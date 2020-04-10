@@ -215,7 +215,7 @@ type JsRequestType = 'createMailEditor'
 	| 'addShortcuts'
 
 type WebContentsMessage
-	= 'setup-context-menu'
+	= 'initialize-ipc'
 	| 'open-context-menu'
 	| 'set-zoom-factor'
 
