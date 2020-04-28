@@ -13,7 +13,7 @@ import type {DomMutation} from "../gui/animation/Animations"
 import {animations, scroll} from "../gui/animation/Animations"
 import {nativeApp} from "../native/NativeWrapper"
 import {MailBodyTypeRef} from "../api/entities/tutanota/MailBody"
-import type {InboxRuleTypeEnum} from "../api/common/TutanotaConstants"
+import type {InboxRuleTypeEnum, MailReportTypeEnum} from "../api/common/TutanotaConstants"
 import {
 	ConversationType,
 	FeatureType,
@@ -22,6 +22,7 @@ import {
 	MailAuthenticationStatus,
 	MailFolderType,
 	MailPhishingStatus,
+	MailReportType,
 	MailState,
 	SpamRuleFieldType as SparmRuleType,
 	SpamRuleType,
@@ -99,11 +100,11 @@ import {createAsyncDropdown, createDropdown} from "../gui/base/DropdownN"
 import {navButtonRoutes} from "../misc/RouteChange"
 import {createEmailSenderListElement} from "../api/entities/sys/EmailSenderListElement"
 import {isNewMailActionAvailable} from "./MailView"
-import {createReportPhishingPostData} from "../api/entities/tutanota/ReportPhishingPostData"
-import {_TypeModel as MailTypeModel} from "../api/entities/tutanota/Mail"
-import {base64ToUint8Array} from "../api/common/utils/Encoding"
 import {RecipientButton} from "../gui/base/RecipientButton"
 import {Banner, BannerType} from "../gui/base/Banner"
+import {createReportPhishingPostData} from "../api/entities/tutanota/ReportPhishingPostData"
+import {base64ToUint8Array} from "../api/common/utils/Encoding"
+import {_TypeModel as MailTypeModel} from "../api/entities/tutanota/Mail"
 
 assertMainOrNode()
 
@@ -606,8 +607,9 @@ export class MailViewer {
 					})
 					if (this.mail.phishingStatus === MailPhishingStatus.UNKNOWN && !isTutanotaTeamMail(this.mail)) {
 						moreButtons.push({
-							label: "reportPhishing_action",
-							click: () => this._reportPhishing(),
+							// TODO: translate
+							label: () => "Report mail",
+							click: () => this._reportMail(),
 							icon: () => Icons.Warning,
 							type: ButtonType.Dropdown
 						})
@@ -620,27 +622,56 @@ export class MailViewer {
 		return m(".action-bar.flex-end.items-center.mr-negative-s", actions)
 	}
 
-	_reportPhishing() {
-		Dialog.confirm("phishingReport_msg").then((confirmed) => {
-			if (confirmed) {
-				worker.resolveSessionKey(MailTypeModel, this.mail)
-				      .then((mailSessionKeyB64) => {
-					      const postData = createReportPhishingPostData({
-						      mailId: this.mail._id,
-						      mailSessionKey: base64ToUint8Array(neverNull(mailSessionKeyB64)),
-					      })
-					      return serviceRequestVoid(TutanotaService.ReportPhishingService, HttpMethod.POST, postData)
+	_reportMail() {
+		const sendReport = (reportType: MailReportTypeEnum) => {
+			worker.resolveSessionKey(MailTypeModel, this.mail)
+			      .then((mailSessionKeyB64) => {
+				      const postData = createReportPhishingPostData({
+					      mailId: this.mail._id,
+					      mailSessionKey: base64ToUint8Array(neverNull(mailSessionKeyB64)),
+					      reportType,
 				      })
-				      .then(() => {
-					      this.mail.phishingStatus = MailPhishingStatus.SUSPICIOUS
-					      return update(this.mail)
-						      .catch(LockedError, e => Dialog.error("operationStillActive_msg"))
-						      .catch(NotFoundError, e => {
-							      console.log("mail already moved")
-						      })
-				      })
-				      .then(m.redraw)
-			}
+				      return serviceRequestVoid(TutanotaService.ReportPhishingService, HttpMethod.POST, postData)
+			      })
+			      .then(() => {
+				      this.mail.phishingStatus = MailPhishingStatus.SUSPICIOUS
+				      return update(this.mail)
+					      .catch(LockedError, () => Dialog.error("operationStillActive_msg"))
+					      .catch(NotFoundError, () => console.log("mail already moved"))
+			      })
+			      .then(m.redraw)
+
+		}
+
+		const dialog = Dialog.showActionDialog({
+			// TODO translate all
+			title: () => "Report mail",
+			child: () => m(".flex.col.mt-m", {
+				// So that space below buttons doesn't look huge
+				style: {marginBottom: "-10px"},
+			}, [
+				m("div", lang.get("phishingReport_msg")),
+				m("a", {href: "https://tutanota.com/faq#phishing", target: "_blank"}, "What is phishing?"),
+				m(".flex-wrap.flex-space-around.mt-s", [
+					m(ButtonN, {
+						label: () => "Report phishing",
+						click: () => {
+							sendReport(MailReportType.PHISHING)
+							dialog.close()
+						},
+						type: ButtonType.Secondary,
+					}),
+					m(ButtonN, {
+						label: () => "Report spam",
+						click: () => {
+							sendReport(MailReportType.SPAM)
+							dialog.close()
+						},
+						type: ButtonType.Secondary,
+					}),
+				]),
+			]),
+			okAction: null,
 		})
 	}
 
