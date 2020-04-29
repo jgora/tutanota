@@ -607,8 +607,7 @@ export class MailViewer {
 					})
 					if (this.mail.phishingStatus === MailPhishingStatus.UNKNOWN && !isTutanotaTeamMail(this.mail)) {
 						moreButtons.push({
-							// TODO: translate
-							label: () => "Report mail",
+							label: "reportEmail_action",
 							click: () => this._reportMail(),
 							icon: () => Icons.Warning,
 							type: ButtonType.Dropdown
@@ -644,17 +643,16 @@ export class MailViewer {
 		}
 
 		const dialog = Dialog.showActionDialog({
-			// TODO translate all
-			title: () => "Report mail",
+			title: lang.get("reportEmail_action"),
 			child: () => m(".flex.col.mt-m", {
 				// So that space below buttons doesn't look huge
 				style: {marginBottom: "-10px"},
 			}, [
 				m("div", lang.get("phishingReport_msg")),
-				m("a", {href: "https://tutanota.com/faq#phishing", target: "_blank"}, "What is phishing?"),
+				m("a.mt-s", {href: "https://tutanota.com/faq#phishing", target: "_blank"}, "What is phishing?"),
 				m(".flex-wrap.flex-space-around.mt-s", [
 					m(ButtonN, {
-						label: () => "Report phishing",
+						label: "reportPhishing_action",
 						click: () => {
 							sendReport(MailReportType.PHISHING)
 							dialog.close()
@@ -662,7 +660,7 @@ export class MailViewer {
 						type: ButtonType.Secondary,
 					}),
 					m(ButtonN, {
-						label: () => "Report spam",
+						label: "reportSpam_action",
 						click: () => {
 							sendReport(MailReportType.SPAM)
 							dialog.close()

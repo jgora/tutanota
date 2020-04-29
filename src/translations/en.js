@@ -742,7 +742,6 @@ module.exports = {
 		"permissions_label": "Permission",
 		"phishingMessageBody_msg": "It is similar to other messages reported for phishing.",
 		"phishingMessage_label": "This message looks suspicious.",
-		"phishingReport_msg": "Contents of the message will be transmitted to the server in unencrypted form so that we can improve phishing protection. Are you sure you want to report this message?",
 		"phone_label": "Phone",
 		"photoLibraryUsageDescription_msg": "Add a picture from your library as attachment.",
 		"plaintext_action": "Plain text",
@@ -1104,6 +1103,11 @@ module.exports = {
 		"yes_label": "Yes",
 		"yourCalendars_label": "Your calendars",
 		"yourFolders_action": "YOUR FOLDERS",
-		"yourMessage_label": "Your message"
+		"yourMessage_label": "Your message",
+		// TODO: add to phrase
+		"whatIsPhishing_msg": "What is phishing?",
+		"reportSpam_action": "Report spam",
+		"reportEmail_action": "Report email",
+		"phishingReport_msg": "Contents of the message will be transmitted to the server in unencrypted form so that we can improve phishing & spam protection. Are you sure you want to report this message?",
 	}
 }
