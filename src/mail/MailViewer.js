@@ -649,7 +649,7 @@ export class MailViewer {
 				style: {marginBottom: "-10px"},
 			}, [
 				m("div", lang.get("phishingReport_msg")),
-				m("a.mt-s", {href: "https://tutanota.com/faq#phishing", target: "_blank"}, "What is phishing?"),
+				m("a.mt-s", {href: "https://tutanota.com/faq#phishing", target: "_blank"}, lang.get("whatIsPhishing_msg")),
 				m(".flex-wrap.flex-space-around.mt-s", [
 					m(ButtonN, {
 						label: "reportPhishing_action",
