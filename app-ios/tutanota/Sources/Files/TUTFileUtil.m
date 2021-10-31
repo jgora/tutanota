@@ -4,7 +4,7 @@
 #import <MobileCoreServices/MobileCoreServices.h>
 #import "TUTFileViewer.h"
 #import "TUTFileUtil.h"
-#import "TUTFileChooser.h"
+#import "tutanota-Swift.h"
 
 static NSString * const FILES_ERROR_DOMAIN = @"tutanota_files";
 
@@ -19,7 +19,7 @@ static NSString * const FILES_ERROR_DOMAIN = @"tutanota_files";
 {
     self = [super init];
     if (self) {
-        _attachmentChooser = [[TUTFileChooser alloc] init];
+        _attachmentChooser = [[TUTFileChooser alloc] initWithViewController:viewController];
 		_viewer = [[TUTFileViewer alloc] initWithViewController:viewController];
     }
     return self;
@@ -62,7 +62,7 @@ static NSString * const FILES_ERROR_DOMAIN = @"tutanota_files";
 		} else {
 			completion(nil, [NSError errorWithDomain:FILES_ERROR_DOMAIN
 												code:1
-											userInfo:@{@"message":@"file does not exists"}]);
+											userInfo:@{@"message":@"file does not exist"}]);
 		}
 	 });
 }
@@ -85,7 +85,7 @@ static NSString * const FILES_ERROR_DOMAIN = @"tutanota_files";
 		[fileURL getResourceValue:&fileSizeValue
 						   forKey:NSURLFileSizeKey
 							error:&fileSizeError];
-		if (fileSizeValue) {
+		if (fileSizeValue != nil) {
 			completion(fileSizeValue, nil);
 		} else {
 			completion(nil, [NSError errorWithDomain:FILES_ERROR_DOMAIN
@@ -125,6 +125,7 @@ static NSString * const FILES_ERROR_DOMAIN = @"tutanota_files";
                                                         [TUTFileUtil addStatusCodeToResponseDict:responseDict from:httpResponse];
                                                         [TUTFileUtil addErrorIdHeaderToResponseDict:responseDict from:httpResponse];
                                                         [TUTFileUtil addPreconditionHeaderToResponseDict:responseDict from:httpResponse];
+                                                        [TUTFileUtil addSuspensionTimeHeaderToResponseDict:responseDict from:httpResponse];
 														completion(responseDict, nil);
 													}];
 		[task resume];
@@ -174,6 +175,7 @@ static NSString * const FILES_ERROR_DOMAIN = @"tutanota_files";
                 [TUTFileUtil addEncFileUriToResponseDict:responseDict fileUri:filePath];
                 [TUTFileUtil addErrorIdHeaderToResponseDict:responseDict from:httpResponse];
                 [TUTFileUtil addPreconditionHeaderToResponseDict:responseDict from:httpResponse];
+                [TUTFileUtil addSuspensionTimeHeaderToResponseDict:responseDict from:httpResponse];
                 completion(responseDict, nil);
                 
                 
@@ -181,7 +183,7 @@ static NSString * const FILES_ERROR_DOMAIN = @"tutanota_files";
 		});
 }
 
-+ (NSString*) getEncryptedFolder:(NSError**)error {
++ (NSString *) getEncryptedFolder:(NSError **)error {
     NSString * encryptedFolder = [NSTemporaryDirectory() stringByAppendingPathComponent:@"encrypted"];
     [[NSFileManager defaultManager] createDirectoryAtPath:encryptedFolder
                               withIntermediateDirectories:YES
@@ -190,8 +192,8 @@ static NSString * const FILES_ERROR_DOMAIN = @"tutanota_files";
     return encryptedFolder;
 }
 
-+ (NSString*) getDecryptedFolder:(NSError**)error  {
-    NSString * decryptedFolder = [NSTemporaryDirectory() stringByAppendingPathComponent:@"decrypted"];
++ (NSString *) getDecryptedFolder:(NSError **)error  {
+    NSString *decryptedFolder = [NSTemporaryDirectory() stringByAppendingPathComponent:@"decrypted"];
     [[NSFileManager defaultManager] createDirectoryAtPath:decryptedFolder
                               withIntermediateDirectories:YES
                                                attributes:nil
@@ -275,5 +277,19 @@ static NSString * const FILES_ERROR_DOMAIN = @"tutanota_files";
     }
 }
 
+
++ (void) addSuspensionTimeHeaderToResponseDict:(NSMutableDictionary*)responseDict from:(const NSHTTPURLResponse*)httpResponse {
+    const NSString *suspensionTime = httpResponse.allHeaderFields[@"Suspension-Time"];
+    const NSString *retryAfter = httpResponse.allHeaderFields[@"Retry-After"];
+    if (retryAfter != nil) {
+        [responseDict setValue:retryAfter forKey:@"suspensionTime"];
+    } else if (suspensionTime != nil) {
+        [responseDict setValue:suspensionTime forKey:@"suspensionTime"];
+    } else {
+        [responseDict setValue:NSNull.null forKey:@"suspensionTime"];
+    }
+}
+
 @end
 
+			

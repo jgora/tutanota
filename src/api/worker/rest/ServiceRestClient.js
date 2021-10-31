@@ -1,15 +1,15 @@
 //@flow
-import {restClient} from "./RestClient"
 import {locator} from "../WorkerLocator"
 import {decryptAndMapToInstance, encryptAndMapToLiteral, resolveServiceSessionKey} from "../crypto/CryptoFacade"
 import type {HttpMethodEnum} from "../../common/EntityFunctions"
-import {MediaType, resolveTypeReference, TypeRef} from "../../common/EntityFunctions"
-import {assertWorkerOrNode} from "../../Env"
+import {MediaType, resolveTypeReference} from "../../common/EntityFunctions"
+import {assertWorkerOrNode} from "../../common/Env"
 import {neverNull} from "../../common/utils/Utils"
+import {TypeRef} from "../../common/utils/TypeRef";
 
 assertWorkerOrNode()
 
-export function _service<T>(service: SysServiceEnum | TutanotaServiceEnum | MonitorServiceEnum | AccountingServiceEnum,
+export function _service<T>(service: SysServiceEnum | TutanotaServiceEnum | MonitorServiceEnum | AccountingServiceEnum | StorageServiceEnum,
                             method: HttpMethodEnum, requestEntity: ?any, responseTypeRef: ?TypeRef<T>, queryParameter: ?Params, sk: ?Aes128Key, extraHeaders?: Params): Promise<any> {
 	return resolveTypeReference((requestEntity) ? requestEntity._type : (responseTypeRef: any))
 		.then(modelForAppAndVersion => {
@@ -30,17 +30,17 @@ export function _service<T>(service: SysServiceEnum | TutanotaServiceEnum | Moni
 				p = Promise.resolve(null)
 			}
 			return p.then(encryptedEntity => {
-				return restClient.request(path, method, queryParams, neverNull(headers), encryptedEntity ? JSON.stringify(encryptedEntity) : null, MediaType.Json)
-				                 .then(data => {
-					                 if (responseTypeRef) {
-						                 return resolveTypeReference(responseTypeRef).then(responseTypeModel => {
-							                 let instance = JSON.parse(((data: any): string))
-							                 return resolveServiceSessionKey(responseTypeModel, instance).then(resolvedSessionKey => {
-								                 return decryptAndMapToInstance(responseTypeModel, instance, resolvedSessionKey ? resolvedSessionKey : sk)
-							                 })
-						                 })
-					                 }
-				                 })
+				return locator.restClient.request(path, method, queryParams, neverNull(headers), encryptedEntity ? JSON.stringify(encryptedEntity) : null, MediaType.Json)
+				              .then(data => {
+					              if (responseTypeRef) {
+						              return resolveTypeReference(responseTypeRef).then(responseTypeModel => {
+							              let instance = JSON.parse(((data: any): string))
+							              return resolveServiceSessionKey(responseTypeModel, instance).then(resolvedSessionKey => {
+								              return decryptAndMapToInstance(responseTypeModel, instance, resolvedSessionKey ? resolvedSessionKey : sk)
+							              })
+						              })
+					              }
+				              })
 			})
 		})
 }

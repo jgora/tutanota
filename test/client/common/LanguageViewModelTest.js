@@ -1,21 +1,23 @@
 // @flow
-import o from "ospec/ospec.js"
+import o from "ospec"
 import {_getSubstitutedLanguageCode, getAvailableLanguageCode, lang} from "../../../src/misc/LanguageViewModel"
+// $FlowIgnore[untyped-import]
 import en from "../../../src/translations/en"
 
 o.spec("LanguageViewModelTests", function () {
-	o("en is default language", browser((done, timeout) => {
-		timeout(4500)
-		lang.init(en).then(() => {
-			o(lang.fallback).equals(en)
-		}).then(done)
+	o("en is default language", browser(async function () {
+		o.timeout(4500)
+		await lang.init(en)
+		o(lang.fallback).equals(en)
 	}))
 
 	o("getAvailableLanguage", function () {
 		[
 			["en", "en"],
-			["zh_hant", "zh"],
-			["zh_HK", "zh_tw"],
+			["zh_CN", "zh"],
+			["zh_Hant", "zh_hant"],
+			["zh_HK", "zh_hant"],
+			["zh_TW", "zh_hant"],
 			["uk_ua", "uk"],
 			["de", "de"],
 			["a", "en"],
@@ -30,8 +32,8 @@ o.spec("LanguageViewModelTests", function () {
 	o("_getSubstitutedLanguageCode", function () {
 		[
 			["en", "en"],
-			["zh_hant", "zh"],
-			["zh_HK", "zh_tw"],
+			["zh_hant", "zh_hant"],
+			["zh_HK", "zh_hant"],
 			["uk_ua", "uk"],
 			["de", "de"],
 			["a", null],
@@ -44,8 +46,9 @@ o.spec("LanguageViewModelTests", function () {
 	})
 
 	o("_getSubstitutedLanguageCodeWhitelabelCustomizations", function () {
-		global.whitelabelCustomizations = {germanLanguageCode: "de_sie"}
+		const globalSelf = typeof window == "undefined" ? global : window
+		globalSelf.whitelabelCustomizations = {germanLanguageCode: "de_sie"}
 		o(_getSubstitutedLanguageCode("de")).equals("de_sie")
-		global.whitelabelCustomizations = undefined
+		globalSelf.whitelabelCustomizations = undefined
 	})
 })

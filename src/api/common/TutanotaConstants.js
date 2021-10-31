@@ -1,5 +1,5 @@
 // @flow
-
+//@bundleInto:common-min
 import {downcast} from "./utils/Utils"
 import type {GroupMembership} from "../entities/sys/GroupMembership"
 import type {MailFolder} from "../entities/tutanota/MailFolder"
@@ -8,9 +8,35 @@ import type {AccountingInfo} from "../entities/sys/AccountingInfo"
 import type {EmailSenderListElement} from "../entities/sys/EmailSenderListElement"
 import type {CertificateInfo} from "../entities/sys/CertificateInfo"
 import type {UserSettingsGroupRoot} from "../entities/tutanota/UserSettingsGroupRoot"
+import type {CalendarEventAttendee} from "../entities/tutanota/CalendarEventAttendee"
+import {isAdminClient, isApp, isDesktop} from "./Env"
+import type {Country} from "./CountryList"
+import type {CreditCard} from "../entities/sys/CreditCard"
 
-export const reverse = (objectMap: Object) => Object.keys(objectMap)
-                                                    .reduce((r, k) => Object.assign(r, {[objectMap[k]]: k}), {})
+
+export const reverse = <K, V>(objectMap: {[K]: V}): {[V]: K} => Object.keys(objectMap)
+                                                                      .reduce((r, k) => {
+	                                                                      const v = objectMap[downcast(k)]
+	                                                                      return Object.assign(r, {[v]: k})
+                                                                      }, {})
+// Also used in other projects
+export type $Reversed<T> = $Call<typeof reverse, T>
+
+export const MAX_NBR_MOVE_DELETE_MAIL_SERVICE = 50
+
+export const REQUEST_SIZE_LIMIT_DEFAULT = 1024 * 1024
+export const REQUEST_SIZE_LIMIT_MAP: Map<string, number> = new Map([
+	["/rest/tutanota/filedataservice", 1024 * 1024 * 25],
+	["/rest/tutanota/draftservice", 1024 * 1024], // should be large enough
+])
+
+export const OutOfOfficeNotificationMessageType = Object.freeze({
+	Default: "0",
+	InsideOrganization: "1"
+})
+export type OutOfOfficeNotificationMessageTypeEnum = $Values<typeof OutOfOfficeNotificationMessageType>
+
+export const OUT_OF_OFFICE_SUBJECT_PREFIX = "Auto-reply: "
 
 export const GroupType = Object.freeze({
 	User: "0",
@@ -22,10 +48,15 @@ export const GroupType = Object.freeze({
 	Contact: "6",
 	File: "7",
 	LocalAdmin: "8",
-	Calendar: "9"
+	Calendar: "9",
+	Template: "10"
 })
 export type GroupTypeEnum = $Values<typeof GroupType>;
-export const getMembershipGroupType = (membership: GroupMembership) => downcast(membership.groupType)
+export const getMembershipGroupType = (membership: GroupMembership): GroupTypeEnum => downcast(membership.groupType)
+
+export function groupTypeToString(groupType: GroupTypeEnum): string {
+	return reverse(GroupType)[groupType]
+}
 
 export const PermissionType = Object.freeze({
 	Public: "0",
@@ -101,6 +132,7 @@ export const OperationType = {
 export type OperationTypeEnum = $Values<typeof OperationType>;
 
 export const AccountType = Object.freeze({
+	SYSTEM: '0',
 	FREE: '1',
 	STARTER: '2',
 	PREMIUM: '3',
@@ -114,7 +146,9 @@ export const PaidSubscriptionType = Object.freeze({
 	Premium: '0',
 	Legacy_Pro: '1',
 	Pro: '2',
-	Teams: '3'
+	Teams: '3',
+	Premium_Business: '4',
+	Teams_Business: '5'
 })
 export type PaidSubscriptionTypeEnum = $Values<typeof PaidSubscriptionType>;
 
@@ -123,27 +157,29 @@ export const BookingItemFeatureType = Object.freeze({
 	Storage: '1',
 	Alias: '2',
 	SharedMailGroup: '3',
-	Branding: '4',
+	Whitelabel: '4',
 	ContactForm: '5',
 	WhitelabelChild: '6',
 	LocalAdminGroup: '7',
 	Discount: '8',
-	Sharing: '9'
+	Sharing: '9',
+	Business: '10'
 })
 export type BookingItemFeatureTypeEnum = $Values<typeof BookingItemFeatureType>;
-export const BookingItemFeatureByCode = reverse(BookingItemFeatureType)
+export const BookingItemFeatureByCode: {} = reverse(BookingItemFeatureType)
 
 
 export const PaymentMethodType = Object.freeze({
 	Invoice: '0',
 	CreditCard: '1',
 	Sepa: '2',
-	Paypal: '3'
+	Paypal: '3',
+	AccountBalance: '4'
 })
 export type PaymentMethodTypeEnum = $Values<typeof PaymentMethodType>;
 export const getPaymentMethodType = (accountingInfo: AccountingInfo): PaymentMethodTypeEnum => downcast(accountingInfo.paymentMethod)
 
-export const ValueToPaymentMethodType = reverse(PaymentMethodType)
+export const ValueToPaymentMethodType: {} = reverse(PaymentMethodType)
 
 
 export const Const = {
@@ -174,13 +210,20 @@ export const MailState = Object.freeze({
 })
 export type MailStateEnum = $Values<typeof MailState>;
 
-export const ApprovalState = Object.freeze({
+export const ApprovalStatus = Object.freeze({
 	REGISTRATION_APPROVED: "0",
 	REGISTRATION_APPROVAL_NEEDED: "1",
 	SEND_MAILS_APPROVED: "2",
 	INVOICE_NOT_PAID: "3",
+	SPAM_SENDER: "4",
+	DELAYED: "5",
+	DELAYED_AND_INITIALLY_ACCESSED: "6",
+	REGISTRATION_APPROVAL_NEEDED_AND_INITIALLY_ACCESSED: "7",
+	PAID_SUBSCRIPTION_NEEDED: "8",
+	INITIAL_PAYMENT_PENDING: "9",
+	NO_ACTIVITY: "10"
 })
-export type ApprovalStateEnum = $Values<typeof ApprovalState>;
+export type ApprovalStatusEnum = $Values<typeof ApprovalStatus>;
 
 
 export const InboxRuleType = Object.freeze({
@@ -217,9 +260,16 @@ export const SpamRuleFieldType = Object.freeze({
 })
 export type SpamRuleFieldTypeEnum = $Values<typeof SpamRuleFieldType>;
 
-export function getSparmRuleField(spamRule: EmailSenderListElement): SpamRuleFieldTypeEnum {
+export function getSpamRuleField(spamRule: EmailSenderListElement): SpamRuleFieldTypeEnum {
 	return downcast(spamRule.field)
 }
+
+export const ReportMovedMailsType = Object.freeze({
+	ALWAYS_ASK: "0",
+	AUTOMATICALLY_ONLY_SPAM: "1",
+	NEVER: "3",
+})
+export type ReportMovedMailsTypeEnum = $Values<typeof ReportMovedMailsType>;
 
 export const EmailSignatureType = Object.freeze({
 	EMAIL_SIGNATURE_TYPE_DEFAULT: "0",
@@ -251,6 +301,8 @@ export const DnsRecordType = Object.freeze({
 	DNS_RECORD_TYPE_TXT_SPF: "1",
 	DNS_RECORD_TYPE_CNAME_DKIM: "2",
 	DNS_RECORD_TYPE_TXT_DMARC: "3",
+	DNS_RECORD_TYPE_CNAME_MTA_STS: "4",
+	DNS_RECORD_TYPE_TXT_VERIFY: "5",
 })
 export type DnsRecordTypeEnum = $Values<typeof DnsRecordType>;
 
@@ -259,6 +311,8 @@ export const DnsRecordTypeToName = Object.freeze({
 	"1": "TXT",
 	"2": "CNAME",
 	"3": "TXT",
+	"4": "CNAME",
+	"5": "TXT"
 })
 
 export const SessionState = Object.freeze({
@@ -300,6 +354,7 @@ export const SecondFactorType = Object.freeze({
 	totp: "1"
 })
 export type SecondFactorTypeEnum = $Values<typeof SecondFactorType>;
+export const SecondFactorTypeNames = ["U2F", "TOTP"]
 
 export const MAX_ATTACHMENT_SIZE = 1024 * 1024 * 25
 export const MAX_LOGO_SIZE = 1024 * 100
@@ -318,9 +373,15 @@ export const FeatureType = Object.freeze({
 	DisableDefaultSignature: "7",
 	HideBuyDialogs: "8",
 	DisableCalendar: "9",
+	ExternalEmailProvider: "10",
+	/** This is required for non admin users because they are not allowed to access the bookings. */
+	BusinessFeatureEnabled: "11",
+	PremiumLegacy: "12",
+	KnowledgeBase: "13",
+	Newsletter: "14"
 })
 export type FeatureTypeEnum = $Values<typeof FeatureType>;
-export const ValueToFeatureType = reverse(FeatureType)
+export const ValueToFeatureType: {} = reverse(FeatureType)
 
 export const BootstrapFeatureType = Object.freeze({
 	DisableSavePassword: "0",
@@ -329,7 +390,7 @@ export type BootstrapFeatureTypeEnum = $Values<typeof BootstrapFeatureType>;
 
 export const FULL_INDEXED_TIMESTAMP: number = 0
 export const NOTHING_INDEXED_TIMESTAMP: number = Math.pow(2, 42) - 1 // maximum Timestamp is 42 bit long (see GeneratedIdData.java)
-
+export const ENTITY_EVENT_BATCH_TTL_DAYS: number = 45 // 45 days (see InstanceDbMapperEventNotifier.java)
 
 export const PaymentDataResultType = Object.freeze({
 	OK: "0",
@@ -342,7 +403,8 @@ export const PaymentDataResultType = Object.freeze({
 	OTHER_PAYMENT_ACCOUNT_REJECTED: "7",
 	COULD_NOT_VERIFY_VATID: "8",
 	CREDIT_CARD_DATE_INVALID: "9",
-	CREDIT_CARD_NUMBER_INVALID: "10"
+	CREDIT_CARD_NUMBER_INVALID: "10",
+	CREDIT_CARD_VERIFICATION_LIMIT_REACHED: "11"
 })
 
 export const ContactComparisonResult = Object.freeze({
@@ -383,7 +445,7 @@ export const InvoiceStatus = Object.freeze({
 	SECONDREMINDER: "11"
 })
 export type InvoiceStatusEnum = $Values<typeof InvoiceStatus>;
-export const ValueToInvoiceStatus = reverse(FeatureType)
+export const ValueToInvoiceStatus: {} = reverse(InvoiceStatus)
 
 export const CloseEventBusOption = Object.freeze({
 	Terminate: "terminate",
@@ -443,14 +505,12 @@ export const AlarmInterval = Object.freeze({
 	ONE_WEEK: "1W",
 })
 export type AlarmIntervalEnum = $Values<typeof AlarmInterval>
-
+export const AlarmIntervalByCode: {} = reverse(AlarmInterval)
 
 export const EventTextTimeOption = Object.freeze({
-	NO_TIME: "noTime",
 	START_TIME: "startTime",
 	END_TIME: "endTime",
 	START_END_TIME: "startAndEndTime",
-	ALL_DAY: "allDay"
 })
 export type EventTextTimeOptionEnum = $Values<typeof EventTextTimeOption>;
 
@@ -463,6 +523,7 @@ export type TimeFormatEnum = $Values<typeof TimeFormat>
 export const WeekStart = Object.freeze({
 	MONDAY: '0',
 	SUNDAY: '1',
+	SATURDAY: '2'
 })
 
 export function getWeekStart(userSettings: UserSettingsGroupRoot): WeekStartEnum {
@@ -525,6 +586,7 @@ export const Keys = Object.freeze({
 	RIGHT: {code: 39, name: "→"},
 	DOWN: {code: 40, name: "↓"},
 	DELETE: {code: 46, name: "DEL"},
+	"0": {code: 48, name: "0"},
 	ONE: {code: 49, name: "1"},
 	TWO: {code: 50, name: "2"},
 	THREE: {code: 51, name: "3"},
@@ -631,3 +693,166 @@ export const MailAuthenticationStatus = Object.freeze({
 	MISSING_MAIL_FROM: "4",
 })
 export type MailAuthenticationStatusEnum = $Values<typeof MailAuthenticationStatus>
+
+export const MailReportType = Object.freeze({
+	PHISHING: "0",
+	SPAM: "1"
+})
+export type MailReportTypeEnum = $Values<typeof MailReportType>
+
+export const DnsRecordValidation = Object.freeze({
+	OK: "✓",
+	BAD: "✗",
+})
+export type DnsRecordValidationTypeEnum = $Values<typeof DnsRecordValidation>;
+
+
+export const CalendarAttendeeStatus = Object.freeze({
+	/** invite is not sent yet */
+	ADDED: "0",
+	/** already invited but did not respond */
+	NEEDS_ACTION: "1",
+	ACCEPTED: "2",
+	DECLINED: "3",
+	TENTATIVE: "4"
+})
+
+export type CalendarAttendeeStatusEnum = $Values<typeof CalendarAttendeeStatus>
+export const attendeeStatusByCode: {} = reverse(CalendarAttendeeStatus)
+
+export function getAttendeeStatus(attendee: CalendarEventAttendee): CalendarAttendeeStatusEnum {
+	return downcast(attendee.status)
+}
+
+export const CalendarMethod = Object.freeze({
+	PUBLISH: "PUBLISH",
+	REQUEST: "REQUEST",
+	REPLY: "REPLY",
+	ADD: "ADD",
+	CANCEL: "CANCEL",
+	REFRESH: "REFRESH",
+	COUNTER: "COUNTER",
+	DECLINECOUNTER: "DECLINECOUNTER"
+})
+
+export type CalendarMethodEnum = $Values<typeof CalendarMethod>
+
+export const MailMethod = Object.freeze({
+	NONE: "0",
+	ICAL_PUBLISH: "1",
+	ICAL_REQUEST: "2",
+	ICAL_REPLY: "3",
+	ICAL_ADD: "4",
+	ICAL_CANCEL: "5",
+	ICAL_REFRESH: "6",
+	ICAL_COUNTER: "7",
+	ICAL_DECLINECOUNTER: "8"
+})
+
+const icalToMailMethodMapping = Object.freeze({
+	PUBLISH: MailMethod.ICAL_PUBLISH,
+	REQUEST: MailMethod.ICAL_REQUEST,
+	REPLY: MailMethod.ICAL_REPLY,
+	ADD: MailMethod.ICAL_ADD,
+	CANCEL: MailMethod.ICAL_CANCEL,
+	REFRESH: MailMethod.ICAL_REFRESH,
+	COUNTER: MailMethod.ICAL_COUNTER,
+	DECLINECOUNTER: MailMethod.ICAL_COUNTER
+})
+
+const mailMethodToIcalMapping: {[$ElementType<typeof icalToMailMethodMapping, $Keys<typeof icalToMailMethodMapping>>]: $Keys<typeof icalToMailMethodMapping>} = reverse(icalToMailMethodMapping)
+
+export function mailMethodToCalendarMethod(mailMethod: MailMethodEnum): CalendarMethodEnum {
+	const calendarMethod = mailMethodToIcalMapping[mailMethod]
+	if (calendarMethod == null) {
+		throw new Error(`No conversion to calendar method from ${mailMethod}`)
+	}
+	return calendarMethod
+}
+
+export function calendarMethodToMailMethod(calendarMethod: CalendarMethodEnum): MailMethodEnum {
+	const mapping = {
+		PUBLISH: MailMethod.ICAL_PUBLISH,
+		REQUEST: MailMethod.ICAL_REQUEST,
+		REPLY: MailMethod.ICAL_REPLY,
+		ADD: MailMethod.ICAL_ADD,
+		CANCEL: MailMethod.ICAL_CANCEL,
+		REFRESH: MailMethod.ICAL_REFRESH,
+		COUNTER: MailMethod.ICAL_COUNTER,
+		DECLINECOUNTER: MailMethod.ICAL_COUNTER
+	}
+	return mapping[calendarMethod]
+}
+
+export type MailMethodEnum = $Values<typeof MailMethod>
+
+export function getAsEnumValue<K, V>(enumValues: {[K]: V}, value: string): ?V {
+	for (const key of Object.getOwnPropertyNames(enumValues)) {
+		const enumValue = enumValues[key]
+		if (enumValue === value) {
+			return enumValue
+		}
+	}
+	return null
+}
+
+export function assertEnumValue<K, V>(enumValues: {[K]: V}, value: string): V {
+	for (const key of Object.getOwnPropertyNames(enumValues)) {
+		const enumValue = enumValues[key]
+		if (enumValue === value) {
+			return enumValue
+		}
+	}
+	throw new Error(`Invalid enum value ${value} for ${JSON.stringify(enumValues)}`)
+}
+
+export function assertEnumKey<K: string, V>(obj: {[K]: V}, key: string): K {
+	if (key in obj) {
+		return downcast(key)
+	} else {
+		throw Error("Not valid enum value: " + key)
+	}
+}
+
+export const ClientType = Object.freeze({
+	Browser: "0",
+	Desktop: "1",
+	App: "2"
+})
+export type ClientTypeEnum = $Values<typeof ClientType>
+
+export function getClientType(): ClientTypeEnum {
+	return isApp()
+		? ClientType.App
+		: (isDesktop() || isAdminClient())
+			? ClientType.Desktop
+			: ClientType.Browser
+}
+
+export const ExternalImageRule = Object.freeze({
+	None: "0",
+	Allow: "1",
+	Block: "2"
+})
+export type ExternalImageRuleEnum = $Values<typeof ExternalImageRule>
+
+export type CreditCardData = {
+	number: string,
+	cvv: string,
+	expirationDate: string
+}
+
+export type PayPalData = {
+	account: string
+}
+
+export type InvoiceData = {
+	invoiceAddress: string;
+	country: ?Country;
+	vatNumber: string; // only for EU countries otherwise empty
+}
+
+export type PaymentData = {
+	paymentMethod: PaymentMethodTypeEnum;
+	creditCardData: ?CreditCard;
+}

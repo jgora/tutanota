@@ -38,11 +38,12 @@
  * openssl x509 -pubkey -noout -in tutao-cert.pem > tutao-pub.pem
  * */
 
-const Promise = require('bluebird')
-const fs = Promise.promisifyAll(require('fs-extra'))
-const path = require('path')
-const spawnSync = require('child_process').spawnSync
-const jsyaml = require('js-yaml')
+
+import path from "path"
+import fs from "fs-extra"
+import {spawnSync} from "child_process"
+import jsyaml from "js-yaml"
+import forge from "node-forge"
 
 /**
  * Creates a signature on the given application file, writes it to signatureFileName and adds the signature to the yaml file.
@@ -51,24 +52,13 @@ const jsyaml = require('js-yaml')
  * @param signatureFileName The signature will be written to that file. Must not contain any path.
  * @param ymlFileName This yaml file will be adapted to include the signature. Must not contain any path.
  */
-function signer(filePath, signatureFileName, ymlFileName) {
+export function sign(filePath, signatureFileName, ymlFileName) {
 	console.log("Signing", path.basename(filePath), '...')
 	const dir = path.dirname(filePath)
-	const sigOutPath = path.join(dir, signatureFileName)
-	const result = spawnSync("/usr/bin/pkcs11-tool", [
-		"-s",
-		"-m", "SHA512-RSA-PKCS",
-		"--id", "10",
-		"--pin", "env:HSM_USER_PIN",
-		"-i", path.basename(filePath),
-		"-o", signatureFileName
-	], {
-		cwd: dir,
-		stdio: [process.stdin, process.stdout, process.stderr]
-	})
-	if (result.status !== 0) {
-		throw new Error("error invoking process" + JSON.stringify(result))
-	}
+
+	const sigOutPath = process.env.DEBUG_SIGN
+		? signWithSelfSignedCertificate(filePath, signatureFileName, dir)
+		: signWithHSM(filePath, signatureFileName, dir)
 
 	if (ymlFileName) {
 		console.log(`attaching signature to yml...`, ymlFileName)
@@ -80,7 +70,56 @@ function signer(filePath, signatureFileName, ymlFileName) {
 	} else {
 		console.log("Not attaching signature to yml")
 	}
-
 }
 
-module.exports = signer
+function signWithHSM(filePath, signatureFileName, dir) {
+	let result = spawnSync("/usr/bin/pkcs11-tool", [
+		"-s",
+		"-m", "SHA512-RSA-PKCS",
+		"--id", "10", // this is the installer verification key
+		"--pin", "env:HSM_USER_PIN",
+		"-i", path.basename(filePath),
+		"-o", signatureFileName
+	], {
+		cwd: dir,
+		stdio: [process.stdin, process.stdout, process.stderr]
+	})
+
+	if (result.status !== 0) {
+		throw new Error("error during hsm signing process" + JSON.stringify(result))
+	}
+	return path.join(dir, signatureFileName)
+}
+
+function signWithSelfSignedCertificate(filePath, signatureFileName, dir) {
+	const sigOutPath = path.join(dir, signatureFileName)
+
+	// copy cert to webserver so it can be easily put into a VM
+	fs.copyFileSync(path.join(process.env.DEBUG_SIGN, "ca.crt"), path.join(dir, "ca.crt"))
+
+	try {
+		const fileData = fs.readFileSync(filePath) //binary format
+		const lnk = path.join(process.env.DEBUG_SIGN, "test.p12")
+		const privateKey = getPrivateKeyFromCert(lnk)
+		const md = forge.md.sha512.create()
+		md.update(fileData.toString('binary'))
+		const sig = Buffer.from(privateKey.sign(md), 'binary')
+		fs.writeFileSync(sigOutPath, sig, null)
+	} catch (e) {
+		console.log('Error:', e.message)
+	}
+	return sigOutPath
+}
+
+function getPrivateKeyFromCert(lnk) {
+	if (!lnk) {
+		throw new Error("can't sign client, no certificate file name")
+	}
+	const p12b64 = fs.readFileSync(lnk).toString('base64')
+	const p12Der = forge.util.decode64(p12b64)
+	const p12Asn1 = forge.asn1.fromDer(p12Der)
+	const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, "")
+	const bag = p12.getBags({friendlyName: 'user'})["friendlyName"]
+		.find(b => b.key != null)
+	return bag.key
+}

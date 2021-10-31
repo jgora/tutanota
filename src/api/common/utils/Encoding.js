@@ -1,6 +1,9 @@
 // @flow
+//@bundleInto:common-min
 import {CryptoError} from "../error/CryptoError"
 import {pad} from "./StringUtils"
+
+// it's in the boot because deviceConfig needs it for signupToken. If we make signupToken async we can move it to just common
 
 // TODO rename methods according to their JAVA counterparts (e.g. Uint8Array == bytes, Utf8Uint8Array == bytes...)
 
@@ -105,9 +108,9 @@ export function base64ExtToBase64(base64ext: Base64Ext): Base64 {
  * @param timestamp The timestamp of the GeneratedId
  * @return The GeneratedId as hex string.
  */
-export function timestampToHexGeneratedId(timestamp: number, serverId: number): Hex {
+export function timestampToHexGeneratedId(timestamp: number, serverBytes: number): Hex {
 	let id = timestamp * 4 // shifted 2 bits left, so the value covers 44 bits overall (42 timestamp + 2 shifted)
-	let hex = parseInt(id).toString(16) + "00000" + pad(serverId, 2) // add one zero for the missing 4 bits plus 4 more (2 bytes) plus 2 more for the server id to get 9 bytes
+	let hex = parseInt(id).toString(16) + "00000" + pad(serverBytes, 2) // add one zero for the missing 4 bits plus 4 more (2 bytes) plus 2 more for the server id to get 9 bytes
 	// add leading zeros to reach 9 bytes (GeneratedId length) = 18 hex
 	for (let length = hex.length; length < 18; length++) {
 		hex = "0" + hex
@@ -121,8 +124,8 @@ export function timestampToHexGeneratedId(timestamp: number, serverId: number): 
  * @param timestamp The timestamp of the GeneratedId
  * @return The GeneratedId.
  */
-export function timestampToGeneratedId(timestamp: number, serverId: number = 0): Id {
-	let hex = timestampToHexGeneratedId(timestamp, serverId)
+export function timestampToGeneratedId(timestamp: number, serverBytes: number = 0): Id {
+	let hex = timestampToHexGeneratedId(timestamp, serverBytes)
 	return base64ToBase64Ext(hexToBase64(hex))
 }
 
@@ -131,7 +134,7 @@ export function timestampToGeneratedId(timestamp: number, serverId: number = 0):
  * @param base64Ext The id as base64Ext
  * @returns The timestamp of the GeneratedId
  */
-export function generatedIdToTimestamp(base64Ext: Id) {
+export function generatedIdToTimestamp(base64Ext: Id): number {
 	const base64 = base64ExtToBase64(base64Ext)
 	const decodedbB4 = atob(base64)
 	let numberResult = 0
@@ -315,3 +318,72 @@ export function base64ToUint8Array(base64: Base64): Uint8Array {
 	}
 	return result
 }
+
+/**
+ * Converts a Uint8Array containing string data into a string, given the charset the data is in.
+ * @param charset The charset. Must be supported by TextDecoder.
+ * @param bytes The string data
+ * @trhows RangeError if the charset is not supported
+ * @return The string
+ */
+export function uint8ArrayToString(charset: string, bytes: Uint8Array): string {
+	// $FlowExpectedError[incompatible-call] we will rely on the constructor throwing an error if the charset is not supported
+	const decoder = new TextDecoder(charset)
+	return decoder.decode(bytes);
+}
+
+/**
+ * Decodes a quoted-printable piece of text in a given charset.
+ * This was copied and modified from https://github.com/mathiasbynens/quoted-printable/blob/master/src/quoted-printable.js (MIT licensed)
+ *
+ * @param charset Must be supported by TextEncoder
+ * @param input The encoded text
+ * @throws RangeError if the charset is not supported
+ * @returns The text as a JavaScript string
+ */
+export function decodeQuotedPrintable(charset: string, input: string): string {
+	return input
+		// https://tools.ietf.org/html/rfc2045#section-6.7, rule 3:
+		// “Therefore, when decoding a `Quoted-Printable` body, any trailing white
+		// space on a line must be deleted, as it will necessarily have been added
+		// by intermediate transport agents.”
+		.replace(/[\t\x20]$/gm, '')
+		// Remove hard line breaks preceded by `=`. Proper `Quoted-Printable`-
+		// encoded data only contains CRLF line  endings, but for compatibility
+		// reasons we support separate CR and LF too.
+		.replace(/=(?:\r\n?|\n|$)/g, '')
+		// Decode escape sequences of the form `=XX` where `XX` is any
+		// combination of two hexidecimal digits. For optimal compatibility,
+		// lowercase hexadecimal digits are supported as well. See
+		// https://tools.ietf.org/html/rfc2045#section-6.7, note 1.
+		.replace(/(=([a-fA-F0-9]{2}))+/g,
+			match => {
+				const hexValues = match.split(/=/)
+				// splitting on '=' is convenient, but adds an empty string at the start due to the first byte
+				hexValues.shift()
+				const intArray = hexValues.map(char => parseInt(char, 16))
+				const bytes = Uint8Array.from(intArray)
+				return uint8ArrayToString(charset, bytes)
+			})
+}
+
+export function decodeBase64(charset: string, input: string): string {
+	return uint8ArrayToString(charset, base64ToUint8Array(input))
+}
+
+export function stringToBase64(str: string): string {
+	return uint8ArrayToBase64(stringToUtf8Uint8Array(str))
+}
+
+// We can't import EntityUtils here, otherwise we should say GENERATED_MAX_ID.length or something like it
+const base64extEncodedIdLength = 12
+
+export function isValidGeneratedId(id: Id | IdTuple): boolean {
+
+	const test = id => id.length === base64extEncodedIdLength && Array.from(id).every(char => base64extAlphabet.includes(char))
+
+	return typeof id === "string"
+		? test(id)
+		: id.every(test)
+}
+

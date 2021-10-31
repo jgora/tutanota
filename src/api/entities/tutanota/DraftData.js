@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {DraftAttachment} from "./DraftAttachment"
 import type {DraftRecipient} from "./DraftRecipient"
@@ -17,54 +19,56 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 497,
-			"since": 11,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"bodyText": {
-			"name": "bodyText",
 			"id": 499,
-			"since": 11,
 			"type": "String",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": true
 		},
+		"compressedBodyText": {
+			"id": 1194,
+			"type": "CompressedString",
+			"cardinality": "ZeroOrOne",
+			"final": true,
+			"encrypted": true
+		},
 		"confidential": {
-			"name": "confidential",
 			"id": 502,
-			"since": 11,
 			"type": "Boolean",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": true
 		},
+		"method": {
+			"id": 1116,
+			"type": "Number",
+			"cardinality": "One",
+			"final": true,
+			"encrypted": true
+		},
 		"senderMailAddress": {
-			"name": "senderMailAddress",
 			"id": 500,
-			"since": 11,
 			"type": "String",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"senderName": {
-			"name": "senderName",
 			"id": 501,
-			"since": 11,
 			"type": "String",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": true
 		},
 		"subject": {
-			"name": "subject",
 			"id": 498,
-			"since": 11,
 			"type": "String",
 			"cardinality": "One",
 			"final": true,
@@ -73,63 +77,55 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"addedAttachments": {
-			"name": "addedAttachments",
 			"id": 506,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": true,
 			"refType": "DraftAttachment",
-			"final": true
+			"dependency": null
 		},
 		"bccRecipients": {
-			"name": "bccRecipients",
 			"id": 505,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": true,
 			"refType": "DraftRecipient",
-			"final": true
+			"dependency": null
 		},
 		"ccRecipients": {
-			"name": "ccRecipients",
 			"id": 504,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": true,
 			"refType": "DraftRecipient",
-			"final": true
+			"dependency": null
 		},
 		"replyTos": {
-			"name": "replyTos",
 			"id": 819,
-			"since": 21,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "EncryptedMailAddress",
-			"final": false
+			"dependency": null
 		},
 		"toRecipients": {
-			"name": "toRecipients",
 			"id": 503,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": true,
 			"refType": "DraftRecipient",
-			"final": true
+			"dependency": null
 		},
 		"removedAttachments": {
-			"name": "removedAttachments",
 			"id": 507,
-			"since": 11,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "Any",
-			"refType": "File",
 			"final": true,
-			"external": false
+			"refType": "File"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createDraftData(values?: $Shape<$Exact<DraftData>>): DraftData {
@@ -141,7 +137,9 @@ export type DraftData = {
 
 	_id: Id;
 	bodyText: string;
+	compressedBodyText: ?string;
 	confidential: boolean;
+	method: NumberString;
 	senderMailAddress: string;
 	senderName: string;
 	subject: string;

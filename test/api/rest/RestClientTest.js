@@ -1,14 +1,19 @@
 //@flow
-import o from "ospec/ospec.js"
-import {RestClient} from "../../../src/api/worker/rest/RestClient"
+import o from "ospec"
+import {isSuspensionResponse, RestClient} from "../../../src/api/worker/rest/RestClient"
 import {HttpMethod, MediaType} from "../../../src/api/common/EntityFunctions"
 import {ResourceError} from "../../../src/api/common/error/RestError"
+import {SuspensionHandler} from "../../../src/api/worker/SuspensionHandler"
+import {downcast} from "../../../src/api/common/utils/Utils"
 
-
+const SERVER_TIME_IN_HEADER = "Mon, 12 Jul 2021 13:18:39 GMT"
+const SERVER_TIMESTAMP = 1626095919000
 
 o.spec("rest client", function () {
 	env.staticUrl = "http://localhost:3000"
-	let rc = new RestClient()
+	const worker = downcast({})
+
+	let rc = new RestClient(new SuspensionHandler(worker))
 
 	o.spec("integration tests", node(function () {
 
@@ -17,12 +22,11 @@ o.spec("rest client", function () {
 
 		o.before(function (done) {
 			server = app.listen(3000, done)
-			global.enableDestroy(server)
 		})
 
 		o.after(function (done) {
 			if (server) {
-				server.destroy(function (err) {
+				server.close(function (err) {
 					if (err) console.log(err)
 					env.staticUrl = null
 					done()
@@ -30,26 +34,22 @@ o.spec("rest client", function () {
 			}
 		})
 
-		o("GET json", function (done, timeout) {
-			timeout(200)
+		o("GET json", async function () {
+			o.timeout(400)
 			let responseText = '{"msg":"Hello Client"}'
-			let before = new Date().getTime()
 			app.get("/get/json", (req, res) => {
 				o(req.method).equals('GET')
 				o(req.headers['content-type']).equals(undefined)
 				o(req.headers['accept']).equals('application/json')
-				//console.log("!", req.method, req.originalUrl, req.path, req.query, req.headers)
 
 				res.send(responseText)
 			})
-			rc.request("/get/json", HttpMethod.GET, {}, {}, null, MediaType.Json).then(res => {
-				o(res).equals(responseText)
-				done()
-			})
+			const res = await rc.request("/get/json", HttpMethod.GET, {}, {}, null, MediaType.Json)
+			o(res).equals(responseText)
 		})
 
-		o("GET with body (converted to query parameter)", function (done, timeout) {
-			timeout(200)
+		o("GET with body (converted to query parameter)", function (done) {
+			o.timeout(200)
 			let request = "{get: true}"
 			app.get("/get/with-body", (req, res) => {
 				o(req.method).equals('GET')
@@ -61,21 +61,20 @@ o.spec("rest client", function () {
 			rc.request("/get/with-body", HttpMethod.GET, {}, {}, request, MediaType.Json)
 		})
 
-		o("GET binary", function (done, timeout) {
-			timeout(200)
+		o("GET binary", function (done) {
+			o.timeout(200)
 			let response = new Buffer([1, 50, 83, 250])
 			let before = new Date().getTime()
 			app.get("/get/binary", (req, res) => {
 				o(req.method).equals('GET')
 				o(req.headers['content-type']).equals(undefined)
 				o(req.headers['accept']).equals('application/octet-stream')
-				//console.log("!", req.method, req.originalUrl, req.path, req.query, req.headers)
 
 				res.send(response)
 			})
 			rc.request("/get/binary", HttpMethod.GET, {}, {}, null, MediaType.Binary).then(res => {
 				o(res instanceof Uint8Array).equals(true)
-				o(Array.from((res:any))).deepEquals(Array.from(response))
+				o(Array.from((res: any))).deepEquals(Array.from(response))
 				done()
 			})
 		})
@@ -83,12 +82,12 @@ o.spec("rest client", function () {
 		o("POST json", testJson('POST'))
 		o("PUT json", testJson('PUT'))
 		o("DELETE json", testJson('DELETE'))
+
 		function testJson(method) {
-			return function (done, timeout) {
-				timeout(200)
+			return function (done) {
+				o.timeout(200)
 				let requestText = '{"msg":"Dear Server"}'
 				let responseText = '{"msg":"Hello Client"}'
-				let before = new Date().getTime()
 				let url = "/" + method + "/json";
 
 				app.use(global.bodyParser.json())
@@ -115,12 +114,12 @@ o.spec("rest client", function () {
 		o("POST binary", testBinary('POST'))
 		o("PUT binary", testBinary('PUT'))
 		o("DELETE binary", testBinary('DELETE'))
+
 		function testBinary(method) {
-			return function (done, timeout) {
-				timeout(200)
+			return function (done) {
+				o.timeout(200)
 				let request = new Buffer([8, 5, 2, 183])
 				let response = new Buffer([1, 50, 83, 250])
-				let before = new Date().getTime()
 				let url = "/" + method + "/binary";
 
 				app.use(global.bodyParser.raw())
@@ -130,7 +129,6 @@ o.spec("rest client", function () {
 					o(req.headers['content-type']).equals('application/octet-stream')
 					o(req.headers['accept']).equals('application/octet-stream')
 					o(Array.from(req.body)).deepEquals(Array.from(request))
-					//console.log("!", req.method, req.originalUrl, req.path, req.query, req.headers)
 
 					o(req.query['_']).equals(undefined) // timestamp should be defined only for GET requests
 
@@ -138,7 +136,7 @@ o.spec("rest client", function () {
 				})
 				rc.request(url, method, {}, {}, new Uint8Array(request), MediaType.Binary).then(res => {
 					o(res instanceof Uint8Array).equals(true)
-					o(Array.from((res:any))).deepEquals(Array.from(response))
+					o(Array.from((res: any))).deepEquals(Array.from(response))
 					done()
 				})
 			}
@@ -148,22 +146,23 @@ o.spec("rest client", function () {
 		o("POST empty body", testEmptyBody('POST'))
 		o("PUT empty body", testEmptyBody('PUT'))
 		o("DELETE empty body", testEmptyBody('DELETE'))
+
 		function testEmptyBody(method) {
-			return function (done, timeout) {
-				timeout(200)
-				let before = new Date().getTime()
-				let url = "/" + method + "/empty-body";
+			return function () {
+				o.timeout(200)
+				return new Promise(resolve => {
+					let url = "/" + method + "/empty-body";
 
-				app[method.toLowerCase()](url, (req, res) => {
-					o(req.headers['content-type']).equals(undefined)
-					o(req.headers['accept']).equals(undefined)
-					//console.log("!", req.method, req.originalUrl, req.path, req.query, req.headers)
-
-					res.send()
-				})
-				rc.request(url, method, {}, {}, null, null).then(res => {
-					o(res).equals(undefined)
-					done()
+					app[method.toLowerCase()](url, (req, res) => {
+						o(req.headers['content-type']).equals(undefined)
+						o(req.headers['accept']).equals(undefined)
+						res.set("Date", SERVER_TIME_IN_HEADER)
+						res.send()
+					})
+					rc.request(url, method, {}, {}, null, null).then(res => {
+						o(res).equals(undefined)
+						resolve()
+					})
 				})
 			}
 		}
@@ -172,23 +171,49 @@ o.spec("rest client", function () {
 		o("POST empty body error", testError('POST'))
 		o("PUT empty body error", testError('PUT'))
 		o("DELETE empty body error", testError('DELETE'))
-		function testError(method) {
-			return function (done, timeout) {
-				timeout(200)
-				let before = new Date().getTime()
-				let url = "/" + method + "/error";
 
-				app[method.toLowerCase()](url, (req, res) => {
-					res.status(205).send() // every status code !== 200 is currently handled as error
-				})
-				rc.request(url, method, {}, {}, null, null).catch(e => {
-					o(e instanceof ResourceError).equals(true)
-					done()
+		function testError(method) {
+			return function () {
+				return new Promise((resolve, reject) => {
+					let url = "/" + method + "/error";
+
+					app[method.toLowerCase()](url, (req, res) => {
+						res.set("Date", SERVER_TIME_IN_HEADER)
+						res.status(205).send() // every status code !== 200 is currently handled as error
+					})
+					rc.request(url, method, {}, {}, null, null)
+					  .then(reject)
+					  .catch(e => {
+						  o(e instanceof ResourceError).equals(true)
+						  resolve()
+					  })
 				})
 			}
 		}
 
+		o("get time successful request", async () => {
+			const test = testEmptyBody("GET")
+			await test()
+			const timestamp = rc.getServerTimestampMs()
+			// Adjust for possible variance in date times
+			o(Math.abs(timestamp - SERVER_TIMESTAMP) < 10).equals(true)("Timestamp on the server was too different")
+		})
 
+		o("get time error request", async () => {
+			const test = testError("GET")
+			await test()
+			const timestamp = rc.getServerTimestampMs()
+			// Adjust for possible variance in date times
+			o(Math.abs(timestamp - SERVER_TIMESTAMP) < 10).equals(true)("Timestamp on the server was too different")
+		})
 	}))
 
+	o("isSuspensionResponse", node(() => {
+		o(isSuspensionResponse(503, "1")).equals(true)
+		o(isSuspensionResponse(429, "100")).equals(true)
+		o(isSuspensionResponse(0, "2")).equals(false)
+		o(isSuspensionResponse(503, "0")).equals(false)
+		o(isSuspensionResponse(503, null)).equals(false)
+		o(isSuspensionResponse(503, undefined)).equals(false)
+	}))
 })

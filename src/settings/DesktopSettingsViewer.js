@@ -1,22 +1,29 @@
 // @flow
 import m from "mithril"
-import {assertMainOrNode} from "../api/Env"
+import {assertMainOrNode} from "../api/common/Env"
 import {lang} from "../misc/LanguageViewModel"
 import stream from "mithril/stream/stream.js"
-import {nativeApp} from '../native/NativeWrapper.js'
 import {Request} from "../api/common/WorkerProtocol.js"
-import {showProgressDialog} from "../gui/base/ProgressDialog.js"
+import {showProgressDialog} from "../gui/dialogs/ProgressDialog.js"
 import {noOp} from "../api/common/utils/Utils"
 import {Icons} from "../gui/base/icons/Icons"
 import type {TextFieldAttrs} from "../gui/base/TextFieldN"
 import {TextFieldN} from "../gui/base/TextFieldN"
 import type {ButtonAttrs} from "../gui/base/ButtonN"
 import {ButtonN, ButtonType} from "../gui/base/ButtonN"
-import {fileApp} from "../native/FileApp"
 import {attachDropdown} from "../gui/base/DropdownN"
 import type {DropDownSelectorAttrs} from "../gui/base/DropDownSelectorN"
 import {DropDownSelectorN} from "../gui/base/DropDownSelectorN"
 import {Dialog} from "../gui/base/Dialog"
+import type {UpdateHelpLabelAttrs} from "./DesktopUpdateHelpLabel"
+import {DesktopUpdateHelpLabel} from "./DesktopUpdateHelpLabel"
+import type {MailExportMode} from "../mail/export/Exporter"
+import type {NativeWrapper} from "../native/common/NativeWrapper"
+import type {DesktopConfigKeyEnum} from "../desktop/config/ConfigKeys"
+import {typeof DesktopConfigKey} from "../desktop/config/ConfigKeys"
+import {getCurrentSpellcheckLanguageLabel, showSpellcheckLanguageDialog} from "../gui/dialogs/SpellcheckLanguageDialog"
+import {ifAllowedTutanotaLinks} from "../gui/base/GuiUtils"
+import type {UpdatableSettingsViewer} from "./SettingsView"
 
 assertMainOrNode()
 
@@ -30,22 +37,35 @@ export class DesktopSettingsViewer implements UpdatableSettingsViewer {
 	_defaultDownloadPath: Stream<string>;
 	_runAsTrayApp: Stream<?boolean>;
 	_runOnStartup: Stream<?boolean>;
+	_spellCheckLang: Stream<string>;
 	_isIntegrated: Stream<?boolean>;
 	_isAutoUpdateEnabled: Stream<?boolean>;
-	_showAutoUpdateOption: Stream<?boolean>;
+	_showAutoUpdateOption: boolean;
+	_updateAvailable: Stream<boolean>;
+	_mailExportMode: Stream<MailExportMode>
 	_isPathDialogOpen: boolean;
+	_nativeApp: Promise<NativeWrapper>
+	_configKeys: Promise<DesktopConfigKey>
 
 	constructor() {
+		this._nativeApp = import("../native/common/NativeWrapper").then((module) => module.nativeApp)
 		this._isDefaultMailtoHandler = stream(false)
 		this._runAsTrayApp = stream(true)
 		this._runOnStartup = stream(false)
+		this._spellCheckLang = stream("")
 		this._isIntegrated = stream(false)
 		this._isAutoUpdateEnabled = stream(false)
-		this._showAutoUpdateOption = stream(true)
+		this._showAutoUpdateOption = true
+		this._updateAvailable = stream(false)
+		this._mailExportMode = stream("msg") // msg is just a dummy value here, it will be overwritten in requestDesktopConfig
+		this._configKeys = import("../desktop/config/ConfigKeys").then(configKeys => configKeys.DesktopConfigKey)
+	}
+
+	oninit() {
 		this._requestDesktopConfig()
 	}
 
-	view() {
+	view(): Children {
 		const setDefaultMailtoHandlerAttrs: DropDownSelectorAttrs<boolean> = {
 			label: "defaultMailHandler_label",
 			helpLabel: () => lang.get("defaultMailHandler_msg"),
@@ -63,9 +83,15 @@ export class DesktopSettingsViewer implements UpdatableSettingsViewer {
 			}
 		}
 
-		const setRunAsTrayAppAttrs: DropDownSelectorAttrs<boolean> = {
-			label: env.platformId === 'linux' ? "showTrayIcon_action" : "runAsTrayApp_action",
-			helpLabel: env.platformId === 'linux' ? () => lang.get("mayNotWorkForAllDe_msg") : () => "",
+		const setRunInBackgroundAttrs: DropDownSelectorAttrs<boolean> = {
+			label: "runInBackground_action",
+			helpLabel: () => {
+				return ifAllowedTutanotaLinks("runInBackground_link", link => [
+					m("span", lang.get("runInBackground_msg") + " "),
+					m("span", lang.get("moreInfo_msg") + " "),
+					m("span.text-break", [m(`a[href=${link}][target=_blank]`, link)])
+				])
+			},
 			items: [
 				{name: lang.get("yes_label"), value: true},
 				{name: lang.get("no_label"), value: false}
@@ -73,7 +99,7 @@ export class DesktopSettingsViewer implements UpdatableSettingsViewer {
 			selectedValue: this._runAsTrayApp,
 			selectionChangedHandler: v => {
 				this._runAsTrayApp(v)
-				this.setBooleanSetting('runAsTrayApp', v)
+				this.updateConfigBoolean('runAsTrayApp', v)
 			}
 		}
 
@@ -85,15 +111,27 @@ export class DesktopSettingsViewer implements UpdatableSettingsViewer {
 			],
 			selectedValue: this._runOnStartup,
 			selectionChangedHandler: v => { // this may take a while
-				showProgressDialog("pleaseWait_msg",
-					nativeApp.invokeNative(new Request(v
-						? 'enableAutoLaunch'
-						: 'disableAutoLaunch', [])),
-				).then(() => {
-					this._runOnStartup(v)
-					m.redraw()
-				})
+				showProgressDialog("pleaseWait_msg", this._toggeAutoLaunchInNative(v))
+					.then(() => {
+						this._runOnStartup(v)
+						m.redraw()
+					})
 			}
+		}
+
+		const editSpellcheckLanguageButtonAttrs: ButtonAttrs = {
+			label: "checkSpelling_action",
+			click: () => showSpellcheckLanguageDialog()
+				.then(newLabel => this._spellCheckLang(newLabel)),
+			icon: () => Icons.Edit,
+		}
+
+		const spellcheckLanguageAttrs: TextFieldAttrs = {
+			label: "checkSpelling_action",
+			value: this._spellCheckLang,
+			disabled: true,
+			injectionsRight: () => [m(ButtonN, editSpellcheckLanguageButtonAttrs)],
+			helpLabel: () => lang.get("requiresNewWindow_msg"),
 		}
 
 		const setDesktopIntegrationAttrs: DropDownSelectorAttrs<boolean> = {
@@ -113,8 +151,28 @@ export class DesktopSettingsViewer implements UpdatableSettingsViewer {
 			}
 		}
 
+		const setMailExportModeAttrs: DropDownSelectorAttrs<MailExportMode> = {
+			label: "mailExportMode_label",
+			helpLabel: () => lang.get("mailExportModeHelp_msg"),
+			items: [
+				{name: "EML", value: "eml"},
+				{name: "MSG (Outlook)", value: "msg"}
+			],
+			selectedValue: this._mailExportMode,
+			selectionChangedHandler: v => {
+				this._mailExportMode(v)
+				this.updateConfig("mailExportMode", v)
+			}
+		}
+
+
+		const updateHelpLabelAttrs: UpdateHelpLabelAttrs = {
+			updateAvailable: this._updateAvailable
+		}
+
 		const setAutoUpdateAttrs: DropDownSelectorAttrs<boolean> = {
 			label: "autoUpdate_label",
+			helpLabel: () => m(DesktopUpdateHelpLabel, updateHelpLabelAttrs),
 			items: [
 				{name: lang.get("activated_label"), value: true},
 				{name: lang.get("deactivated_label"), value: false}
@@ -122,7 +180,7 @@ export class DesktopSettingsViewer implements UpdatableSettingsViewer {
 			selectedValue: this._isAutoUpdateEnabled,
 			selectionChangedHandler: v => {
 				this._isAutoUpdateEnabled(v)
-				this.setBooleanSetting('enableAutoUpdate', v)
+				this.updateConfigBoolean('enableAutoUpdate', v)
 			}
 		}
 
@@ -154,78 +212,120 @@ export class DesktopSettingsViewer implements UpdatableSettingsViewer {
 		return [
 			m("#user-settings.fill-absolute.scroll.plr-l.pb-xl", [
 				m(".h4.mt-l", lang.get('desktopSettings_label')),
+				env.platformId !== 'darwin' ? m(TextFieldN, spellcheckLanguageAttrs) : null,
 				env.platformId === 'linux' ? null : m(DropDownSelectorN, setDefaultMailtoHandlerAttrs),
-				env.platformId === 'darwin' ? null : m(DropDownSelectorN, setRunAsTrayAppAttrs),
+				env.platformId === 'darwin' ? null : m(DropDownSelectorN, setRunInBackgroundAttrs),
 				m(DropDownSelectorN, setRunOnStartupAttrs),
 				m(TextFieldN, defaultDownloadPathAttrs),
+				m(DropDownSelectorN, setMailExportModeAttrs),
 				env.platformId === 'linux' ? m(DropDownSelectorN, setDesktopIntegrationAttrs) : null,
-				this._showAutoUpdateOption() ? m(DropDownSelectorN, setAutoUpdateAttrs) : null,
+				this._showAutoUpdateOption ? m(DropDownSelectorN, setAutoUpdateAttrs) : null,
 			])
 		]
 	}
 
+	_toggeAutoLaunchInNative(enable: boolean): Promise<*> {
+		return import("../native/common/NativeWrapper").then(({nativeApp}) => {
+			return nativeApp.invokeNative(new Request(enable ? 'enableAutoLaunch' : 'disableAutoLaunch', []))
+		})
+	}
+
 	_updateDefaultMailtoHandler(shouldBeDefaultMailtoHandler: boolean): Promise<void> {
-		if (shouldBeDefaultMailtoHandler) {
-			return nativeApp.invokeNative(new Request('registerMailto', []))
-		} else {
-			return nativeApp.invokeNative(new Request('unregisterMailto', []))
-		}
+		return this._nativeApp.then((nativeApp) => {
+			if (shouldBeDefaultMailtoHandler) {
+				return nativeApp.invokeNative(new Request('registerMailto', []))
+			} else {
+				return nativeApp.invokeNative(new Request('unregisterMailto', []))
+			}
+		})
 	}
 
 	_updateDesktopIntegration(shouldIntegrate: boolean): Promise<void> {
-		if (shouldIntegrate) {
-			return nativeApp.invokeNative(new Request('integrateDesktop', []))
-		} else {
-			return nativeApp.invokeNative(new Request('unIntegrateDesktop', []))
-		}
+		return this._nativeApp.then((nativeApp) => {
+			if (shouldIntegrate) {
+				return nativeApp.invokeNative(new Request('integrateDesktop', []))
+			} else {
+				return nativeApp.invokeNative(new Request('unIntegrateDesktop', []))
+			}
+		})
 	}
 
 	_requestDesktopConfig() {
 		this._defaultDownloadPath = stream(lang.get('alwaysAsk_action'))
-		nativeApp.invokeNative(new Request('sendDesktopConfig', []))
-		         .then(desktopConfig => {
-			         this._isDefaultMailtoHandler(desktopConfig.isMailtoHandler)
-			         this._defaultDownloadPath(desktopConfig.defaultDownloadPath
-				         ? desktopConfig.defaultDownloadPath
-				         : lang.get('alwaysAsk_action')
-			         )
-			         this._runAsTrayApp(desktopConfig.runAsTrayApp)
-			         this._runOnStartup(desktopConfig.runOnStartup)
-			         this._isIntegrated(desktopConfig.isIntegrated)
-			         this._showAutoUpdateOption(desktopConfig.showAutoUpdateOption)
-			         this._isAutoUpdateEnabled(desktopConfig.enableAutoUpdate)
-			         m.redraw()
-		         })
-	}
 
-	setBooleanSetting(setting: string, value: boolean): void {
-		nativeApp.invokeNative(new Request('sendDesktopConfig', []))
-		         .then(config => {
-			         config[setting] = value
-			         return nativeApp.invokeNative(new Request('updateDesktopConfig', [config]))
-		         }).then(() => m.redraw())
-	}
+		Promise.all([import("../native/main/SystemApp"), this._configKeys])
+		       .then(([systemApp, DesktopConfigKey]) => {
+			       return Promise.all([
+				       systemApp.getIntegrationInfo(),
+				       systemApp.getConfigValue(DesktopConfigKey.defaultDownloadPath),
+				       systemApp.getConfigValue(DesktopConfigKey.runAsTrayApp),
+				       systemApp.getConfigValue(DesktopConfigKey.showAutoUpdateOption),
+				       systemApp.getConfigValue(DesktopConfigKey.enableAutoUpdate),
+				       systemApp.getConfigValue(DesktopConfigKey.mailExportMode),
+				       getCurrentSpellcheckLanguageLabel()
+			       ]).then((result) => {
 
-	setDefaultDownloadPath(v: $Values<typeof DownloadLocationStrategy>) {
-		this._isPathDialogOpen = true
-		Promise.join(
-			nativeApp.invokeNative(new Request('sendDesktopConfig', [])),
-			v === DownloadLocationStrategy.ALWAYS_ASK
-				? Promise.resolve([null])
-				: fileApp.openFolderChooser(),
-			(config, newPaths) => {
-				config.defaultDownloadPath = newPaths[0]
-				this._defaultDownloadPath(newPaths[0]
-					? newPaths[0]
-					: lang.get('alwaysAsk_action'))
-				return config
-			}).then(config => nativeApp.invokeNative(new Request('updateDesktopConfig', [config])))
-		       .then(() => {
-			       this._isPathDialogOpen = false
-			       m.redraw()
+				       const [
+					       integrationInfo,
+					       defaultDownloadPath,
+					       runAsTrayApp,
+					       showAutoUpdateOption,
+					       enableAutoUpdate,
+					       mailExportMode,
+					       spellcheckLabel
+				       ] = result
+				       const {isMailtoHandler, isAutoLaunchEnabled, isIntegrated, isUpdateAvailable} = integrationInfo
+				       this._isDefaultMailtoHandler(isMailtoHandler)
+				       this._defaultDownloadPath(defaultDownloadPath || lang.get('alwaysAsk_action'))
+				       this._runAsTrayApp(runAsTrayApp)
+				       this._runOnStartup(isAutoLaunchEnabled)
+				       this._isIntegrated(isIntegrated)
+				       this._showAutoUpdateOption = showAutoUpdateOption
+				       this._isAutoUpdateEnabled(enableAutoUpdate)
+				       this._updateAvailable(isUpdateAvailable)
+				       this._mailExportMode(mailExportMode)
+				       this._spellCheckLang(spellcheckLabel)
+				       m.redraw()
+			       })
 		       })
 	}
 
+	updateConfigBoolean(setting: DesktopConfigKeyEnum, value: boolean): void {
+		return this.updateConfig(setting, value)
+	}
+
+	updateConfig<T>(setting: DesktopConfigKeyEnum, value: T): void {
+		import("../native/main/SystemApp").then((systemApp) => {
+			return systemApp.setConfigValue(setting, value)
+			                .then(() => m.redraw())
+		})
+	}
+
+	setDefaultDownloadPath(v: $Values<typeof DownloadLocationStrategy>): Promise<void> {
+		this._isPathDialogOpen = true
+
+		return Promise
+			.resolve(
+				v === DownloadLocationStrategy.ALWAYS_ASK
+					? Promise.resolve([null])
+					: import("../native/common/FileApp").then(({fileApp}) => fileApp.openFolderChooser())
+			)
+			.then((newPaths) => {
+				this._defaultDownloadPath(newPaths[0] ? newPaths[0] : lang.get('alwaysAsk_action'))
+				return this._configKeys.then((DesktopConfigKey) => this.updateConfig(DesktopConfigKey.defaultDownloadPath, newPaths[0]))
+			})
+			.then(() => {
+				this._isPathDialogOpen = false
+				m.redraw()
+			})
+	}
+
+	onAppUpdateAvailable(): void {
+		this._updateAvailable(true)
+		m.redraw()
+	}
+
+
 	// this is all local for now
-	entityEventsReceived = noOp
+	entityEventsReceived: (() => Promise<void>) = () => Promise.resolve()
 }

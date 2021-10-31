@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {UserAccountUserData} from "./UserAccountUserData"
 import type {InternalGroupData} from "./InternalGroupData"
@@ -16,18 +18,14 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 664,
-			"since": 16,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"date": {
-			"name": "date",
 			"id": 665,
-			"since": 16,
 			"type": "Date",
 			"cardinality": "ZeroOrOne",
 			"final": false,
@@ -36,26 +34,24 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"userData": {
-			"name": "userData",
 			"id": 666,
-			"since": 16,
 			"type": "AGGREGATION",
 			"cardinality": "One",
+			"final": false,
 			"refType": "UserAccountUserData",
-			"final": false
+			"dependency": null
 		},
 		"userGroupData": {
-			"name": "userGroupData",
 			"id": 667,
-			"since": 16,
 			"type": "AGGREGATION",
 			"cardinality": "One",
+			"final": false,
 			"refType": "InternalGroupData",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createUserAccountCreateData(values?: $Shape<$Exact<UserAccountCreateData>>): UserAccountCreateData {

@@ -2,10 +2,11 @@
 import m from "mithril"
 import type {TranslationKey} from "../../misc/LanguageViewModel"
 import {lang} from "../../misc/LanguageViewModel"
-import {assertMainOrNode} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import type {AllIconsEnum} from "./Icon"
 import {Icon} from "./Icon"
 import {px, size} from "../size"
+import type {lazy} from "../../api/common/utils/Utils"
 
 assertMainOrNode()
 
@@ -21,7 +22,7 @@ export type Attrs = {
 export default class ColumnEmptyMessageBox implements MComponent<Attrs> {
 	view({attrs}: Vnode<Attrs>): Children {
 		return m(".fill-absolute.flex.col.items-center.justify-center",
-			m(".mt-negative-l.flex.col.items-center.justify-center.mlr", {
+			m(".flex.col.items-center.justify-center.mlr", {
 				style: {
 					'margin-top': px(attrs.icon ? -size.icon_message_box - size.vpad_xl : -size.vpad_xl)
 				}

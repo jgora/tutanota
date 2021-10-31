@@ -1,27 +1,28 @@
 //@flow
 import {FULL_INDEXED_TIMESTAMP, NOTHING_INDEXED_TIMESTAMP, OperationType} from "../../common/TutanotaConstants"
-import {EntityWorker} from "../EntityWorker"
 import {NotFoundError} from "../../common/error/RestError"
+import type {GroupInfo} from "../../entities/sys/GroupInfo"
 import {_TypeModel as GroupInfoModel, GroupInfoTypeRef} from "../../entities/sys/GroupInfo"
-import {neverNull} from "../../common/utils/Utils"
+import {neverNull, noOp} from "../../common/utils/Utils"
 import type {Db, GroupData, IndexUpdate, SearchIndexEntry} from "./SearchTypes"
 import {_createNewIndexUpdate, typeRefToTypeInfo, userIsLocalOrGlobalAdmin} from "./IndexUtils"
 import {CustomerTypeRef} from "../../entities/sys/Customer"
-import {GroupDataOS} from "./DbFacade"
+import {GroupDataOS} from "./Indexer"
 import {IndexerCore} from "./IndexerCore"
 import {SuggestionFacade} from "./SuggestionFacade"
 import {tokenize} from "./Tokenizer"
-import type {GroupInfo} from "../../entities/sys/GroupInfo"
 import type {EntityUpdate} from "../../entities/sys/EntityUpdate"
 import type {User} from "../../entities/sys/User"
+import {EntityClient} from "../../common/EntityClient"
+import {ofClass, promiseMap} from "../../common/utils/PromiseUtils"
 
 export class GroupInfoIndexer {
 	_core: IndexerCore;
 	_db: Db;
-	_entity: EntityWorker;
+	_entity: EntityClient;
 	suggestionFacade: SuggestionFacade<GroupInfo>
 
-	constructor(core: IndexerCore, db: Db, entity: EntityWorker, suggestionFacade: SuggestionFacade<GroupInfo>) {
+	constructor(core: IndexerCore, db: Db, entity: EntityClient, suggestionFacade: SuggestionFacade<GroupInfo>) {
 		this._core = core
 		this._db = db
 		this._entity = entity
@@ -56,46 +57,48 @@ export class GroupInfoIndexer {
 			return this.suggestionFacade.store().then(() => {
 				return {groupInfo, keyToIndexEntries}
 			})
-		}).catch(NotFoundError, () => {
+		}).catch(ofClass(NotFoundError, () => {
 			console.log("tried to index non existing group info")
 			return null
-		})
+		}))
 	}
 
 	/**
 	 * Indexes the group infos if they are not yet indexed.
 	 */
-	indexAllUserAndTeamGroupInfosForAdmin(user: User): Promise<void> {
+	async indexAllUserAndTeamGroupInfosForAdmin(user: User): Promise<*> {
 		if (userIsLocalOrGlobalAdmin(user)) {
-			return this._entity.load(CustomerTypeRef, neverNull(user.customer)).then(customer => {
-				return this._db.dbFacade.createTransaction(true, [GroupDataOS]).then(t => {
-					return t.get(GroupDataOS, customer.customerGroup).then((groupData: ?GroupData) => {
-						if (groupData && groupData.indexTimestamp === NOTHING_INDEXED_TIMESTAMP) {
-							return Promise.all([
-								this._entity.loadAll(GroupInfoTypeRef, customer.userGroups),
-								this._entity.loadAll(GroupInfoTypeRef, customer.teamGroups)
-							]).spread((allUserGroupInfos, allTeamGroupInfos) => {
-								let indexUpdate = _createNewIndexUpdate(typeRefToTypeInfo(GroupInfoTypeRef))
-								allUserGroupInfos.concat(allTeamGroupInfos).forEach(groupInfo => {
-									let keyToIndexEntries = this.createGroupInfoIndexEntries(groupInfo)
-									this._core.encryptSearchIndexEntries(groupInfo._id, neverNull(groupInfo._ownerGroup), keyToIndexEntries, indexUpdate)
-								})
-								return Promise.all([
-									this._core.writeIndexUpdate([{groupId: customer.customerGroup, indexTimestamp: FULL_INDEXED_TIMESTAMP}], indexUpdate),
-									this.suggestionFacade.store()
-								])
-							})
-						}
-					})
+			const customer = await this._entity.load(CustomerTypeRef, neverNull(user.customer))
+			const t = await this._db.dbFacade.createTransaction(true, [GroupDataOS])
+			const groupData: ?GroupData = await t.get(GroupDataOS, customer.customerGroup)
+			if (groupData && groupData.indexTimestamp === NOTHING_INDEXED_TIMESTAMP) {
+				const [allUserGroupInfos, allTeamGroupInfos] = await Promise.all([
+					this._entity.loadAll(GroupInfoTypeRef, customer.userGroups),
+					this._entity.loadAll(GroupInfoTypeRef, customer.teamGroups)
+				])
+
+				let indexUpdate = _createNewIndexUpdate(typeRefToTypeInfo(GroupInfoTypeRef))
+				allUserGroupInfos.concat(allTeamGroupInfos).forEach(groupInfo => {
+					let keyToIndexEntries = this.createGroupInfoIndexEntries(groupInfo)
+					this._core.encryptSearchIndexEntries(groupInfo._id, neverNull(groupInfo._ownerGroup), keyToIndexEntries, indexUpdate)
 				})
-			})
+				return Promise.all([
+					this._core.writeIndexUpdate([
+						{
+							groupId: customer.customerGroup,
+							indexTimestamp: FULL_INDEXED_TIMESTAMP
+						}
+					], indexUpdate),
+					this.suggestionFacade.store()
+				])
+			}
 		} else {
 			return Promise.resolve()
 		}
 	}
 
 	processEntityEvents(events: EntityUpdate[], groupId: Id, batchId: Id, indexUpdate: IndexUpdate, user: User): Promise<void> {
-		return Promise.each(events, (event, index) => {
+		return promiseMap(events, (event) => {
 			if (userIsLocalOrGlobalAdmin(user)) {
 				if (event.operation === OperationType.CREATE) {
 					return this.processNewGroupInfo(event).then(result => {
@@ -118,6 +121,6 @@ export class GroupInfoIndexer {
 					return this._core._processDeleted(event, indexUpdate)
 				}
 			}
-		}).return()
+		}).then(noOp)
 	}
 }

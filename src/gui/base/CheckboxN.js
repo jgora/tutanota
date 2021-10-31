@@ -4,15 +4,18 @@ import stream from "mithril/stream/stream.js"
 import {BootIcons} from "./icons/BootIcons"
 import {Icon} from "./Icon"
 import {addFlash, removeFlash} from "./Flash"
+import type {TranslationKey} from "../../misc/LanguageViewModel"
+import {lang} from "../../misc/LanguageViewModel"
+import type {lazy} from "../../api/common/utils/Utils"
 
 export type CheckboxAttrs = {
-	label: lazy<string | VirtualElement>,
+	label: lazy<string | Children>,
 	checked: Stream<boolean>,
-	helpLabel?: lazy<string>,
+	helpLabel?: TranslationKey | lazy<string>,
 	disabled?: boolean,
 }
 
-export class _Checkbox {
+export class CheckboxN implements MComponent<CheckboxAttrs> {
 	focused: Stream<boolean>;
 	_domInput: HTMLElement;
 	_domIcon: ?HTMLElement;
@@ -21,8 +24,9 @@ export class _Checkbox {
 		this.focused = stream(false)
 	}
 
-	view(vnode: Vnode<CheckboxAttrs>) {
+	view(vnode: Vnode<CheckboxAttrs>): Children {
 		const a = vnode.attrs
+		const helpLabel = a.helpLabel ? m("small.block.content-fg", lang.getMaybeLazy(a.helpLabel)) : []
 		return m(".checkbox.click.pt", {
 			onclick: (e: MouseEvent) => {
 				if (e.target !== this._domInput) {
@@ -61,9 +65,16 @@ export class _Checkbox {
 				}),
 				m(".pl", {
 					class: this.focused() ? "content-accent-fg" : "content-fg",
+					onclick: e => {
+						// if the label contains a link, then stop the event so that the checkbox doesnt get toggled upon clicking
+						// we still allow it to be checked if they click on the non-link part of the label
+						if (e.target.tagName.toUpperCase() === "A") {
+							e.stopPropagation()
+						}
+					}
 				}, a.label()),
 			]),
-			a.helpLabel ? m("small.block.content-fg", a.helpLabel()) : [],
+			helpLabel,
 		])
 	}
 
@@ -77,5 +88,3 @@ export class _Checkbox {
 		}
 	}
 }
-
-export const CheckboxN: Class<MComponent<CheckboxAttrs>> = _Checkbox

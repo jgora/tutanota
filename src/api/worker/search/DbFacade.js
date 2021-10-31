@@ -3,36 +3,32 @@ import {DbError} from "../../common/error/DbError"
 import {LazyLoaded} from "../../common/utils/LazyLoaded"
 import {IndexingNotSupportedError} from "../../common/error/IndexingNotSupportedError"
 import {QuotaExceededError} from "../../common/error/QuotaExceededError"
+import {stringToUtf8Uint8Array, uint8ArrayToBase64} from "../../common/utils/Encoding"
+import {hash} from "../crypto/Sha256"
+import type {User} from "../../entities/sys/User"
+import {getEtId} from "../../common/utils/EntityUtils"
+import type {IndexName} from "./Indexer"
+import {delay} from "../../common/utils/PromiseUtils"
 
 
 export type ObjectStoreName = string
-export const SearchIndexOS: ObjectStoreName = "SearchIndex"
-export const SearchIndexMetaDataOS: ObjectStoreName = "SearchIndexMeta"
-export const ElementDataOS: ObjectStoreName = "ElementData"
-export const MetaDataOS: ObjectStoreName = "MetaData"
-export const GroupDataOS: ObjectStoreName = "GroupMetaData"
-export const SearchTermSuggestionsOS: ObjectStoreName = "SearchTermSuggestions"
 
 export const osName = (objectStoreName: ObjectStoreName): string => objectStoreName
 
-export type IndexName = string
-export const SearchIndexWordsIndex: IndexName = "SearchIndexWords"
-export const indexName = (indexName: IndexName): string => indexName
+export type DbKey = string | number | Uint8Array
 
-const DB_VERSION = 3
-
+export type DatabaseEntry = {key: DbKey, value: any}
 
 export interface DbTransaction {
-	getAll(objectStore: ObjectStoreName): Promise<{key: string | number, value: any}[]>;
+	getAll(objectStore: ObjectStoreName): Promise<Array<DatabaseEntry>>;
 
-	get<T>(objectStore: ObjectStoreName, key: (string | number), indexName?: IndexName): Promise<?T>;
+	get<T>(objectStore: ObjectStoreName, key: DbKey, indexName?: IndexName): Promise<?T>;
 
-	getAsList<T>(objectStore: ObjectStoreName, key: string | number, indexName?: IndexName): Promise<T[]>;
+	getAsList<T>(objectStore: ObjectStoreName, key: DbKey, indexName?: IndexName): Promise<T[]>;
 
-	put(objectStore: ObjectStoreName, key: ?(string | number), value: any): Promise<any>;
+	put(objectStore: ObjectStoreName, key: ?DbKey, value: any): Promise<any>;
 
-
-	delete(objectStore: ObjectStoreName, key: string | number): Promise<void>;
+	delete(objectStore: ObjectStoreName, key: DbKey): Promise<void>;
 
 	abort(): void;
 
@@ -54,22 +50,21 @@ export class DbFacade {
 	_id: string;
 	_db: LazyLoaded<IDBDatabase>;
 	_activeTransactions: number;
-	indexingSupported: boolean;
+	indexingSupported: boolean = true;
 
-	constructor(supported: boolean, onupgrade?: () => void) {
+	constructor(version: number, onupgrade: (event: any, db: IDBDatabase) => void) {
 		this._activeTransactions = 0
-		this.indexingSupported = supported
 		this._db = new LazyLoaded(() => {
 			// If indexedDB is disabled in Firefox, the browser crashes when accessing indexedDB in worker process
 			// ask the main thread if indexedDB is supported.
 			if (!this.indexingSupported) {
 				return Promise.reject(new IndexingNotSupportedError("indexedDB not supported"))
 			} else {
-				return Promise.fromCallback(callback => {
+				return new Promise((resolve, reject) => {
 					let DBOpenRequest
 					try {
 
-						DBOpenRequest = indexedDB.open(this._id, DB_VERSION)
+						DBOpenRequest = self.indexedDB.open(this._id, version)
 						DBOpenRequest.onerror = (event) => {
 							// Copy all the keys from the error, including inheritent ones so we can get some info
 
@@ -83,38 +78,18 @@ export class DbFacade {
 
 							if (event.target && event.target.error && event.target.error.name === "QuotaExceededError") {
 								console.log("Storage Quota is exceeded")
-								callback(new QuotaExceededError(message, DBOpenRequest.error || event.target.error))
+								reject(new QuotaExceededError(message, DBOpenRequest.error || event.target.error))
 							} else {
-								callback(new IndexingNotSupportedError(message, DBOpenRequest.error || event.target.error))
+								reject(new IndexingNotSupportedError(message, DBOpenRequest.error || event.target.error))
 							}
 						}
 
 						DBOpenRequest.onupgradeneeded = (event) => {
 							//console.log("upgrade db", event)
-							let db = event.target.result
-							if (event.oldVersion !== DB_VERSION && event.oldVersion !== 0) {
-								if (onupgrade) onupgrade()
-
-								this._deleteObjectStores(db,
-									SearchIndexOS,
-									ElementDataOS,
-									MetaDataOS,
-									GroupDataOS,
-									SearchTermSuggestionsOS,
-									SearchIndexMetaDataOS
-								)
-							}
-
 							try {
-								db.createObjectStore(SearchIndexOS, {autoIncrement: true})
-								const metaOS = db.createObjectStore(SearchIndexMetaDataOS, {autoIncrement: true, keyPath: "id"})
-								db.createObjectStore(ElementDataOS)
-								db.createObjectStore(MetaDataOS)
-								db.createObjectStore(GroupDataOS)
-								db.createObjectStore(SearchTermSuggestionsOS)
-								metaOS.createIndex(SearchIndexWordsIndex, "word", {unique: true})
+								onupgrade(event, event.target.result)
 							} catch (e) {
-								callback(new DbError("could not create object store searchindex", e))
+								reject(new DbError("could not create object store for DB " + this._id, e))
 							}
 						}
 
@@ -126,30 +101,20 @@ export class DbFacade {
 								this._db.reset()
 							}
 							DBOpenRequest.result.onerror = (event) => console.log("db error", event)
-							callback(null, DBOpenRequest.result)
+							resolve(DBOpenRequest.result)
 						}
 					} catch (e) {
 						this.indexingSupported = false
-						callback(new IndexingNotSupportedError(`exception when accessing indexeddb ${this._id}`, e))
+						reject(new IndexingNotSupportedError(`exception when accessing indexeddb ${this._id}`, e))
 					}
 				})
 			}
 		})
 	}
 
-	_deleteObjectStores(db: IDBDatabase, ...oss: string[]) {
-		for (let os of oss) {
-			try {
-				db.deleteObjectStore(os)
-			} catch (e) {
-				console.log("Error while deleting old os", os, "ignoring", e)
-			}
-		}
-	}
-
-	open(id: string): Promise<void> {
+	open(id: string): Promise<*> {
 		this._id = id
-		return this._db.getAsync().return()
+		return this._db.getAsync()
 	}
 
 	/**
@@ -158,17 +123,17 @@ export class DbFacade {
 	deleteDatabase(): Promise<void> {
 		if (this._db.isLoaded()) {
 			if (this._activeTransactions > 0) {
-				return Promise.delay(150).then(() => this.deleteDatabase())
+				return delay(150).then(() => this.deleteDatabase())
 			} else {
 				this._db.getLoaded().close()
-				return Promise.fromCallback(cb => {
-					let deleteRequest = indexedDB.deleteDatabase(this._db.getLoaded().name)
+				return new Promise((resolve, reject) => {
+					let deleteRequest = self.indexedDB.deleteDatabase(this._db.getLoaded().name)
 					deleteRequest.onerror = (event) => {
-						cb(new DbError(`could not delete database ${this._db.getLoaded().name}`, event))
+						reject(new DbError(`could not delete database ${this._db.getLoaded().name}`, event))
 					}
 					deleteRequest.onsuccess = (event) => {
 						this._db.reset()
-						cb()
+						resolve()
 					}
 				})
 			}
@@ -219,34 +184,36 @@ export class IndexedDbTransaction implements DbTransaction {
 	constructor(transaction: IDBTransaction, onUnknownError: (e: any) => mixed) {
 		this._transaction = transaction
 		this._onUnknownError = onUnknownError
-		this._promise = Promise.fromCallback((callback) => {
-
+		this._promise = new Promise((resolve, reject) => {
+			let done = false
 			transaction.onerror = (event) => {
-				if (this._promise.isPending()) {
+				if (!done) {
 					this._handleDbError(event, this._transaction, "transaction.onerror", (e) => {
-						callback(e)
+						reject(e)
 					})
 				} else {
-					console.log("ignore error of aborted/fullfilled transaction", event)
+					console.log("ignore error of aborted/fulfilled transaction", event)
 				}
 			}
-			transaction.oncomplete = (event) => {
-				callback()
+			transaction.oncomplete = () => {
+				done = true
+				resolve()
 			}
 			transaction.onabort = (event) => {
 				event.stopPropagation()
-				callback()
+				done = true
+				resolve()
 			}
 		})
 	}
 
-	getAll(objectStore: ObjectStoreName): Promise<{key: string | number, value: any}[]> {
-		return Promise.fromCallback((callback) => {
+	getAll(objectStore: ObjectStoreName): Promise<Array<DatabaseEntry>> {
+		return new Promise((resolve, reject) => {
 			try {
 				let keys = []
 				let request = (this._transaction.objectStore(objectStore): any).openCursor()
 				request.onerror = (event) => {
-					this._handleDbError(event, request, "getAll().onError " + objectStore, callback)
+					this._handleDbError(event, request, "getAll().onError " + objectStore, reject)
 				}
 				request.onsuccess = (event) => {
 					let cursor = request.result
@@ -254,17 +221,17 @@ export class IndexedDbTransaction implements DbTransaction {
 						keys.push({key: cursor.key, value: cursor.value})
 						cursor.continue() // onsuccess is called again
 					} else {
-						callback(null, keys) // cursor has reached the end
+						resolve(keys) // cursor has reached the end
 					}
 				}
 			} catch (e) {
-				this._handleDbError(e, null, "getAll().catch", callback)
+				this._handleDbError(e, null, "getAll().catch", reject)
 			}
 		})
 	}
 
-	get<T>(objectStore: ObjectStoreName, key: (string | number), indexName?: IndexName): Promise<?T> {
-		return Promise.fromCallback((callback) => {
+	get<T>(objectStore: ObjectStoreName, key: DbKey, indexName?: IndexName): Promise<?T> {
+		return new Promise((resolve, reject) => {
 			try {
 				const os = this._transaction.objectStore(objectStore)
 				let request
@@ -274,53 +241,53 @@ export class IndexedDbTransaction implements DbTransaction {
 					request = os.get(key)
 				}
 				request.onerror = (event) => {
-					this._handleDbError(event, request, "get().onerror " + objectStore, callback)
+					this._handleDbError(event, request, "get().onerror " + objectStore, reject)
 				}
 				request.onsuccess = (event) => {
-					callback(null, event.target.result)
+					resolve(event.target.result)
 				}
 			} catch (e) {
-				this._handleDbError(e, null, "get().catch", callback)
+				this._handleDbError(e, null, "get().catch", reject)
 			}
 		})
 	}
 
-	getAsList<T>(objectStore: ObjectStoreName, key: string | number, indexName?: IndexName): Promise<T[]> {
+	getAsList<T>(objectStore: ObjectStoreName, key: DbKey, indexName?: IndexName): Promise<T[]> {
 		return this.get(objectStore, key, indexName)
 		           .then(result => result || [])
 	}
 
-	put(objectStore: ObjectStoreName, key: ?(string | number), value: any): Promise<any> {
-		return Promise.fromCallback((callback) => {
+	put(objectStore: ObjectStoreName, key: ?DbKey, value: any): Promise<any> {
+		return new Promise((resolve, reject) => {
 			try {
 				let request = key
 					? this._transaction.objectStore(objectStore).put(value, key)
 					: this._transaction.objectStore(objectStore).put(value)
 				request.onerror = (event) => {
-					this._handleDbError(event, request, "put().onerror " + objectStore, callback)
+					this._handleDbError(event, request, "put().onerror " + objectStore, reject)
 				}
 				request.onsuccess = (event) => {
-					callback(null, event.target.result)
+					resolve(event.target.result)
 				}
 			} catch (e) {
-				this._handleDbError(e, null, "put().catch", callback)
+				this._handleDbError(e, null, "put().catch", reject)
 			}
 		})
 	}
 
 
-	delete(objectStore: ObjectStoreName, key: string | number): Promise<void> {
-		return Promise.fromCallback((callback) => {
+	delete(objectStore: ObjectStoreName, key: DbKey): Promise<void> {
+		return new Promise((resolve, reject) => {
 			try {
 				let request = this._transaction.objectStore(objectStore).delete(key)
 				request.onerror = (event) => {
-					this._handleDbError(event, request, "delete().onerror " + objectStore, callback)
+					this._handleDbError(event, request, "delete().onerror " + objectStore, reject)
 				}
 				request.onsuccess = (event) => {
-					callback()
+					resolve()
 				}
 			} catch (e) {
-				this._handleDbError(e, null, ".delete().catch " + objectStore, callback)
+				this._handleDbError(e, null, ".delete().catch " + objectStore, reject)
 			}
 		})
 	}
@@ -368,4 +335,8 @@ export class IndexedDbTransaction implements DbTransaction {
 			}
 		}
 	}
+}
+
+export function b64UserIdHash(user: User): string {
+	return uint8ArrayToBase64(hash(stringToUtf8Uint8Array(getEtId(user))))
 }

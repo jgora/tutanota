@@ -1,8 +1,10 @@
 // @flow
 import m from "mithril"
-import {assertMainOrNode} from "../../api/Env"
-import type {AriaLandmarksEnum} from "../../api/common/utils/AriaUtils"
-import {AriaLandmarks, landmarkAttrs} from "../../api/common/utils/AriaUtils"
+import {assertMainOrNode} from "../../api/common/Env"
+import type {AriaLandmarksEnum} from "../AriaUtils"
+import {AriaLandmarks, landmarkAttrs} from "../AriaUtils"
+import {LayerType} from "../../RootView"
+import type {lazy} from "../../api/common/utils/Utils"
 
 assertMainOrNode()
 
@@ -13,14 +15,20 @@ export const ColumnType = {
 	Foreground: 0
 }
 
+type HeaderCenter = {
+	left: Child,
+	middle: string,
+	right: Child
+}
+
 type Attrs = {rightBorder?: boolean}
 
-export class ViewColumn {
-	component: Component;
+export class ViewColumn implements MComponent<Attrs> {
+	component: MComponent<void>;
 	columnType: ColumnTypeEnum;
 	minWidth: number;
 	maxWidth: number;
-	title: ?lazy<string>;
+	headerCenter: lazy<string | HeaderCenter>
 	ariaLabel: ?lazy<string>;
 	width: number;
 	offset: number; // offset to the left
@@ -38,12 +46,12 @@ export class ViewColumn {
 	 * @param maxWidth The maximum allowed width for the view column.
 	 * @param title A function that returns the translated title text for a column.
 	 */
-	constructor(component: Component, columnType: ColumnTypeEnum, minWidth: number, maxWidth: number, title: ?lazy<string>, ariaLabel: ?lazy<string>) {
+	constructor(component: MComponent<void>, columnType: ColumnTypeEnum, minWidth: number, maxWidth: number, headerCenter: ?lazy<string | HeaderCenter>, ariaLabel: ?lazy<string>) {
 		this.component = component
 		this.columnType = columnType
 		this.minWidth = minWidth
 		this.maxWidth = maxWidth
-		this.title = title
+		this.headerCenter = headerCenter || (() => "")
 		this.ariaLabel = ariaLabel
 		this.width = minWidth
 		this.offset = 0
@@ -51,10 +59,10 @@ export class ViewColumn {
 		this.visible = false
 
 		this.view = (vnode: Vnode<Attrs>) => {
-			const zIndex = !this.visible && this.columnType === ColumnType.Foreground ? ".z4" : ""
+			const zIndex = !this.visible && this.columnType === ColumnType.Foreground ? (LayerType.ForegroundMenu + 1) : ""
 			const border = vnode.attrs.rightBorder ? ".list-border-right" : ""
 			const landmark = this._ariaRole ? landmarkAttrs(this._ariaRole, this.ariaLabel ? this.ariaLabel() : this.getTitle()) : ""
-			return m(".view-column.overflow-x-hidden.fill-absolute.backface_fix" + zIndex + border + landmark, {
+			return m(".view-column.overflow-x-hidden.fill-absolute.backface_fix" + border + landmark, {
 					"aria-hidden": this.visible || this.isInForeground ? "false" : "true",
 					oncreate: (vnode) => {
 						this._domColumn = vnode.dom
@@ -65,6 +73,7 @@ export class ViewColumn {
 						}
 					},
 					style: {
+						zIndex,
 						width: this.width + 'px',
 						left: this.offset + 'px',
 					},
@@ -86,10 +95,27 @@ export class ViewColumn {
 	}
 
 	getTitle(): string {
-		return this.title ? this.title() : ""
+		const center = this.headerCenter()
+		return typeof center === "string"
+			? center
+			: center.middle
 	}
 
-	getOffsetForeground(foregroundState: boolean) {
+	getTitleButtonLeft(): ?Child {
+		const center = this.headerCenter()
+		return typeof center === "string"
+			? null
+			: center.left
+	}
+
+	getTitleButtonRight(): ?Child {
+		const center = this.headerCenter()
+		return typeof center === "string"
+			? null
+			: center.right
+	}
+
+	getOffsetForeground(foregroundState: boolean): number {
 		if (this.visible || foregroundState) {
 			return 0
 		} else {

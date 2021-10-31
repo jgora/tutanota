@@ -1,7 +1,11 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
+import type {CalendarEventAttendee} from "./CalendarEventAttendee"
+import type {EncryptedMailAddress} from "./EncryptedMailAddress"
 import type {CalendarRepeatRule} from "./CalendarRepeatRule"
 
 export const CalendarEventTypeRef: TypeRef<CalendarEvent> = new TypeRef("tutanota", "CalendarEvent")
@@ -15,99 +19,98 @@ export const _TypeModel: TypeModel = {
 	"encrypted": true,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 937,
-			"since": 33,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"_id": {
-			"name": "_id",
 			"id": 935,
-			"since": 33,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerEncSessionKey": {
-			"name": "_ownerEncSessionKey",
 			"id": 939,
-			"since": 33,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerGroup": {
-			"name": "_ownerGroup",
 			"id": 938,
-			"since": 33,
 			"type": "GeneratedId",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_permissions": {
-			"name": "_permissions",
 			"id": 936,
-			"since": 33,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"description": {
-			"name": "description",
 			"id": 941,
-			"since": 33,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": true
 		},
 		"endTime": {
-			"name": "endTime",
 			"id": 943,
-			"since": 33,
 			"type": "Date",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": true
 		},
+		"hashedUid": {
+			"id": 1088,
+			"type": "Bytes",
+			"cardinality": "ZeroOrOne",
+			"final": false,
+			"encrypted": false
+		},
+		"invitedConfidentially": {
+			"id": 1090,
+			"type": "Boolean",
+			"cardinality": "ZeroOrOne",
+			"final": false,
+			"encrypted": true
+		},
 		"location": {
-			"name": "location",
 			"id": 944,
-			"since": 33,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": true
 		},
+		"sequence": {
+			"id": 1089,
+			"type": "Number",
+			"cardinality": "One",
+			"final": false,
+			"encrypted": true
+		},
 		"startTime": {
-			"name": "startTime",
 			"id": 942,
-			"since": 33,
 			"type": "Date",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": true
 		},
 		"summary": {
-			"name": "summary",
 			"id": 940,
-			"since": 33,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": true
 		},
 		"uid": {
-			"name": "uid",
 			"id": 988,
-			"since": 35,
 			"type": "String",
 			"cardinality": "ZeroOrOne",
 			"final": false,
@@ -115,28 +118,40 @@ export const _TypeModel: TypeModel = {
 		}
 	},
 	"associations": {
-		"repeatRule": {
-			"name": "repeatRule",
-			"id": 945,
-			"since": 33,
+		"attendees": {
+			"id": 1091,
+			"type": "AGGREGATION",
+			"cardinality": "Any",
+			"final": false,
+			"refType": "CalendarEventAttendee",
+			"dependency": null
+		},
+		"organizer": {
+			"id": 1092,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": false,
+			"refType": "EncryptedMailAddress",
+			"dependency": null
+		},
+		"repeatRule": {
+			"id": 945,
+			"type": "AGGREGATION",
+			"cardinality": "ZeroOrOne",
+			"final": false,
 			"refType": "CalendarRepeatRule",
-			"final": false
+			"dependency": null
 		},
 		"alarmInfos": {
-			"name": "alarmInfos",
 			"id": 946,
-			"since": 33,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "Any",
-			"refType": "UserAlarmInfo",
 			"final": false,
-			"external": true
+			"refType": "UserAlarmInfo"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createCalendarEvent(values?: $Shape<$Exact<CalendarEvent>>): CalendarEvent {
@@ -154,11 +169,16 @@ export type CalendarEvent = {
 	_permissions: Id;
 	description: string;
 	endTime: Date;
+	hashedUid: ?Uint8Array;
+	invitedConfidentially: ?boolean;
 	location: string;
+	sequence: NumberString;
 	startTime: Date;
 	summary: string;
 	uid: ?string;
 
+	attendees: CalendarEventAttendee[];
+	organizer: ?EncryptedMailAddress;
 	repeatRule: ?CalendarRepeatRule;
 	alarmInfos: IdTuple[];
 }

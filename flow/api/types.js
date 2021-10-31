@@ -1,9 +1,3 @@
-import {Request} from "../../src/api/common/WorkerProtocol"
-import {AssociationType, Cardinality, Type, ValueType} from "../../src/api/common/EntityConstants"
-import type {BootstrapFeatureTypeEnum, PaymentMethodTypeEnum} from "../../src/api/common/TutanotaConstans"
-import type {Theme} from "../../src/gui/theme"
-import {Country} from "../../src/api/common/CountryList"
-import type {MoreResultsIndexEntry} from "../../src/api/worker/search/SearchTypes"
 // see https://bitwiseshiftleft.github.io/sjcl/doc/symbols/sjcl.bitArray.html
 
 // type that is used by sjcl for any encryption/decryption operation
@@ -49,96 +43,25 @@ type PublicKey = {
 	publicExponent: number,
 }
 
+/** Requests from main web thread to worker */
 type WorkerRequestType = 'setup'
 	| 'generateSignupKeys'
-	| 'signup'
-	| 'createSession'
-	| 'createExternalSession'
-	| 'loadExternalPasswordChannels'
-	| 'sendExternalPasswordSms'
 	| 'reset'
-	| 'resumeSession'
 	| 'testEcho'
 	| 'testError'
-	| 'deleteSession'
 	| 'restRequest'
 	| 'entityRequest'
 	| 'serviceRequest'
-	| 'createMailFolder'
-	| 'readAvailableCustomerStorage'
-	| 'readUsedCustomerStorage'
-	| 'createMailDraft'
-	| 'updateMailDraft'
-	| 'sendMailDraft'
-	| 'downloadFileContent'
 	| 'entropy'
 	| 'tryReconnectEventBus'
-	| 'changePassword'
-	| 'deleteAccount'
-	| 'setMailAliasStatus'
-	| 'addMailAlias'
-	| 'isMailAddressAvailable'
-	| 'getAliasCounters'
-	| 'changeUserPassword'
-	| 'changeAdminFlag'
-	| 'readUsedUserStorage'
-	| 'deleteUser'
-	| 'getPrice'
-	| 'getCurrentPrice'
-	| 'loadCustomerServerProperties'
-	| 'addSpamRule'
-	| 'createUser'
-	| 'readUsedGroupStorage'
-	| 'createMailGroup'
-	| 'createLocalAdminGroup'
-	| 'addUserToGroup'
-	| 'removeUserFromGroup'
-	| 'deactivateGroup'
-	| 'loadContactFormByPath'
-	| 'addDomain'
-	| 'removeDomain'
-	| 'setCatchAllGroup'
-	| 'uploadCertificate'
-	| 'deleteCertificate'
-	| 'createContactFormUserGroupData'
-	| 'createContactFormUser'
-	| 'generateTotpCode'
-	| 'generateTotpSecret'
-	| 'search'
-	| 'enableMailIndexing'
-	| 'disableMailIndexing'
-	| 'cancelMailIndexing'
-	| 'updateAdminship'
-	| 'switchFreeToPremiumGroup'
-	| 'switchPremiumToFreeGroup'
-	| 'updatePaymentData'
-	| 'downloadInvoice'
-	| 'generateSsePushIdentifer'
-	| 'decryptUserPassword'
 	| 'closeEventBus'
-	| 'readCounterValue'
-	| 'getMoreSearchResults'
-	| 'cancelCreateSession'
-	| 'getRecoveryCode'
-	| 'createRecoveryCode'
-	| 'recoverLogin'
-	| 'resetSecondFactors'
-	| 'extendMailIndex'
-	| 'resetSession'
-	| 'downloadFileContentNative'
-	| 'createCalendarEvent'
-	| 'updateCalendarEvent'
 	| 'resolveSessionKey'
-	| 'addCalendar'
-	| 'scheduleAlarmsForNewDevice'
-	| 'loadAlarmEvents'
-	| 'getDomainValidationRecord'
-	| 'visibilityChange'
 	| 'getLog'
-	| 'acceptGroupInvitation'
-	| 'rejectGroupInvitation'
-	| 'editSpamRule'
-	| 'checkMailForPhishing'
+	| 'urlify'
+	| 'generateSsePushIdentifer'
+	| 'facade'
+
+/** Requests from worker web thread to main web thread */
 type MainRequestType = 'execNative'
 	| 'entityEvent'
 	| 'error'
@@ -146,9 +69,13 @@ type MainRequestType = 'execNative'
 	| 'updateIndexState'
 	| 'updateWebSocketState'
 	| 'counterUpdate'
+	| 'updateLeaderStatus'
 	| 'infoMessage'
-	| 'phishingMarkers'
+	| 'createProgressMonitor'
+	| 'progressWorkDone'
+	| 'writeIndexerDebugLog'
 
+/** Requests from web to native */
 type NativeRequestType = 'init'
 	| 'generateRsaKey'
 	| 'rsaEncrypt'
@@ -167,12 +94,12 @@ type NativeRequestType = 'init'
 	| 'findSuggestions'
 	| 'initPushNotifications'
 	| 'openLink'
+	| 'shareText'
 	| 'reload'
 	| 'getPushIdentifier'
 	| 'storePushIdentifierLocally'
 	| 'closePushNotifications'
-	| 'readFile'
-	| 'changeTheme'
+	| 'readDataFile'
 	| 'saveBlob'
 	| 'putFileIntoDownloads'
 	| 'findInPage'
@@ -180,26 +107,36 @@ type NativeRequestType = 'init'
 	| 'registerMailto'
 	| 'unregisterMailto'
 	| 'openNewWindow'
-	| 'showWindow'
-	| 'sendDesktopConfig'
-	| 'updateDesktopConfig'
+	| 'setConfigValue'
 	| 'enableAutoLaunch'
 	| 'disableAutoLaunch'
 	| 'sendSocketMessage'
 	| 'getDeviceLog' // for mobile apps
 	| 'getLog' // for desktop
 	| 'sendGroupInvitation'
-	| 'calendarInvitationProgress_msg'
 	| 'shareGroup'
-	| 'sendGroupInvitation'
 	| 'integrateDesktop'
 	| 'unIntegrateDesktop'
 	| 'unscheduleAlarms'
 	| 'setSearchOverlayState'
-	| 'closeApp'
-	| 'unload' // desktop
+	| 'changeLanguage'
+	| 'isUpdateAvailable' // check if update is ready to install
+	| 'manualUpdate' // progress update process (check, dl, install)
+	| 'startNativeDrag'
+	| 'mailToMsg'
+	| 'focusApplicationWindow'
+	| 'saveToExportDir'
+	| 'checkFileExistsInExportDirectory'
+	| 'scheduleAlarms'
+	| 'getConfigValue'
+	| 'getIntegrationInfo'
+	| 'getSpellcheckLanguages'
+	| 'getSelectedTheme'
+	| 'setSelectedTheme'
+	| 'getThemes'
+	| 'setThemes'
 
-
+/** Requests from native to web */
 type JsRequestType = 'createMailEditor'
 	| 'handleBackPress'
 	| 'showAlertDialog'
@@ -213,98 +150,45 @@ type JsRequestType = 'createMailEditor'
 	| 'invalidateAlarms'
 	| 'applySearchResultToOverlay'
 	| 'addShortcuts'
-
-type WebContentsMessage
-	= 'setup-context-menu'
-	| 'open-context-menu'
-	| 'set-zoom-factor'
+	| 'appUpdateDownloaded'
+	| 'openCustomer' // only for admin clients
+	| 'updateTargetUrl'
+	| 'showSpellcheckDropdown'
 
 type Callback<T> = (err: ?Error, data?: T) => void
-type Command = (msg: Request) => Promise<any>
 
-
-// EntityConstants
-type TypeEnum = $Keys<typeof Type>;
-type AssociationTypeEnum = $Keys<typeof AssociationType>;
-type CardinalityEnum = $Keys<typeof Cardinality>;
-type ValueTypeEnum = $Keys<typeof ValueType>;
-
-type TypeModel = {
-	id: number,
-	app: string,
-	version: string,
-	name: string,
-	type: TypeEnum,
-	versioned: boolean,
-	encrypted: boolean,
-	rootId: string,
-	values: {[key: string]: ModelValue},
-	associations: {[key: string]: ModelAssociation}
-}
-
-type ModelValue = {
-	id: number,
-	name: string,
-	type: ValueTypeEnum,
-	cardinality: CardinalityEnum,
-	final: boolean,
-	encrypted: boolean
-}
-
-type ModelAssociation = {
-	id: number,
-	type: AssociationTypeEnum,
-	cardinality: CardinalityEnum,
-	refType: string
-}
+type EnvMode = "Browser" | "App" | "Test" | "Playground" | "Desktop" | "Admin"
 
 type EnvType = {
 	staticUrl: ?string, // if null the url from the browser is used
-	mode: "Browser" | "App" | "Test" | "Playground",
+	mode: EnvMode,
 	platformId: ?"ios" | ?"android" | ?"darwin" | ?"linux" | ?"win32",
 	dist: boolean,
 	versionNumber: string,
 	timeout: number,
-	rootPathPrefix: string,
-	adminTypes: string[],
-	systemConfig: any
+	systemConfig: any,
 }
 
 declare var env: EnvType
 
-type WhitelabelCustomizations = {
-	theme: ?Theme,
-	bootstrapCustomizations: BootstrapFeatureTypeEnum[],
-	germanLanguageCode: string,
-	registrationDomains: ?string[],
-	imprintUrl: ?string,
-	privacyStatementUrl: ?string,
-}
-
-declare var whitelabelCustomizations: ?WhitelabelCustomizations
-
+/** Data obtained after logging in. */
 type Credentials = {
-	mailAddress: string,
-	encryptedPassword: ?Base64, // only set for persistent sessions
+	/**
+	 * Identifier which we use for logging in.
+	 * Email address used to log in for internal users, userId for external users.
+	 * */
+	login: string,
+	/** Session#accessKey encrypted password. Is set when session is persisted. */
+	encryptedPassword: ?Base64,
 	accessToken: Base64Url,
-	userId: Id
+	userId: Id,
+	type: "internal" | "external",
 }
 
 declare function browser(f: Function): Function
 
 declare function node(f: Function): Function
 
-type RecipientInfoTypeEnum = 'unknown' | 'internal' | 'external'
-
-type RecipientInfoName = 'RecipientInfo'
-type RecipientInfo = {
-	_type: RecipientInfoName,
-	type: RecipientInfoTypeEnum,
-	mailAddress: string,
-	name: string, // empty string if no name is available
-	contact: ?Contact, // The resolved contact or a new contact instance with the given email address and name. A new contact is used to store a shared password if applicable. Null if no contact shall be resolved.
-	resolveContactPromise: ?Promise<?Contact> // Null if resolving contact is finished
-}
 
 type DataFile = {
 	+_type: 'DataFile',
@@ -328,53 +212,6 @@ type FileReference = {
 type KeyListener = {
 	modifier: number,
 	callback: Function
-}
-
-type SearchRestriction = {
-	type: TypeRef<any>;
-	start: ?number; // timestamp
-	end: ?number; // timestamp
-	field: ?string; // must be kept in sync with attributeIds
-	attributeIds: ?number[]; // must be kept in sync with field
-	listId: ?Id;
-}
-
-type SearchResult = {
-	query: string,
-	restriction: SearchRestriction,
-	results: IdTuple[];
-	currentIndexTimestamp: number;
-	moreResults: Array<MoreResultsIndexEntry>,
-	lastReadSearchIndexRow: Array<[string, ?number]>; // array of pairs (token, lastReadSearchIndexRowOldestElementTimestamp) lastRowReadSearchIndexRow: null = no result read, 0 = no more search results????
-	matchWordOrder: boolean;
-}
-
-type SearchIndexStateInfo = {
-	initializing: boolean;
-	mailIndexEnabled: boolean;
-	progress: number;
-	currentMailIndexTimestamp: number;
-	indexedMailCount: number;
-	failedIndexingUpTo: ?number;
-}
-
-type CreditCardData = {
-	number: string,
-	cvv: string,
-	expirationDate: string
-}
-
-type PayPalData = {
-	account: string
-}
-type InvoiceData = {
-	invoiceAddress: string;
-	country: ?Country;
-	vatNumber: string; // only for EU countries otherwise empty
-}
-type PaymentData = {
-	paymentMethod: PaymentMethodTypeEnum;
-	creditCardData: ?CreditCard;
 }
 
 type WsConnectionState = "connecting" | "connected" | "terminated"

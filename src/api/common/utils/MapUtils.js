@@ -1,4 +1,5 @@
 //@flow
+//@bundleInto:common-min
 import {neverNull} from "./Utils"
 
 /**
@@ -26,4 +27,17 @@ export function getFromMap<K, V>(map: Map<K, V>, key: K, byDefault: () => V): V 
 	}
 
 	return value
+}
+
+/** Creates a new map with key and value added to {@param map}. It is like set() but for immutable map. */
+export function addMapEntry<K, V>(map: $ReadOnlyMap<K, V>, key: K, value: V): Map<K, V> {
+	const newMap = new Map(map)
+	newMap.set(key, value)
+	return newMap
+}
+
+export function deleteMapEntry<K, V>(map: $ReadOnlyMap<K, V>, key: K): Map<K, V> {
+	const newMap = new Map(map)
+	newMap.delete(key)
+	return newMap
 }

@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {AttachmentKeyData} from "./AttachmentKeyData"
 import type {InternalRecipientKeyData} from "./InternalRecipientKeyData"
@@ -17,54 +19,49 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 548,
-			"since": 11,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"bucketEncMailSessionKey": {
-			"name": "bucketEncMailSessionKey",
 			"id": 551,
-			"since": 11,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
+		"calendarMethod": {
+			"id": 1117,
+			"type": "Boolean",
+			"cardinality": "One",
+			"final": false,
+			"encrypted": false
+		},
 		"language": {
-			"name": "language",
 			"id": 549,
-			"since": 11,
 			"type": "String",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"mailSessionKey": {
-			"name": "mailSessionKey",
 			"id": 550,
-			"since": 11,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"plaintext": {
-			"name": "plaintext",
 			"id": 675,
-			"since": 18,
 			"type": "Boolean",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"senderNameUnencrypted": {
-			"name": "senderNameUnencrypted",
 			"id": 552,
-			"since": 11,
 			"type": "String",
 			"cardinality": "ZeroOrOne",
 			"final": true,
@@ -73,45 +70,39 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"attachmentKeyData": {
-			"name": "attachmentKeyData",
 			"id": 555,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": true,
 			"refType": "AttachmentKeyData",
-			"final": true
+			"dependency": null
 		},
 		"internalRecipientKeyData": {
-			"name": "internalRecipientKeyData",
 			"id": 553,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": true,
 			"refType": "InternalRecipientKeyData",
-			"final": true
+			"dependency": null
 		},
 		"secureExternalRecipientKeyData": {
-			"name": "secureExternalRecipientKeyData",
 			"id": 554,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": true,
 			"refType": "SecureExternalRecipientKeyData",
-			"final": true
+			"dependency": null
 		},
 		"mail": {
-			"name": "mail",
 			"id": 556,
-			"since": 11,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "Mail",
 			"final": true,
-			"external": false
+			"refType": "Mail"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createSendDraftData(values?: $Shape<$Exact<SendDraftData>>): SendDraftData {
@@ -123,6 +114,7 @@ export type SendDraftData = {
 
 	_format: NumberString;
 	bucketEncMailSessionKey: ?Uint8Array;
+	calendarMethod: boolean;
 	language: string;
 	mailSessionKey: ?Uint8Array;
 	plaintext: boolean;

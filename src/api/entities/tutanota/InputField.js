@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {Name} from "./Name"
 
@@ -15,27 +17,21 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 729,
-			"since": 19,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"name": {
-			"name": "name",
 			"id": 730,
-			"since": 19,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"type": {
-			"name": "type",
 			"id": 731,
-			"since": 19,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -44,17 +40,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"enumValues": {
-			"name": "enumValues",
 			"id": 732,
-			"since": 19,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "Name",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createInputField(values?: $Shape<$Exact<InputField>>): InputField {

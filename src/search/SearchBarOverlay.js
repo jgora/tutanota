@@ -10,23 +10,24 @@ import {isEmpty} from "../api/common/utils/ArrayUtils"
 import {logins} from "../api/main/LoginController"
 import {FULL_INDEXED_TIMESTAMP} from "../api/common/TutanotaConstants"
 import {formatDate, formatDateTimeFromYesterdayOn, formatDateWithMonth} from "../misc/Formatter"
-import {isSameTypeRef} from "../api/common/EntityFunctions"
+import type {Mail} from "../api/entities/tutanota/Mail"
 import {MailTypeRef} from "../api/entities/tutanota/Mail"
-import {getMailFolderIcon, getSenderOrRecipientHeading, isTutanotaTeamMail} from "../mail/MailUtils"
+import {getSenderOrRecipientHeading, isTutanotaTeamMail} from "../mail/model/MailUtils"
 import Badge from "../gui/base/Badge"
 import {Icon} from "../gui/base/Icon"
+import type {Contact} from "../api/entities/tutanota/Contact"
 import {ContactTypeRef} from "../api/entities/tutanota/Contact"
+import type {GroupInfo} from "../api/entities/sys/GroupInfo"
 import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
 import {BootIcons} from "../gui/base/icons/BootIcons"
+import type {WhitelabelChild} from "../api/entities/sys/WhitelabelChild"
 import {WhitelabelChildTypeRef} from "../api/entities/sys/WhitelabelChild"
 import {client} from "../misc/ClientDetector"
 import m from "mithril"
 import {theme} from "../gui/theme"
-import {getContactListName} from "../contacts/ContactUtils.js"
-import type {Mail} from "../api/entities/tutanota/Mail"
-import type {Contact} from "../api/entities/tutanota/Contact"
-import type {GroupInfo} from "../api/entities/sys/GroupInfo"
-import type {WhitelabelChild} from "../api/entities/sys/WhitelabelChild"
+import {getContactListName} from "../contacts/model/ContactUtils.js"
+import {getMailFolderIcon} from "../mail/view/MailGuiUtils";
+import {isSameTypeRef, TypeRef} from "../api/common/utils/TypeRef";
 
 type SearchBarOverlayAttrs = {
 	state: SearchBarState,
@@ -38,7 +39,7 @@ type SearchBarOverlayAttrs = {
 }
 
 export class SearchBarOverlay implements MComponent<SearchBarOverlayAttrs> {
-	view({attrs}: Vnode<SearchBarOverlayAttrs>) {
+	view({attrs}: Vnode<SearchBarOverlayAttrs>): Children {
 		const {state} = attrs
 		return [
 			this._renderIndexingStatus(state, attrs),
@@ -48,7 +49,7 @@ export class SearchBarOverlay implements MComponent<SearchBarOverlayAttrs> {
 		]
 	}
 
-	renderResults(state: SearchBarState, attrs: SearchBarOverlayAttrs) {
+	renderResults(state: SearchBarState, attrs: SearchBarOverlayAttrs): Children {
 		return m("ul.list.click.mail-list", [
 			state.entities.map((result) => {
 				return m("li.plr-l.flex-v-center.", {
@@ -78,7 +79,7 @@ export class SearchBarOverlay implements MComponent<SearchBarOverlayAttrs> {
 		}
 	}
 
-	_renderProgress(state: SearchBarState, attrs: SearchBarOverlayAttrs) {
+	_renderProgress(state: SearchBarState, attrs: SearchBarOverlayAttrs): Children {
 		return m(".flex.col.rel", [
 			m(".plr-l.pt-s.pb-s.flex.items-center.flex-space-between.mr-negative-s", {
 				style: {
@@ -94,7 +95,7 @@ export class SearchBarOverlay implements MComponent<SearchBarOverlayAttrs> {
 				state.indexState.progress !== 100
 					? m("div", {onmousedown: e => attrs.skipNextBlur(true)}, m(ButtonN, {
 						label: "cancel_action",
-						click: () => worker.cancelMailIndexing(),
+						click: () => worker.indexerFacade.cancelMailIndexing(),
 						//icon: () => Icons.Cancel
 						type: ButtonType.Secondary
 					}))
@@ -111,7 +112,7 @@ export class SearchBarOverlay implements MComponent<SearchBarOverlayAttrs> {
 		])
 	}
 
-	_renderError(failedIndexingUpTo: number, attrs: SearchBarOverlayAttrs) {
+	_renderError(failedIndexingUpTo: number, attrs: SearchBarOverlayAttrs): Children {
 		return m(".flex.rel", [
 			m(".plr-l.pt-s.pb-s.flex.items-center.flex-space-between.mr-negative-s", {
 				style: {
@@ -122,15 +123,15 @@ export class SearchBarOverlay implements MComponent<SearchBarOverlayAttrs> {
 				m(".small", lang.get("indexing_error")),
 				m("div", {onmousedown: e => attrs.skipNextBlur(true)}, m(ButtonN, {
 					label: "retry_action",
-					click: () => worker.extendMailIndex(failedIndexingUpTo),
+					click: () => worker.indexerFacade.extendMailIndex(failedIndexingUpTo),
 					type: ButtonType.Secondary
 				}))
 			]),
 		])
 	}
 
-	renderResult(state: SearchBarState, result: Entry) {
-		let type: ?TypeRef = result._type ? result._type : null
+	renderResult(state: SearchBarState, result: Entry): Children {
+		let type: ?TypeRef<*> = result._type ? result._type : null
 		if (!type) { // show more action
 			let showMoreAction = ((result: any): ShowMoreAction)
 			let infoText
@@ -231,6 +232,8 @@ export class SearchBarOverlay implements MComponent<SearchBarOverlayAttrs> {
 					])
 				])
 			]
+		} else {
+			return []
 		}
 	}
 }

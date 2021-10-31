@@ -2,14 +2,13 @@
 import m from "mithril"
 import {List} from "../gui/base/List"
 import {load, loadAll} from "../api/main/Entity"
-import {GENERATED_MAX_ID} from "../api/common/EntityFunctions"
-import {assertMainOrNode} from "../api/Env"
+import {assertMainOrNode} from "../api/common/Env"
 import {lang} from "../misc/LanguageViewModel"
 import {NotFoundError} from "../api/common/error/RestError"
 import {size} from "../gui/size"
 import {CustomerTypeRef} from "../api/entities/sys/Customer"
-import {neverNull} from "../api/common/utils/Utils"
-import {SettingsView} from "./SettingsView"
+import {neverNull, noOp} from "../api/common/utils/Utils"
+import type {SettingsView} from "./SettingsView"
 import {LazyLoaded} from "../api/common/utils/LazyLoaded"
 import {logins} from "../api/main/LoginController"
 import {Icon} from "../gui/base/Icon"
@@ -21,6 +20,8 @@ import {WhitelabelChildViewer} from "./WhitelabelChildViewer"
 import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
 import type {WhitelabelChild} from "../api/entities/sys/WhitelabelChild"
+import {GENERATED_MAX_ID} from "../api/common/utils/EntityUtils";
+import {ofClass, promiseMap} from "../api/common/utils/PromiseUtils"
 
 assertMainOrNode()
 
@@ -68,9 +69,9 @@ export class WhitelabelChildrenListView {
 			loadSingle: (elementId) => {
 				return this._listId.getAsync().then(listId => {
 					if (listId) {
-						return load(WhitelabelChildTypeRef, [listId, elementId]).catch(NotFoundError, (e) => {
+						return load(WhitelabelChildTypeRef, [listId, elementId]).catch(ofClass(NotFoundError, (e) => {
 							// we return null if the entity does not exist
-						})
+						}))
 					} else {
 						return null
 					}
@@ -88,7 +89,6 @@ export class WhitelabelChildrenListView {
 				swipeLeft: (listElement) => Promise.resolve(),
 				swipeRight: (listElement) => Promise.resolve(),
 			}: any),
-			elementsDraggable: false,
 			multiSelectionAllowed: false,
 			emptyMessage: lang.get("noEntries_msg")
 		})
@@ -129,12 +129,12 @@ export class WhitelabelChildrenListView {
 		}
 	}
 
-	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>): void {
-		for (let update of updates) {
+	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>): Promise<void> {
+		return promiseMap(updates, update => {
 			if (isUpdateForTypeRef(WhitelabelChildTypeRef, update) && this._listId.getSync() === update.instanceListId) {
-				this.list.entityEventReceived(update.instanceId, update.operation)
+				return this.list.entityEventReceived(update.instanceId, update.operation)
 			}
-		}
+		}).then(noOp)
 	}
 }
 

@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const UserDataDeleteTypeRef: TypeRef<UserDataDelete> = new TypeRef("sys", "UserDataDelete")
@@ -14,27 +16,21 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 405,
-			"since": 1,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"date": {
-			"name": "date",
 			"id": 879,
-			"since": 9,
 			"type": "Date",
 			"cardinality": "ZeroOrOne",
 			"final": false,
 			"encrypted": false
 		},
 		"restore": {
-			"name": "restore",
 			"id": 406,
-			"since": 1,
 			"type": "Boolean",
 			"cardinality": "One",
 			"final": false,
@@ -43,18 +39,15 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"user": {
-			"name": "user",
 			"id": 407,
-			"since": 1,
 			"type": "ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "User",
 			"final": false,
-			"external": false
+			"refType": "User"
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createUserDataDelete(values?: $Shape<$Exact<UserDataDelete>>): UserDataDelete {

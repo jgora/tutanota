@@ -1,5 +1,6 @@
 // @flow
 import {neverNull} from "./Utils"
+import type {lazyAsync} from "./Utils"
 
 /**
  * A wrapper for an object that shall be lazy loaded asynchronously. If loading the object is triggered in parallel (getAsync()) the object is actually only loaded once but returned to all calls of getAsync().
@@ -7,6 +8,7 @@ import {neverNull} from "./Utils"
  */
 export class LazyLoaded<T> {
 
+	_isLoaded: boolean
 	_loadingPromise: ?Promise<T>; // null if loading is not started yet
 	_loadedObject: ?T;
 	_loadFunction: lazyAsync<T>;
@@ -16,13 +18,19 @@ export class LazyLoaded<T> {
 	 * @param defaultValue The value that shall be returned by getSync() or getLoaded() as long as the object is not loaded yet.
 	 */
 	constructor(loadFunction: lazyAsync<T>, defaultValue: ?T) {
+		this._isLoaded = false
 		this._loadFunction = loadFunction
 		this._loadingPromise = null
 		this._loadedObject = defaultValue
 	}
 
+	load(): this {
+		this.getAsync()
+		return this
+	}
+
 	isLoaded(): boolean {
-		return this._loadingPromise != null && this._loadingPromise.isFulfilled()
+		return this._isLoaded
 	}
 
 	/**
@@ -35,6 +43,7 @@ export class LazyLoaded<T> {
 			if (!this._loadingPromise) {
 				this._loadingPromise = this._loadFunction().then(result => {
 					this._loadedObject = result
+					this._isLoaded = true
 					return result
 				})
 			}
@@ -60,6 +69,7 @@ export class LazyLoaded<T> {
 	 * Removes the currently loaded object, so it will be loaded again with the next getAsync() call. Does not set any default value.
 	 */
 	reset() {
+		this._isLoaded = false
 		this._loadingPromise = null
 		this._loadedObject = null
 	}
@@ -69,6 +79,7 @@ export class LazyLoaded<T> {
 	 */
 	reload(): Promise<T> {
 		return this._loadFunction().then(result => {
+			this._isLoaded = true
 			this._loadedObject = result
 			return result
 		})

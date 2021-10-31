@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const SharedGroupDataTypeRef: TypeRef<SharedGroupData> = new TypeRef("tutanota", "SharedGroupData")
@@ -14,81 +16,63 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 993,
-			"since": 38,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"bucketEncInvitationSessionKey": {
-			"name": "bucketEncInvitationSessionKey",
 			"id": 998,
-			"since": 38,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"capability": {
-			"name": "capability",
 			"id": 994,
-			"since": 38,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"sessionEncInviterName": {
-			"name": "sessionEncInviterName",
 			"id": 997,
-			"since": 38,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"sessionEncSharedGroupKey": {
-			"name": "sessionEncSharedGroupKey",
 			"id": 995,
-			"since": 38,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"sessionEncSharedGroupName": {
-			"name": "sessionEncSharedGroupName",
 			"id": 996,
-			"since": 38,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"sharedGroup": {
-			"name": "sharedGroup",
 			"id": 1001,
-			"since": 38,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"sharedGroupEncInviterGroupInfoKey": {
-			"name": "sharedGroupEncInviterGroupInfoKey",
 			"id": 999,
-			"since": 38,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"sharedGroupEncSharedGroupInfoKey": {
-			"name": "sharedGroupEncSharedGroupInfoKey",
 			"id": 1000,
-			"since": 38,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
@@ -97,7 +81,7 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createSharedGroupData(values?: $Shape<$Exact<SharedGroupData>>): SharedGroupData {

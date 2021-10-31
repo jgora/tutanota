@@ -1,17 +1,15 @@
 // @flow
 import m from "mithril"
-import {assertMainOrNodeBoot, isApp, isIOSApp, Mode} from "../api/Env"
+import {assertMainOrNodeBoot, isAdminClient, isApp, isDesktop, isIOSApp, Mode} from "../api/common/Env"
 import {lang} from "./LanguageViewModel"
 import type {WorkerClient} from "../api/main/WorkerClient"
-import {asyncImport} from "../api/common/utils/Utils"
-import {reloadNative} from "../native/SystemApp"
-import {nativeApp} from "../native/NativeWrapper";
 import {client} from "./ClientDetector"
 import {logins} from "../api/main/LoginController"
 
 assertMainOrNodeBoot()
 
 export type KeyboardSizeListener = (keyboardSize: number) => mixed;
+export type windowSizeListener = (width: number, height: number) => mixed
 
 class WindowFacade {
 	_windowSizeListeners: windowSizeListener[];
@@ -21,7 +19,7 @@ class WindowFacade {
 	_historyStateEventListeners: Array<(e: Event) => boolean> = [];
 	_worker: WorkerClient;
 	// following two properties are for the iOS
-	_keyboardSize = 0;
+	_keyboardSize: number = 0;
 	_keyboardSizeListeners: KeyboardSizeListener[] = [];
 	_ignoreNextPopstate: boolean = false;
 
@@ -30,14 +28,17 @@ class WindowFacade {
 		this.resizeTimeout = null
 		this.windowCloseConfirmation = false
 		this._windowCloseListeners = new Set()
-		this.init()
-		asyncImport(typeof module !== "undefined" ? module.id : __moduleName,
-			`${env.rootPathPrefix}src/api/main/WorkerClient.js`)
-			.then(module => {
+		import("../api/main/MainLocator")
+			.then(locatorModule => locatorModule.locator.initializedWorker)
+			.then(worker => {
 				// load async to reduce size of boot bundle
-				this._worker = module.worker
-				return nativeApp.initialized()
-			}).then(() => this.addPageInBackgroundListener())
+				this._worker = worker
+				if (env.mode === Mode.App || env.mode === Mode.Desktop || env.mode === Mode.Admin) {
+					return import("../native/common/NativeWrapper").then(({nativeApp}) => {
+						return nativeApp.initialized().then(() => this.addPageInBackgroundListener())
+					})
+				}
+			})
 	}
 
 	/**
@@ -80,7 +81,7 @@ class WindowFacade {
 		}
 	}
 
-	openLink(href: string): window {
+	openLink(href: string): typeof window {
 		if (env.mode === Mode.App) {
 			return window.open(href, "_system");
 		} else {
@@ -107,6 +108,23 @@ class WindowFacade {
 			window.addEventListener("popstate", e => this._popState(e))
 			window.addEventListener("unload", e => this._onUnload())
 		}
+
+
+		// needed to help the MacOs desktop client to distinguish between Cmd+Arrow to navigate the history
+		// and Cmd+Arrow to navigate a text editor
+		if (env.mode === Mode.Desktop && client.isMacOS && window.addEventListener) {
+			window.addEventListener('keydown', e => {
+				if (!e.metaKey || e.key === 'Meta') return
+				// prevent history nav if the active element is an input / squire editor
+				if (e.target && (e.target.tagName === "INPUT" || e.target.contentEditable === 'true')) {
+					e.stopPropagation()
+				} else if (e.key === 'ArrowLeft') {
+					window.history.back()
+				} else if (e.key === 'ArrowRight') {
+					window.history.forward()
+				}
+			})
+		}
 	}
 
 	_resize() {
@@ -123,7 +141,7 @@ class WindowFacade {
 		this.windowCloseConfirmation = enable
 	}
 
-	_beforeUnload(e: any) { // BeforeUnloadEvent
+	_beforeUnload(e: any): ?string { // BeforeUnloadEvent
 		console.log("windowfacade._beforeUnload")
 		this._notifyCloseListeners(e)
 		if (this.windowCloseConfirmation) {
@@ -187,13 +205,16 @@ class WindowFacade {
 		window.addEventListener("offline", listener)
 	}
 
-	reload(args: {[string]: any}) {
-		if (isApp()) {
+	reload(args: {[string]: QueryValue}) {
+		if (isApp() || isDesktop() || isAdminClient()) {
 			if (!args.hasOwnProperty("noAutoLogin")) {
 				args.noAutoLogin = true
 			}
-			let newQueryString = m.buildQueryString(args)
-			reloadNative(newQueryString.length > 0 ? "?" + newQueryString : "")
+			// Convert all values to strings so that native has easier time dealing with it
+			const preparedArgs = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, String(v)]))
+			import("../native/main/SystemApp").then(({reloadNative}) =>
+				reloadNative(preparedArgs)
+			)
 		} else {
 			window.location.reload();
 		}
@@ -207,7 +228,7 @@ class WindowFacade {
 			document.addEventListener("visibilitychange", () => {
 				console.log("Visibility change, hidden: ", document.hidden)
 
-				this._worker.notifyVisiblityChange(!document.hidden)
+				this._worker.indexerFacade.onVisibilityChanged(!document.hidden)
 				if (!document.hidden) {
 					// On iOS devices the WebSocket close event fires when the app comes back to foreground
 					// so we try to reconnect with a delay to receive _close event first. Otherwise

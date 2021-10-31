@@ -1,12 +1,7 @@
 // @flow
 import type {Contact} from "../api/entities/tutanota/Contact"
-import {ContactTypeRef} from "../api/entities/tutanota/Contact"
-import {assertMainOrNode} from "../api/Env"
-import {showProgressDialog} from "../gui/base/ProgressDialog"
-import {createDataFile} from "../api/common/DataFile"
-import {LazyContactListId} from "../contacts/ContactUtils"
-import {loadAll} from "../api/main/Entity"
-import {Dialog} from "../gui/base/Dialog"
+import {assertMainOrNode} from "../api/common/Env"
+import {convertToDataFile} from "../api/common/DataFile"
 import {createFile} from "../api/entities/tutanota/File"
 import {stringToUtf8Uint8Array} from "../api/common/utils/Encoding"
 import {fileController} from "../file/FileController"
@@ -18,27 +13,6 @@ import type {ContactSocialId} from "../api/entities/tutanota/ContactSocialId"
 
 assertMainOrNode()
 
-/**
- *Creates a vCard file with all contacts if at least one contact exists
- */
-export function exportAsVCard(): Promise<void> {
-	return showProgressDialog("pleaseWait_msg",
-		LazyContactListId.getAsync().then(contactListId => {
-			return loadAll(ContactTypeRef, contactListId).then((allContacts) => {
-				if (allContacts.length === 0) {
-					return 0
-				} else {
-					return exportContacts(allContacts).return(allContacts.length)
-				}
-			})
-		})
-	).then(nbrOfContacts => {
-		if (nbrOfContacts === 0) {
-			Dialog.error("noContacts_msg")
-		}
-	})
-}
-
 
 export function exportContacts(contacts: Contact[]): Promise<void> {
 	let vCardFile = contactsToVCard(contacts)
@@ -47,7 +21,7 @@ export function exportContacts(contacts: Contact[]): Promise<void> {
 	tmpFile.name = "vCard3.0.vcf"
 	tmpFile.mimeType = "vCard/rfc2426"
 	tmpFile.size = String(data.byteLength)
-	return fileController.open(createDataFile(tmpFile, data))
+	return fileController.open(convertToDataFile(tmpFile, data))
 }
 
 /**

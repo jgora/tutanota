@@ -1,15 +1,13 @@
 // @flow
 import {remove} from "../common/utils/ArrayUtils"
-import {assertMainOrNode} from "../Env"
+import {assertMainOrNode} from "../common/Env"
 import type {LoginController} from "./LoginController"
 import type {OperationTypeEnum} from "../common/TutanotaConstants"
-import {PhishingMarkerStatus} from "../common/TutanotaConstants"
-import {isSameTypeRefByAttr} from "../common/EntityFunctions"
 import stream from "mithril/stream/stream.js"
-import {downcast, identity} from "../common/utils/Utils"
+import {downcast, identity, noOp} from "../common/utils/Utils"
 import type {WebsocketCounterData} from "../entities/sys/WebsocketCounterData"
 import type {EntityUpdate} from "../entities/sys/EntityUpdate"
-import type {PhishingMarkerWebsocketData} from "../entities/tutanota/PhishingMarkerWebsocketData"
+import {isSameTypeRefByAttr, TypeRef} from "../common/utils/TypeRef";
 
 assertMainOrNode()
 
@@ -21,7 +19,7 @@ export type EntityUpdateData = {
 	operation: OperationTypeEnum
 }
 
-export type EntityEventsListener = ($ReadOnlyArray<EntityUpdateData>, eventOwnerGroupId: Id) => mixed;
+export type EntityEventsListener = (updates: $ReadOnlyArray<EntityUpdateData>, eventOwnerGroupId: Id) => Promise<*>;
 
 export const isUpdateForTypeRef = <T>(typeRef: TypeRef<T>, update: EntityUpdateData): boolean => isSameTypeRefByAttr(typeRef, update.application, update.type)
 
@@ -29,13 +27,11 @@ export class EventController {
 	_countersStream: Stream<WebsocketCounterData>;
 	_entityListeners: Array<EntityEventsListener>;
 	_logins: LoginController;
-	_phishingMarkers: Set<string>;
 
 	constructor(logins: LoginController) {
 		this._logins = logins
 		this._countersStream = stream()
 		this._entityListeners = []
-		this._phishingMarkers = new Set()
 	}
 
 	addEntityListener(listener: EntityEventsListener) {
@@ -51,36 +47,23 @@ export class EventController {
 		return this._countersStream.map(identity)
 	}
 
-	phishingMarkers(): Set<string> {
-		return this._phishingMarkers
-	}
-
-	notificationReceived(entityUpdates: $ReadOnlyArray<EntityUpdate>, eventOwnerGroupId: Id) {
+	notificationReceived(entityUpdates: $ReadOnlyArray<EntityUpdate>, eventOwnerGroupId: Id): Promise<void> {
 		let loginsUpdates = Promise.resolve()
 		if (this._logins.isUserLoggedIn()) {
 			// the UserController must be notified first as other event receivers depend on it to be up-to-date
 			loginsUpdates = this._logins.getUserController().entityEventsReceived(entityUpdates, eventOwnerGroupId)
 		}
 
-		loginsUpdates.then(() => {
-			this._entityListeners.forEach(listener => {
+		return loginsUpdates.then(async () => {
+			// sequentially to prevent parallel loading of instances
+			for (const listener of this._entityListeners) {
 				let entityUpdatesData: Array<EntityUpdateData> = downcast(entityUpdates)
-				listener(entityUpdatesData, eventOwnerGroupId)
-			})
-		})
+				await listener(entityUpdatesData, eventOwnerGroupId)
+			}
+		}).then(noOp)
 	}
 
 	counterUpdateReceived(update: WebsocketCounterData) {
 		this._countersStream(update)
-	}
-
-	phishingMarkersUpdateReceived(update: PhishingMarkerWebsocketData) {
-		update.markers.forEach((marker) => {
-			if (marker.status === PhishingMarkerStatus.INACTIVE) {
-				this._phishingMarkers.delete(marker.marker)
-			} else {
-				this._phishingMarkers.add(marker.marker)
-			}
-		})
 	}
 }

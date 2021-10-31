@@ -9,8 +9,8 @@ import {PaymentMethodInput} from "./PaymentMethodInput"
 import {updatePaymentData} from "./InvoiceAndPaymentDataPage"
 import {px} from "../gui/size"
 import {formatNameAndAddress} from "../misc/Formatter"
-import {showProgressDialog} from "../gui/base/ProgressDialog"
-import {getPaymentMethodType, PaymentMethodType} from "../api/common/TutanotaConstants"
+import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
+import {getClientType, getPaymentMethodType, PaymentMethodType} from "../api/common/TutanotaConstants"
 import {LazyLoaded} from "../api/common/utils/LazyLoaded"
 import {serviceRequest} from "../api/main/Entity"
 import {PaymentDataServiceGetReturnTypeRef} from "../api/entities/sys/PaymentDataServiceGetReturn"
@@ -18,11 +18,13 @@ import {SysService} from "../api/entities/sys/Services"
 import {HttpMethod} from "../api/common/EntityFunctions"
 import {neverNull} from "../api/common/utils/Utils"
 import type {AccountingInfo} from "../api/entities/sys/AccountingInfo"
+import {createPaymentDataServiceGetData} from "../api/entities/sys/PaymentDataServiceGetData"
+import type {Customer} from "../api/entities/sys/Customer"
 
 /**
  * @returns {boolean} true if the payment data update was successful
  */
-export function show(accountingInfo: AccountingInfo): Promise<boolean> {
+export function show(customer: Customer, accountingInfo: AccountingInfo, price: number): Promise<boolean> {
 	let payPalRequestUrl = getLazyLoadedPayPalUrl()
 
 	let invoiceData = {
@@ -32,7 +34,7 @@ export function show(accountingInfo: AccountingInfo): Promise<boolean> {
 	}
 
 	const subscriptionOptions = {
-		businessUse: stream(accountingInfo.business),
+		businessUse: stream(neverNull(customer.businessUse)),
 		paymentInterval: stream(Number(accountingInfo.paymentInterval)),
 	}
 
@@ -63,19 +65,34 @@ export function show(accountingInfo: AccountingInfo): Promise<boolean> {
 	})
 
 
-	return Promise.fromCallback(cb => {
+	return new Promise(resolve => {
+		const didLinkPaypal = () => selectedPaymentMethod() === PaymentMethodType.Paypal && paymentMethodInput.isPaypalAssigned()
 		const confirmAction = () => {
 			let error = paymentMethodInput.validatePaymentData()
 			if (error) {
 				Dialog.error(error)
 			} else {
-				showProgressDialog("updatePaymentDataBusy_msg", updatePaymentData(subscriptionOptions, invoiceData, paymentMethodInput.getPaymentData(), invoiceData.country, false))
-					.then(success => {
-						if (success) {
-							dialog.close()
-							cb(null, true)
-						}
-					})
+				const finish = success => {
+					if (success) {
+						dialog.close()
+						resolve(true)
+					}
+				}
+				// updatePaymentData gets done when the big paypal button is clicked
+				if (didLinkPaypal()) {
+					finish(true)
+				} else {
+					showProgressDialog("updatePaymentDataBusy_msg",
+						updatePaymentData(
+							subscriptionOptions.paymentInterval(),
+							invoiceData,
+							paymentMethodInput.getPaymentData(),
+							invoiceData.country,
+							false,
+							price + "",
+							accountingInfo))
+						.then(finish)
+				}
 			}
 		}
 
@@ -88,16 +105,18 @@ export function show(accountingInfo: AccountingInfo): Promise<boolean> {
 				])
 			},
 			okAction: confirmAction,
-			allowCancel: true,
-			okActionTextId: "save_action",
-			cancelAction: () => cb(null, false)
+			// if they've just gone through the process of linking a paypal account, don't offer a cancel button
+			allowCancel: () => !didLinkPaypal(),
+			okActionTextId: () => didLinkPaypal() ? "close_alt" : "save_action",
+			cancelAction: () => resolve(false)
 		})
 	})
 }
 
 export function getLazyLoadedPayPalUrl(): LazyLoaded<string> {
 	return new LazyLoaded(() => {
-		return serviceRequest(SysService.PaymentDataService, HttpMethod.GET, null, PaymentDataServiceGetReturnTypeRef)
+		const clientType = getClientType()
+		return serviceRequest(SysService.PaymentDataService, HttpMethod.GET, createPaymentDataServiceGetData({clientType}), PaymentDataServiceGetReturnTypeRef)
 			.then((result) => {
 				return result.loginUrl
 			})

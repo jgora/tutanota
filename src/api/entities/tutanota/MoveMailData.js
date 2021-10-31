@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const MoveMailDataTypeRef: TypeRef<MoveMailData> = new TypeRef("tutanota", "MoveMailData")
@@ -14,9 +16,7 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 446,
-			"since": 7,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -25,28 +25,22 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"mails": {
-			"name": "mails",
 			"id": 448,
-			"since": 7,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "Any",
-			"refType": "Mail",
 			"final": false,
-			"external": false
+			"refType": "Mail"
 		},
 		"targetFolder": {
-			"name": "targetFolder",
 			"id": 447,
-			"since": 7,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "MailFolder",
 			"final": false,
-			"external": false
+			"refType": "MailFolder"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createMoveMailData(values?: $Shape<$Exact<MoveMailData>>): MoveMailData {

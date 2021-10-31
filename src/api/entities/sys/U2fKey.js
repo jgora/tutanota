@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const U2fKeyTypeRef: TypeRef<U2fKey> = new TypeRef("sys", "U2fKey")
@@ -14,27 +16,21 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 1179,
-			"since": 23,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"appId": {
-			"name": "appId",
 			"id": 1181,
-			"since": 23,
 			"type": "String",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"keyHandle": {
-			"name": "keyHandle",
 			"id": 1180,
-			"since": 23,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
@@ -43,18 +39,15 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"secondFactor": {
-			"name": "secondFactor",
 			"id": 1182,
-			"since": 23,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "SecondFactor",
 			"final": false,
-			"external": false
+			"refType": "SecondFactor"
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createU2fKey(values?: $Shape<$Exact<U2fKey>>): U2fKey {

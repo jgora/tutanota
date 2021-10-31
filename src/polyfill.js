@@ -1,16 +1,12 @@
-import "core-js/es6/symbol.js"
-import "core-js/es6/array.js"
-import "core-js/modules/es7.array.includes.js"
-import "core-js/es6/object.js"
-import "core-js/es6/string.js"
-import "core-js/es6/map.js"
-import "core-js/es6/set.js"
-import "core-js/modules/es7.object.values"
-import "core-js/modules/es7.object.entries"
+import "systemjs"
 
-// is used by helpers/update-libs.js to generate lib/polyfill.js
+const globalContext = (typeof window !== "undefined")
+	? window
+	: (typeof global !== "undefined")
+		? global
+		: self
 
-const noOp = () => {}
+const noOp = function () {}
 
 if (typeof performance === 'undefined') {
 	self.performance = {

@@ -1,3 +1,4 @@
+// @flow
 export const FontIcons = {
  "Reply": "\uf4c7",
  "Forward": "\uf499",

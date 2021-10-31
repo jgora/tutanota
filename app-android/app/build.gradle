@@ -1,16 +1,15 @@
 apply plugin: 'com.android.application'
 
 android {
-	compileSdkVersion 28
-	buildToolsVersion '28.0.3'
+	compileSdkVersion 31
+	buildToolsVersion '29.0.2'
 	defaultConfig {
 		applicationId "de.tutao.tutanota"
-		minSdkVersion 21
-		targetSdkVersion 28
-		versionCode 372000
-		versionName "3.72.0"
+		minSdkVersion 23
+		targetSdkVersion 30
+		versionCode 389050
+		versionName "3.89.5"
 		testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
-
 
 		javaCompileOptions {
 			annotationProcessorOptions {
@@ -18,35 +17,59 @@ android {
 			}
 		}
 	}
+	signingConfigs {
+		release {
+			// Provide non-empty placeholders because otherwise configuration will braek even in debug.
+			storeFile file(System.getenv("APK_SIGN_STORE") ?: 'EMPTY')
+			storePassword System.getenv("APK_SIGN_STORE_PASS" ?: 'EMPTY')
+			keyAlias System.getenv("APK_SIGN_ALIAS" ?: 'EMPTY')
+			keyPassword System.getenv("APK_SIGN_KEY_PASS" ?: 'EMPTY')
+
+			enableV1Signing = true
+			enableV2Signing = true
+		}
+	}
+	flavorDimensions 'releaseType'
+	productFlavors {
+		tutao {
+			signingConfig signingConfigs.release
+		}
+		fdroid {
+		}
+	}
 	buildTypes {
+		def distPath = "\"file:///android_asset/tutanota/dist/index-app.html\""
 		debug {
 			manifestPlaceholders = [contentProviderAuthority: 'de.tutao.fileprovider.debug']
-			buildConfigField 'String', 'RES_ADDRESS', "\"file:///android_asset/tutanota/app.html\""
+			buildConfigField 'String', 'RES_ADDRESS', "\"file:///android_asset/tutanota/index-app.html\""
 			applicationIdSuffix ".debug"
 		}
 		debugDist {
 			initWith debug
 			manifestPlaceholders = [contentProviderAuthority: 'de.tutao.fileprovider.debugdist']
-			buildConfigField 'String', 'RES_ADDRESS', "\"file:///android_asset/tutanota/dist/app.html\""
+			buildConfigField 'String', 'RES_ADDRESS', distPath
 			applicationIdSuffix ".debugdist"
 		}
 		releaseTest {
 			initWith release
+			minifyEnabled true
+			proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
 			manifestPlaceholders = [contentProviderAuthority: 'de.tutao.fileprovider.test']
-			buildConfigField 'String', 'RES_ADDRESS', "\"file:///android_asset/tutanota/dist/app.html\""
+			buildConfigField 'String', 'RES_ADDRESS', distPath
 			applicationIdSuffix ".test"
 		}
 		release {
 			minifyEnabled true
-			manifestPlaceholders = [contentProviderAuthority: 'de.tutao.fileprovider']
-			buildConfigField 'String', 'RES_ADDRESS', "\"file:///android_asset/tutanota/dist/app.html\""
 			proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+			manifestPlaceholders = [contentProviderAuthority: 'de.tutao.fileprovider']
+			buildConfigField 'String', 'RES_ADDRESS', distPath
 		}
 	}
 
 	applicationVariants.all { variant ->
 		variant.outputs.all { output ->
-			outputFileName = output.outputFileName.replace("app-release.apk", "tutanota-${variant.versionName}.apk")
+			def flavor = variant.productFlavors[0].name
+			outputFileName = "tutanota-$flavor-${variant.buildType.name}-${variant.versionName}.apk"
 		}
 	}
 
@@ -72,10 +95,6 @@ task copyResourcesToClasses(type: Copy) {
 
 preBuild.dependsOn copyResourcesToClasses
 
-//task unitTest(dependsOn: [copyResourcesToClasses, 'testDebugUnitTest']) {
-//
-//}
-
 tasks.withType(Test) {
 	testLogging {
 		exceptionFormat "full"
@@ -85,9 +104,10 @@ tasks.withType(Test) {
 }
 
 dependencies {
-	def room_version = "2.2.3"
-	def lifecycle_version = "2.2.0"
-	def appcompat_version = "1.1.0"
+	def room_version = "2.3.0"
+	def lifecycle_version = "2.3.1"
+	def activity_version = "1.3.1"
+
 
 	implementation fileTree(dir: 'libs', include: ['*.jar'])
 	androidTestImplementation('com.android.support.test.espresso:espresso-core:2.2.2', {
@@ -95,19 +115,18 @@ dependencies {
 	})
 	implementation 'commons-io:commons-io:2.5'
 	implementation 'org.jdeferred:jdeferred-core:1.2.4'
-	implementation 'androidx.core:core:1.1.0'
+	implementation 'androidx.core:core:1.6.0'
+	implementation "androidx.activity:activity:$activity_version"
 
 	implementation "androidx.room:room-runtime:$room_version"
-	annotationProcessor "androidx.room:room-compiler:$room_version" // For Kotlin use kapt instead of annotationProcessor
+	// For Kotlin use kapt instead of annotationProcessor
+	annotationProcessor "androidx.room:room-compiler:$room_version"
 
 	implementation "androidx.lifecycle:lifecycle-livedata:$lifecycle_version"
 
 
-
-
-
-	testImplementation 'junit:junit:4.12'
-	testImplementation "org.robolectric:robolectric:3.3.2"
+	testImplementation 'junit:junit:4.13.1'
+	testImplementation "org.robolectric:robolectric:4.6.1"
 	testImplementation "org.mockito:mockito-core:2.28.2"
 	androidTestImplementation 'org.codehaus.jackson:jackson-mapper-asl:1.9.2'
 }

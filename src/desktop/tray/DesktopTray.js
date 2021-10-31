@@ -1,51 +1,51 @@
 // @flow
 import type {NativeImage} from 'electron'
 import {app, Menu, MenuItem, nativeImage, Tray} from 'electron'
-import type {DesktopConfigHandler} from '../config/DesktopConfigHandler.js'
+import type {DesktopConfig} from '../config/DesktopConfig.js'
 import type {WindowManager} from "../DesktopWindowManager.js"
 import type {DesktopNotifier} from "../DesktopNotifier.js"
 import {lang} from "../../misc/LanguageViewModel"
+import {MacTray} from "./MacTray"
+import {NonMacTray} from "./NonMacTray"
+import {getResourcePath} from "../resources"
 
-let icon: NativeImage
-const platformTray: PlatformTray = process.platform === 'darwin'
-	? require('./PlatformDock')
-	: require('./PlatformTray')
-
-export type PlatformTray = {
-	setBadge: ()=>void,
-	clearBadge: ()=>void,
-	getTray: (WindowManager, NativeImage) => ?Tray,
-	getPlatformMenuItems: ()=>Array<MenuItem>,
-	attachMenuToTray: (Menu, ?Tray) => void,
-	iconPath: string => string,
-	needsWindowListInMenu: ()=>boolean
+export interface PlatformTray {
+	setBadge(): void,
+	clearBadge(): void,
+	getTray(WindowManager, NativeImage): ?Tray,
+	getPlatformMenuItems(): Array<MenuItem>,
+	attachMenuToTray(Menu, ?Tray): void,
+	getAppIconPathFromName(string): string,
+	needsWindowListInMenu(): boolean,
 }
 
+const platformTray: PlatformTray = (process.platform === 'darwin')
+	? new MacTray()
+	: new NonMacTray()
 
 export class DesktopTray {
-	_conf: DesktopConfigHandler;
+	+_conf: DesktopConfig;
 	_wm: WindowManager;
-	_notifier: DesktopNotifier;
-
 	_tray: ?Tray;
+	_icon: ?NativeImage
 
-	constructor(config: DesktopConfigHandler, notifier: DesktopNotifier) {
+	constructor(config: DesktopConfig) {
 		this._conf = config
-		this._notifier = notifier
-		this.getIcon()
+		this.getAppIcon()
 		app.on('will-quit', (e: Event) => {
 			if (this._tray) {
 				this._tray.destroy()
 				this._tray = null
 			}
-		}).on('ready', () => {
+		}).on('ready', async () => {
 			if (!this._wm) console.warn("Tray: No WM set before 'ready'!")
-			this._tray = platformTray.getTray(this._wm, this.getIcon())
+			this._tray = platformTray.getTray(this._wm, await this.getAppIcon())
 		})
 	}
 
-	update(): void {
-		if (!this._conf.getDesktopConfig("runAsTrayApp")) return
+	async update(notifier: DesktopNotifier): Promise<void> {
+		const runAsTrayApp = await this._conf.getVar("runAsTrayApp")
+		if (!runAsTrayApp) return
 		const m = new Menu()
 		m.append(new MenuItem({
 			label: lang.get("openNewWindow_action"), click: () => {
@@ -56,7 +56,7 @@ export class DesktopTray {
 			m.append(new MenuItem({type: 'separator'}))
 			this._wm.getAll().forEach(w => {
 				let label = w.getTitle()
-				if (this._notifier.hasNotificationsForWindow(w)) {
+				if (notifier.hasNotificationsForWindow(w)) {
 					label = "• " + label
 				} else {
 					label = label + "  "
@@ -79,12 +79,18 @@ export class DesktopTray {
 		platformTray.clearBadge()
 	}
 
-	getIcon(): NativeImage {
-		return DesktopTray.getIcon(this._conf.get('iconName'))
+	async getAppIcon(): Promise<NativeImage> {
+		if (!this._icon) {
+			const iconName = await this._conf.getConst('iconName')
+			const iconPath = platformTray.getAppIconPathFromName(iconName)
+			this._icon = nativeImage.createFromPath(iconPath)
+		}
+		return this._icon
 	}
 
-	static getIcon(iconName: string): NativeImage {
-		return icon || (icon = nativeImage.createFromPath(platformTray.iconPath(iconName)))
+	getIconByName(iconName: string): NativeImage {
+		const iconPath = getResourcePath(`icons/${iconName}`)
+		return nativeImage.createFromPath(iconPath)
 	}
 
 	setWindowManager(wm: WindowManager) {

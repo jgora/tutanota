@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {StringWrapper} from "./StringWrapper"
 
@@ -15,18 +17,14 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 732,
-			"since": 9,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"validationResult": {
-			"name": "validationResult",
 			"id": 733,
-			"since": 9,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -35,17 +33,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"invalidDnsRecords": {
-			"name": "invalidDnsRecords",
 			"id": 734,
-			"since": 9,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": true,
 			"refType": "StringWrapper",
-			"final": true
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createCustomDomainReturn(values?: $Shape<$Exact<CustomDomainReturn>>): CustomDomainReturn {

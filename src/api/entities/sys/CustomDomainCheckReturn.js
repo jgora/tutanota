@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {DnsRecord} from "./DnsRecord"
 
@@ -15,18 +17,14 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1590,
-			"since": 49,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"checkResult": {
-			"name": "checkResult",
 			"id": 1591,
-			"since": 49,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -35,26 +33,32 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"invalidRecords": {
-			"name": "invalidRecords",
 			"id": 1593,
-			"since": 49,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "DnsRecord",
-			"final": false
+			"dependency": null
 		},
 		"missingRecords": {
-			"name": "missingRecords",
 			"id": 1592,
-			"since": 49,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "DnsRecord",
-			"final": false
+			"dependency": null
+		},
+		"requiredRecords": {
+			"id": 1758,
+			"type": "AGGREGATION",
+			"cardinality": "Any",
+			"final": false,
+			"refType": "DnsRecord",
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createCustomDomainCheckReturn(values?: $Shape<$Exact<CustomDomainCheckReturn>>): CustomDomainCheckReturn {
@@ -69,4 +73,5 @@ export type CustomDomainCheckReturn = {
 
 	invalidRecords: DnsRecord[];
 	missingRecords: DnsRecord[];
+	requiredRecords: DnsRecord[];
 }

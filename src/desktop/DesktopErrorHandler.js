@@ -1,12 +1,13 @@
 // @flow
 import {app, dialog} from 'electron'
 import {lang} from "../misc/LanguageViewModel"
-import {LOGIN_TITLE} from "../api/Env"
+import {LOGIN_TITLE} from "../api/common/Env"
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import type {IPC} from "./IPC"
 import type {WindowManager} from "./DesktopWindowManager.js"
+import {log} from "./DesktopLog";
 
 type ErrorLog = {|
 	name: string,
@@ -16,7 +17,7 @@ type ErrorLog = {|
 	version: string
 |}
 
-class DesktopErrorHandler {
+export class DesktopErrorHandler {
 	_wm: WindowManager
 	_ipc: IPC
 	_errorLogPath: string;
@@ -44,7 +45,7 @@ class DesktopErrorHandler {
 			try {
 				this.lastErrorLog = JSON.parse(fs.readFileSync(this._errorLogPath).toString())
 				if (this.lastErrorLog) {
-					console.log('found error log')
+					log.debug('found error log')
 				}
 			} catch (e) {
 				console.warn("Could not read error log:", e)
@@ -79,10 +80,10 @@ class DesktopErrorHandler {
 			checkboxLabel: lang.get("restartBefore_action"),
 			checkboxChecked: false,
 			type: 'error'
-		}).then(({response, checkboxChecked}) => {
+		}).then(async ({response, checkboxChecked}) => {
 			if (response === 1) { // clicked yes
 				if (checkboxChecked) {
-					console.log('writing error log to', this._errorLogPath)
+					log.debug('writing error log to', this._errorLogPath)
 					fs.writeFileSync(this._errorLogPath, this.lastErrorLog ? JSON.stringify(this.lastErrorLog) : "")
 					app.relaunch({args: process.argv.slice(1)})
 					app.exit(0)
@@ -91,7 +92,8 @@ class DesktopErrorHandler {
 					if (loggedInWindow) {
 						return this.sendErrorReport(loggedInWindow.id)
 					} else {
-						return this.sendErrorReport(this._wm.getLastFocused(true).id)
+						const lastFocused = await this._wm.getLastFocused(true)
+						return this.sendErrorReport(lastFocused.id)
 					}
 				}
 			}
@@ -119,5 +121,5 @@ class DesktopErrorHandler {
 	}
 }
 
-export const err = new DesktopErrorHandler()
+export const err: DesktopErrorHandler = new DesktopErrorHandler()
 

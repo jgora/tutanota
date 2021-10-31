@@ -3,13 +3,15 @@ import m from "mithril"
 import type {TranslationKey} from "../../misc/LanguageViewModel"
 import {lang} from "../../misc/LanguageViewModel"
 import {px, size} from "../size"
-import {assertMainOrNode} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import {progressIcon} from "./Icon"
 import type {ButtonAttrs} from "./ButtonN"
 import {ButtonN, ButtonType, isVisible} from "./ButtonN"
 import {downcast, neverNull} from "../../api/common/utils/Utils"
 import {createDropdown} from "./DropdownN"
 import {Icons} from "./icons/Icons"
+import type {lazy} from "../../api/common/utils/Utils"
+import type {clickHandler} from "./GuiUtils"
 
 assertMainOrNode()
 
@@ -27,7 +29,7 @@ export type ColumnWidthEnum = $Values<typeof ColumnWidth>
  * @param lines the lines of the table
  */
 export type TableAttrs = {
-	columnHeading: Array<lazy<string> | TranslationKey>,
+	columnHeading?: Array<lazy<string> | TranslationKey>,
 	columnWidths: ColumnWidthEnum[],
 	columnAlignments?: Array<boolean>,
 	showActionButtonColumn: boolean,
@@ -37,7 +39,7 @@ export type TableAttrs = {
 
 export type CellTextData = {
 	main: string,
-	info?: ?string,
+	info?: string[],
 	click?: clickHandler,
 	mainStyle?: string
 }
@@ -53,7 +55,7 @@ export type TableLineAttrs = {
  */
 export class TableN implements MComponent<TableAttrs> {
 
-	view(vnode: Vnode<LifecycleAttrs<TableAttrs>>): VirtualElement {
+	view(vnode: Vnode<TableAttrs>): Children {
 		const a = vnode.attrs
 		const loading = !(a.lines)
 		const alignments = a.columnAlignments || []
@@ -62,13 +64,13 @@ export class TableN implements MComponent<TableAttrs> {
 			: []
 
 		return m("", [
-			m("table.table", [
-				[
+			m(`table.table${a.columnHeading ? ".table-header-border" : ""}`, [
+				(a.columnHeading ? [
 					this._createLine({
 						cells: a.columnHeading.map(textIdOrFunction => lang.getMaybeLazy(textIdOrFunction)),
 						actionButtonAttrs: (loading) ? null : a.addButtonAttrs
 					}, a.showActionButtonColumn, a.columnWidths, true, alignments)
-				].concat(lineAttrs)
+				] : []).concat(lineAttrs)
 			]),
 			(loading)
 				? m(".flex-center.items-center.button-height", progressIcon())
@@ -80,7 +82,7 @@ export class TableN implements MComponent<TableAttrs> {
 	}
 
 	_createLine(lineAttrs: TableLineAttrs, showActionButtonColumn: boolean, columnWidths: ColumnWidthEnum[], bold: boolean,
-	            columnAlignments: Array<boolean>): VirtualElement {
+	            columnAlignments: Array<boolean>): Children {
 		let cells
 		if (typeof lineAttrs.cells == "function") {
 			cells = lineAttrs.cells().map((cellTextData, index) =>
@@ -102,7 +104,7 @@ export class TableN implements MComponent<TableAttrs> {
 							const dom = downcast(event.target)
 							cellTextData.click ? cellTextData.click(event, dom) : null
 						}
-					}, cellTextData.info)
+					}, cellTextData.info ? cellTextData.info.map(line => m("", line)) : null)
 				]))
 		} else {
 			cells = lineAttrs.cells.map((text, index) =>

@@ -14,9 +14,9 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
+import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLEncoder;
-import java.util.Objects;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -70,13 +70,16 @@ public class SseClient {
 	public void restartConnectionIfNeeded(@NonNull SseInfo sseInfo) {
 		SseInfo oldConnectedInfo = this.connectedSseInfo;
 		this.connectedSseInfo = sseInfo;
-		Log.d(TAG, "old sseInfo: " + oldConnectedInfo + " new sseInfo: " + this.connectedSseInfo);
 
 		HttpURLConnection connection = httpsURLConnectionRef.get();
 		if (connection == null) {
 			Log.d(TAG, "ConnectionRef not available, schedule connect");
 			reschedule(0);
-		} else if (!Objects.equals(this.connectedSseInfo, oldConnectedInfo)) {
+		} else if (oldConnectedInfo == null
+				|| !oldConnectedInfo.getPushIdentifier().equals(sseInfo.getPushIdentifier())
+				|| !oldConnectedInfo.getSseOrigin().equals(sseInfo.getSseOrigin())) {
+			// If pushIdentifier or SSE origin have changed for some reason, restart the connect.
+			// If user IDs have changed, do not restart, if current user is invalid we have either oldConnectedInfo
 			Log.d(TAG, "ConnectionRef available, but SseInfo has changed, call disconnect to reschedule connection");
 			connection.disconnect();
 		} else {
@@ -101,9 +104,10 @@ public class SseClient {
 			this.timeoutInSeconds = 90;
 		}
 
+		ConnectionData connectionData = prepareSSEConnection();
 		try {
-			HttpURLConnection httpsURLConnection = prepareSseConnection();
-			reader = new BufferedReader(new InputStreamReader(new BufferedInputStream(httpsURLConnection.getInputStream())));
+			HttpURLConnection httpURLConnection = this.openSseConnection(connectionData);
+			reader = new BufferedReader(new InputStreamReader(new BufferedInputStream(httpURLConnection.getInputStream())));
 			String event;
 			Log.d(TAG, "SSE connection established, listening for events");
 			boolean notifiedEstablishedConnection = true;
@@ -115,7 +119,7 @@ public class SseClient {
 				}
 			}
 		} catch (Exception exception) {
-			handleException(random, exception);
+			handleException(random, exception, connectionData.userId);
 		} finally {
 			if (reader != null) {
 				try {
@@ -127,13 +131,13 @@ public class SseClient {
 		}
 	}
 
-	private void handleException(Random random, Exception exception) {
+	private void handleException(Random random, Exception exception, String userId) {
 		HttpURLConnection httpURLConnection = httpsURLConnectionRef.get();
 		try {
 			// we get not authorized for the stored identifier and user ids, so remove them
 			if (httpURLConnection != null && httpURLConnection.getResponseCode() == 403) {
-				Log.e(TAG, "not authorized to connect, disable reconnect");
-				sseListener.onNotAuthorized();
+				Log.e(TAG, "not authorized to connect, disable reconnect for " + userId);
+				sseListener.onNotAuthorized(userId);
 				return;
 			}
 		} catch (IOException e) {
@@ -157,7 +161,6 @@ public class SseClient {
 	}
 
 	private void handleLine(String line) {
-		Log.d(TAG, "Event: " + line);
 		failedConnectionAttempts = 0;
 
 		if (!line.startsWith("data: ")) {
@@ -178,18 +181,16 @@ public class SseClient {
 		Log.d(TAG, "Executing jobFinished after receiving notifications");
 	}
 
-	private String requestJson(SseInfo sseInfo) {
+	private String requestJson(String pushIdentifier, String userId) {
 		JSONObject jsonObject = new JSONObject();
 		try {
 			jsonObject.put("_format", "0");
-			jsonObject.put("identifier", sseInfo.getPushIdentifier());
+			jsonObject.put("identifier", pushIdentifier);
 			JSONArray jsonArray = new JSONArray();
-			for (String userId : sseInfo.getUserIds()) {
-				JSONObject userIdObject = new JSONObject();
-				userIdObject.put("_id", generateId());
-				userIdObject.put("value", userId);
-				jsonArray.put(userIdObject);
-			}
+			JSONObject userIdObject = new JSONObject();
+			userIdObject.put("_id", generateId());
+			userIdObject.put("value", userId);
+			jsonArray.put(userIdObject);
 			jsonObject.put("userIds", jsonArray);
 			return URLEncoder.encode(jsonObject.toString(), "UTF-8");
 		} catch (JSONException | UnsupportedEncodingException e) {
@@ -203,10 +204,25 @@ public class SseClient {
 		return Utils.base64ToBase64Url(Utils.bytesToBase64(bytes));
 	}
 
+	private ConnectionData prepareSSEConnection() {
+		if (connectedSseInfo.getUserIds().isEmpty()) {
+			throw new IllegalStateException("Push identifier but no user IDs");
+		}
+		String userId = connectedSseInfo.getUserIds().iterator().next();
+
+		String json = requestJson(connectedSseInfo.getPushIdentifier(), userId);
+		URL url;
+		try {
+			url = new URL(connectedSseInfo.getSseOrigin() + "/sse?_body=" + json);
+		} catch (MalformedURLException e) {
+			throw new RuntimeException(e);
+		}
+		return new ConnectionData(userId, url);
+	}
+
 	@NonNull
-	private HttpURLConnection prepareSseConnection() throws IOException {
-		URL url = new URL(connectedSseInfo.getSseOrigin() + "/sse?_body=" + requestJson(connectedSseInfo));
-		HttpURLConnection httpsURLConnection = (HttpURLConnection) url.openConnection();
+	private HttpURLConnection openSseConnection(ConnectionData connectionData) throws IOException {
+		HttpURLConnection httpsURLConnection = (HttpURLConnection) connectionData.url.openConnection();
 		this.httpsURLConnectionRef.set(httpsURLConnection);
 		httpsURLConnection.setRequestMethod("GET");
 		httpsURLConnection.setRequestProperty("Content-Type", "application/json");
@@ -244,8 +260,19 @@ public class SseClient {
 
 		void onConnectionEstablished();
 
-		void onNotAuthorized();
+		void onNotAuthorized(String userId);
 
 		void onStoppingReconnectionAttempts();
+
+	}
+
+	private static final class ConnectionData {
+		final String userId;
+		final URL url;
+
+		ConnectionData(String userId, URL url) {
+			this.userId = userId;
+			this.url = url;
+		}
 	}
 }

@@ -4,16 +4,15 @@ import m from "mithril"
 import {px} from "../size"
 import {DefaultAnimationTime, transform} from "../animation/Animations"
 import {displayOverlay} from "./Overlay"
-import {assertMainOrNodeBoot} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import type {ButtonAttrs} from "./ButtonN"
 import {ButtonN, ButtonType} from "./ButtonN"
 
-assertMainOrNodeBoot()
+assertMainOrNode()
 
 type NotificationOverlayAttrs = {|
-	message: Component,
-	buttons: Array<ButtonAttrs>,
-	closeFunction: () => void
+	message: MComponent<void>,
+	buttons: Array<ButtonAttrs>
 |}
 
 
@@ -21,8 +20,7 @@ const notificationQueue = []
 let currentAnimationTimeout: ?TimeoutID = null
 
 class NotificationOverlay implements MComponent<NotificationOverlayAttrs> {
-
-	view(vnode: Vnode<NotificationOverlayAttrs>) {
+	view(vnode: Vnode<NotificationOverlayAttrs>): Children {
 		return m(".notification-overlay-content.flex.flex-column.flex-space-between", [
 			m(vnode.attrs.message),
 			m(".flex.justify-end.flex-wrap",
@@ -32,9 +30,11 @@ class NotificationOverlay implements MComponent<NotificationOverlayAttrs> {
 }
 
 /**
+ * @param message What will be shown inside notification
+ * @param closeButtonAttrs To define the close button in the notification
  * @param buttons The postpone button is automatically added and does not have to be passed from outside
  */
-export function show(message: Component, closeButtonAttrs: $Shape<ButtonAttrs>, buttons: Array<ButtonAttrs>) {
+export function show(message: MComponent<void>, closeButtonAttrs: $Shape<ButtonAttrs>, buttons: Array<ButtonAttrs>) {
 	notificationQueue.push({message, buttons, closeButtonAttrs})
 	if (notificationQueue.length > 1) {
 		// another notification is already visible. Next notification will be shown when closing current notification
@@ -50,8 +50,9 @@ function showNextNotification() {
 	const width = window.innerWidth
 	const margin = (width - Math.min(400, width)) / 2
 	const allButtons = buttons.slice()
-	const closeFunction = displayOverlay({top: px(0), left: px(margin), right: px(margin)}, {
-			view: () => m(NotificationOverlay, {message, closeFunction, buttons: allButtons})
+	const overlayRect = {top: px(0), left: px(margin), right: px(margin)}
+	const closeFunction = displayOverlay(() => overlayRect, {
+			view: () => m(NotificationOverlay, {message, buttons: allButtons})
 		},
 		(dom) => transform(transform.type.translateY, -dom.offsetHeight, 0),
 		(dom) => transform(transform.type.translateY, 0, -dom.offsetHeight)

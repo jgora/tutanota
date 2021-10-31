@@ -7,12 +7,14 @@ import {alpha, animations, transform} from "../animation/Animations"
 import {ease} from "../animation/Easing"
 import {theme} from "../theme"
 import {neverNull} from "../../api/common/utils/Utils"
-import {assertMainOrNode} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import {BottomNav} from "../nav/BottomNav"
 import {header} from "./Header"
 import {styles} from "../styles"
-import type {AriaLandmarksEnum} from "../../api/common/utils/AriaUtils"
-import {AriaLandmarks} from "../../api/common/utils/AriaUtils"
+import type {AriaLandmarksEnum} from "../AriaUtils"
+import {AriaLandmarks} from "../AriaUtils"
+import {LayerType} from "../../RootView"
+import type {windowSizeListener} from "../../misc/WindowFacade"
 
 assertMainOrNode()
 
@@ -35,7 +37,7 @@ export const gestureInfoFromTouch = (touch: Touch): GestureInfo => ({
  * the actual widths and positions of the view columns is calculated. This allows a consistent layout for any browser
  * resolution on any type of device.
  */
-export class ViewSlider implements IViewSlider {
+export class ViewSlider {
 	columns: ViewColumn[];
 	_mainColumn: ViewColumn;
 	focusedColumn: ViewColumn;
@@ -48,17 +50,17 @@ export class ViewSlider implements IViewSlider {
 
 
 	/** Creates the event listener as soon as this component is loaded (invoked by mithril)*/
-	oncreate = () => {
+	oncreate: (() => void) = () => {
 		this._updateVisibleBackgroundColumns()
 		windowFacade.addResizeListener(this.resizeListener)
 	}
 
 	/** Removes the registered event listener as soon as this component is unloaded (invoked by mithril)*/
-	onremove = () => windowFacade.removeResizeListener(this.resizeListener)
+	onremove: (() => void) = () => windowFacade.removeResizeListener(this.resizeListener)
 
 	resizeListener: windowSizeListener = () => this._updateVisibleBackgroundColumns()
 
-	_getSideColDom = () => this.columns[0]._domColumn
+	_getSideColDom: (() => ?HTMLElement) = () => this.columns[0]._domColumn
 
 	constructor(viewColumns: ViewColumn[], parentName: string) {
 		this.columns = viewColumns
@@ -102,7 +104,7 @@ export class ViewSlider implements IViewSlider {
 					}))
 				),
 				styles.isUsingBottomNavigation() ? m(BottomNav) : null,
-				this._getColumnsForOverlay().map(m),
+				this._getColumnsForOverlay().map((c) => m(c, {})),
 				this._createModalBackground(),
 			])
 		}
@@ -116,7 +118,7 @@ export class ViewSlider implements IViewSlider {
 		return this._mainColumn === column ? AriaLandmarks.Main : AriaLandmarks.Region
 	}
 
-	getMainColumn() {
+	getMainColumn(): ViewColumn {
 		return this._mainColumn;
 	}
 
@@ -128,10 +130,13 @@ export class ViewSlider implements IViewSlider {
 		return this.columns.filter(c => c.columnType === ColumnType.Foreground && !c.visible)
 	}
 
-	_createModalBackground() {
+	_createModalBackground(): Children {
 		if (this._isModalBackgroundVisible) {
 			return [
-				m(".fill-absolute.z3.will-change-alpha", {
+				m(".fill-absolute.will-change-alpha", {
+					style: {
+						zIndex: LayerType.ForegroundMenu
+					},
 					oncreate: (vnode) => {
 						this._busy.then(() => animations.add(vnode.dom, alpha(alpha.type.backgroundColor, theme.modal_bg, 0, 0.5)))
 					},
@@ -257,8 +262,8 @@ export class ViewSlider implements IViewSlider {
 	}
 
 
-	focus(viewColumn: ViewColumn) {
-		this._busy.then(() => {
+	focus(viewColumn: ViewColumn): Promise<void> {
+		return this._busy.then(() => {
 			// hide the foreground column if the column is in foreground
 			if (this.focusedColumn.isInForeground) {
 				this._busy = this._slideForegroundColumn(this.focusedColumn, false)
@@ -268,7 +273,8 @@ export class ViewSlider implements IViewSlider {
 			this.focusedColumn = viewColumn
 			if (viewColumn.columnType === ColumnType.Background && this._visibleBackgroundColumns.length === 1
 				&& this._visibleBackgroundColumns.indexOf(viewColumn) < 0) {
-				this._busy = this._slideBackgroundColumns(viewColumn, this.getOffset(this._visibleBackgroundColumns[0]), this.getOffset(viewColumn))
+				const currentOffset = this._domSlidingPart.getBoundingClientRect().left
+				this._busy = this._slideBackgroundColumns(viewColumn, currentOffset, this.getOffset(viewColumn))
 			} else if (viewColumn.columnType === ColumnType.Foreground
 				&& this._visibleBackgroundColumns.indexOf(viewColumn) < 0) {
 				this._busy = this._slideForegroundColumn(viewColumn, true)
@@ -330,7 +336,7 @@ export class ViewSlider implements IViewSlider {
 		return 0 - column.offset
 	}
 
-	isFocusPreviousPossible() {
+	isFocusPreviousPossible(): boolean {
 		return this.getPreviousColumn() != null
 	}
 
@@ -355,12 +361,12 @@ export class ViewSlider implements IViewSlider {
 		return null
 	}
 
-	isFirstBackgroundColumnFocused() {
+	isFirstBackgroundColumnFocused(): boolean {
 		return this.columns.filter(column => column.columnType === ColumnType.Background)
 		           .indexOf(this.focusedColumn) === 0
 	}
 
-	isForegroundColumnFocused() {
+	isForegroundColumnFocused(): boolean {
 		return this.focusedColumn && this.focusedColumn.columnType === ColumnType.Foreground
 	}
 
@@ -377,7 +383,9 @@ export class ViewSlider implements IViewSlider {
 		let directionLock: 0 | 1 | 2 = 0
 
 		const gestureEnd = (event: any) => {
-			if (lastGestureInfo && oldGestureInfo && !this.allColumnsVisible()) {
+			const safeLastGestureInfo = lastGestureInfo
+			const safeOldGestureInfo = oldGestureInfo
+			if (safeLastGestureInfo && safeOldGestureInfo && !this.allColumnsVisible()) {
 				const touch = event.changedTouches[0]
 				const mainCol = this._mainColumn._domColumn
 				const sideCol = this._getSideColDom()
@@ -387,7 +395,7 @@ export class ViewSlider implements IViewSlider {
 
 				const mainColRect = mainCol.getBoundingClientRect()
 
-				const velocity = (lastGestureInfo.x - oldGestureInfo.x) / (lastGestureInfo.time - oldGestureInfo.time)
+				const velocity = (safeLastGestureInfo.x - safeOldGestureInfo.x) / (safeLastGestureInfo.time - safeOldGestureInfo.time)
 
 				const show = () => {
 					this.focusedColumn = this.columns[0]
@@ -401,18 +409,31 @@ export class ViewSlider implements IViewSlider {
 					this._isModalBackgroundVisible = false
 				}
 
-				// Gesture was with enough velocity to show the menu
-				if (velocity > 0.8) {
-					show()
-					// Gesture was with enough velocity to hide the menu and we're not scrolling vertically
-				} else if (velocity < -0.8 && directionLock !== VERTICAL) {
-					hide()
-				} else {
-					// Finger was released without much velocity so if it's further than some distance from edge, open menu. Otherwise, close it.
-					if (touch.pageX > mainColRect.left + 100) {
+				// Gesture for the side column
+				if (this.getBackgroundColumns()[0].visible || this.focusedColumn.isInForeground) {
+					// Gesture was with enough velocity to show the menu
+					if (velocity > 0.8) {
 						show()
-					} else if (directionLock !== VERTICAL) {
+						// Gesture was with enough velocity to hide the menu and we're not scrolling vertically
+					} else if (velocity < -0.8 && directionLock !== VERTICAL) {
 						hide()
+					} else {
+						// Finger was released without much velocity so if it's further than some distance from edge, open menu. Otherwise, close it.
+						if (touch.pageX > mainColRect.left + 100) {
+							show()
+						} else if (directionLock !== VERTICAL) {
+							hide()
+						}
+					}
+				} else {
+					// Gesture for sliding other columns
+					if ((safeLastGestureInfo.x > window.innerWidth / 3 || velocity > 0.8) && directionLock !== VERTICAL) {
+						this.focusPreviousColumn()
+					} else {
+						const colRect = this._domSlidingPart.getBoundingClientRect()
+						// Re-focus the column to reset offset changed by the gesture
+						this._busy = this._slideBackgroundColumns(this.focusedColumn, colRect.left, -this.focusedColumn.offset)
+						this.focus(this.focusedColumn)
 					}
 				}
 
@@ -420,7 +441,7 @@ export class ViewSlider implements IViewSlider {
 			}
 
 			// If this is the first touch and not another one
-			if (lastGestureInfo && lastGestureInfo.identifier === event.changedTouches[0].identifier) {
+			if (safeLastGestureInfo && safeLastGestureInfo.identifier === event.changedTouches[0].identifier) {
 				lastGestureInfo = null
 				oldGestureInfo = null
 				initialGestureInfo = null
@@ -440,9 +461,8 @@ export class ViewSlider implements IViewSlider {
 					lastGestureInfo = null
 					return
 				}
-				const colRect = mainCol.getBoundingClientRect()
 				if (event.touches.length === 1
-					&& (this.columns[0].isInForeground || event.touches[0].pageX < colRect.left + 40)) {
+					&& (this.columns[0].isInForeground || event.touches[0].pageX < 40)) {
 					// Only stop propogation while the menu is not yet fully visible
 					if (!this.columns[0].isInForeground) {
 						event.stopPropagation()
@@ -457,21 +477,32 @@ export class ViewSlider implements IViewSlider {
 				}
 
 				const gestureInfo = lastGestureInfo
-				if (gestureInfo && event.touches.length === 1 && initialGestureInfo) {
+				const safeInitialGestureInfo = initialGestureInfo
+				if (gestureInfo && safeInitialGestureInfo && event.touches.length === 1 ) {
 					const touch = event.touches[0]
 					const newTouchPos = touch.pageX
 					const sideColRect = sideCol.getBoundingClientRect()
 					oldGestureInfo = lastGestureInfo
-					lastGestureInfo = gestureInfoFromTouch(touch)
+					const safeLastInfo = lastGestureInfo = gestureInfoFromTouch(touch)
 					// If we have horizonal lock or we don't have vertical lock but would like to acquire horizontal one, the lock horizontally
-					if (directionLock === HORIZONTAL || directionLock !== VERTICAL && Math.abs(lastGestureInfo.x - initialGestureInfo.x)
-						> 30) {
+					if (directionLock === HORIZONTAL ||
+						directionLock !== VERTICAL && Math.abs(safeLastInfo.x - safeInitialGestureInfo.x) > 30
+					) {
 						directionLock = HORIZONTAL
-						const newTranslate = Math.min(sideColRect.left - (gestureInfo.x - newTouchPos), 0)
-						sideCol.style.transform = `translateX(${newTranslate}px)`
-						event.preventDefault()
+						// Gesture for side column
+						if (this.getBackgroundColumns()[0].visible || this.focusedColumn.isInForeground) {
+							const newTranslate = Math.min(sideColRect.left - (gestureInfo.x - newTouchPos), 0)
+							sideCol.style.transform = `translateX(${newTranslate}px)`
+						} else { // Gesture for background column
+							const slidingDomRect = this._domSlidingPart.getBoundingClientRect()
+							// Do not allow to move column to the left
+							const newTranslate = Math.max(slidingDomRect.left - (gestureInfo.x - newTouchPos), -this.focusedColumn.offset)
+							this._domSlidingPart.style.transform = `translateX(${newTranslate}px)`
+						}
+						// Scroll events are not cancellable and browsees complain a lot
+						if (event.cancelable !== false) event.preventDefault()
 						// If we don't have a vertical lock but we would like to acquire one, get it
-					} else if (directionLock !== VERTICAL && Math.abs(lastGestureInfo.y - initialGestureInfo.y) > 30) {
+					} else if (directionLock !== VERTICAL && Math.abs(safeLastInfo.y - safeInitialGestureInfo.y) > 30) {
 						directionLock = VERTICAL
 					}
 					event.stopPropagation()

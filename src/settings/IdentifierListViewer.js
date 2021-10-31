@@ -1,32 +1,34 @@
 //@flow
 import m from "mithril"
-import {isApp, isDesktop} from "../api/Env"
+import {isApp, isDesktop} from "../api/common/Env"
 import {HttpMethod as HttpMethodEnum} from "../api/common/EntityFunctions"
 import {lang} from "../misc/LanguageViewModel"
 import {erase, loadAll, update} from "../api/main/Entity"
 import {neverNull, noOp} from "../api/common/utils/Utils"
+import type {PushIdentifier} from "../api/entities/sys/PushIdentifier"
 import {createPushIdentifier, PushIdentifierTypeRef} from "../api/entities/sys/PushIdentifier"
-import {pushServiceApp} from "../native/PushServiceApp"
 import {logins} from "../api/main/LoginController"
 import {Icons} from "../gui/base/icons/Icons"
 import {PushServiceType} from "../api/common/TutanotaConstants"
-import {getCleanedMailAddress} from "../misc/Formatter"
-import {showNotAvailableForFreeDialog} from "../misc/ErrorHandlerImpl"
-import {showProgressDialog} from "../gui/base/ProgressDialog"
+import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
 import {worker} from "../api/main/WorkerClient"
 import {Dialog} from "../gui/base/Dialog"
 import {NotFoundError} from "../api/common/error/RestError"
 import {attachDropdown} from "../gui/base/DropdownN"
 import type {ButtonAttrs} from "../gui/base/ButtonN"
 import {ButtonN, ButtonType} from "../gui/base/ButtonN"
-import type {ExpanderAttrs} from "../gui/base/ExpanderN"
-import {ExpanderButtonN, ExpanderPanelN} from "../gui/base/ExpanderN"
+import type {ExpanderAttrs} from "../gui/base/Expander"
+import {ExpanderButtonN, ExpanderPanelN} from "../gui/base/Expander"
 import stream from "mithril/stream/stream.js"
 import type {TextFieldAttrs} from "../gui/base/TextFieldN"
 import {TextFieldN} from "../gui/base/TextFieldN"
+import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
 import type {User} from "../api/entities/sys/User"
-import type {PushIdentifier} from "../api/entities/sys/PushIdentifier"
+import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
+import {getCleanedMailAddress} from "../misc/parsing/MailAddressParser"
+import type {TranslationKey} from "../misc/LanguageViewModel"
+import {ofClass} from "../api/common/utils/PromiseUtils"
 
 type IdentifierRowAttrs = {|
 	name: string,
@@ -98,7 +100,7 @@ export class IdentifierListViewer {
 		update(identifier).then(m.redraw)
 	}
 
-	view() {
+	view(): Children {
 		const pushIdentifiersExpanderAttrs: ExpanderAttrs = {
 			label: "show_action",
 			expanded: this._expanded
@@ -123,7 +125,7 @@ export class IdentifierListViewer {
 						disabled: identifier.disabled,
 						identifier: identifier.identifier,
 						current: isCurrentDevice,
-						removeClicked: () => {erase(identifier).catch(NotFoundError, noOp)},
+						removeClicked: () => {erase(identifier).catch(ofClass(NotFoundError, noOp))},
 						formatIdentifier: identifier.pushServiceType !== PushServiceType.EMAIL,
 						disableClicked: () => this._disableIdentifier(identifier)
 					})
@@ -158,15 +160,17 @@ export class IdentifierListViewer {
 		if (!this._user) {
 			return
 		}
-		this._currentIdentifier = pushServiceApp.getPushIdentifier()
-		const list = neverNull(this._user).pushIdentifierList
-		if (list) {
-			loadAll(PushIdentifierTypeRef, list.list)
-				.then((identifiers) => {
-					this._identifiers(identifiers)
-					m.redraw()
-				})
-		}
+		import("../native/main/PushServiceApp").then(({pushServiceApp}) => {
+			this._currentIdentifier = pushServiceApp.getPushIdentifier()
+			const list = neverNull(this._user).pushIdentifierList
+			if (list) {
+				return loadAll(PushIdentifierTypeRef, list.list)
+					.then((identifiers) => {
+						this._identifiers(identifiers)
+						m.redraw()
+					})
+			}
+		})
 	}
 
 	_showAddNotificationEmailAddressDialog(user: ?User) {
@@ -216,7 +220,7 @@ export class IdentifierListViewer {
 		}
 	}
 
-	_validateAddNotificationEmailAddressInput(emailAddress: string): ?string {
+	_validateAddNotificationEmailAddressInput(emailAddress: string): ?TranslationKey {
 		return getCleanedMailAddress(emailAddress) == null
 			? "mailAddressInvalid_msg"
 			: null // TODO check if it is a Tutanota mail address

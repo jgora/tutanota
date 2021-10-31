@@ -1,14 +1,6 @@
 //@flow
-
-import {downcast} from "./Utils"
-
-// flow erases types to empty (bottom) if we write them inline so we give them a name
-type PromiseAllTyped = (<A, B>(a: $Promisable<A>, b: $Promisable<B>) => Promise<[A, B]>)
-	& (<A, B, C>(a: $Promisable<A>, b: $Promisable<B>, c: $Promisable<C>) => Promise<[A, B, C]>)
-	& (<A, B, C, D>(a: $Promisable<A>, b: $Promisable<B>, c: $Promisable<C>, d: $Promisable<D>) =>
-	Promise<[A, B, C, D]>)
-
-export const all: PromiseAllTyped = downcast((...promises) => Promise.all(promises))
+import type {Options as PromiseMapOptions} from "./PromiseMap"
+import {pMap as promiseMap} from "./PromiseMap"
 
 type PromiseMapCallback<T, U> = (el: T, index: number) => $Promisable<U>
 
@@ -39,12 +31,18 @@ function _mapInCallContext<T, U>(values: T[], callback: PromiseMapCallback<T, U>
 	}
 }
 
+export {pMap as promiseMap} from "./PromiseMap"
 
-export type PromiseMapFn = <T, U>(values: T[], callback: PromiseMapCallback<T, U>, concurrency?: Bluebird$ConcurrencyOption) => PromisableWrapper<U[]>
+export type PromiseMapFn = <T, U>(values: T[], callback: PromiseMapCallback<T, U>, options?: PromiseMapOptions) => PromisableWrapper<U[]>
 
-export const promiseMapCompat = (useMapInCallContext: boolean): PromiseMapFn => useMapInCallContext
-	? mapInCallContext
-	: <T, U>(values: Array<T>, callback: PromiseMapCallback<T, U>, concurrency) => PromisableWrapper.from(Promise.map(values, callback, concurrency))
+function mapNoFallback<T, U>(values: Array<T>, callback: PromiseMapCallback<T, U>, options?: PromiseMapOptions) {
+	return PromisableWrapper.from(promiseMap(values, callback, options))
+}
+
+/** Factory function which gives you ack promiseMap implementation. {@see mapInCallContext} for what it means. */
+export function promiseMapCompat(useMapInCallContext: boolean): PromiseMapFn {
+	return useMapInCallContext ? mapInCallContext : mapNoFallback
+}
 
 function flatWrapper<T>(value: PromisableWrapper<T> | T): $Promisable<T> {
 	return value instanceof PromisableWrapper ? value.value : value
@@ -81,4 +79,64 @@ export class PromisableWrapper<T> {
 	toPromise(): Promise<T> {
 		return Promise.resolve(this.value)
 	}
+}
+
+export function delay(ms: number): Promise<void> {
+	return new Promise((resolve) => {
+		setTimeout(resolve, ms)
+	})
+}
+
+/**
+ * Pass to Promise.then to perform an action while forwarding on the result
+ * @param action
+ */
+export function tap<T>(action: T => mixed): T => T {
+	return function (value) {
+		action(value)
+		return value
+	}
+}
+
+/**
+ * Helper utility intended to be used with typed excpetions and .catch() method of promise like so:
+ *
+ * ```js
+ *  class SpecificError extends Error {}
+ *
+ *  Promise.reject(new SpecificError())
+ *      .catch(ofClass(SpecificError, (e) => console.log("some error", e)))
+ *      .catch((e) => console.log("generic error", e))
+ * ```
+ *
+ * @param cls Class which will be caught
+ * @param catcher to handle only errors of type cls
+ * @returns handler which either forwards to catcher or rethrows
+ */
+export function ofClass<E, R>(cls: Class<E>, catcher: (E) => $Promisable<R>): ((any) => Promise<R>) {
+	return async (e) => {
+		if (e instanceof cls) {
+			return catcher(e)
+		} else {
+			// It's okay to rethrow because:
+			// 1. It preserves the original stacktrace
+			// 2. Because of 1. it is not that expensive
+			throw e
+		}
+	}
+}
+
+/**
+ * Filter iterable. Just like Array.prototype.filter but callback can return promises
+ */
+export async function promiseFilter<T>(iterable: Iterable<T>, filter: (item: T, index: number) => $Promisable<boolean>): Promise<Array<T>> {
+	let index = 0
+	const result = []
+	for (let item of iterable) {
+		if (await filter(item, index)) {
+			result.push(item)
+		}
+		index++
+	}
+	return result
 }

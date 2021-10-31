@@ -1,7 +1,10 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
+import type {CalendarEventIndexRef} from "./CalendarEventIndexRef"
 
 export const CalendarGroupRootTypeRef: TypeRef<CalendarGroupRoot> = new TypeRef("tutanota", "CalendarGroupRoot")
 export const _TypeModel: TypeModel = {
@@ -14,45 +17,35 @@ export const _TypeModel: TypeModel = {
 	"encrypted": true,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 951,
-			"since": 33,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"_id": {
-			"name": "_id",
 			"id": 949,
-			"since": 33,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerEncSessionKey": {
-			"name": "_ownerEncSessionKey",
 			"id": 953,
-			"since": 33,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerGroup": {
-			"name": "_ownerGroup",
 			"id": 952,
-			"since": 33,
 			"type": "GeneratedId",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_permissions": {
-			"name": "_permissions",
 			"id": 950,
-			"since": 33,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
@@ -60,29 +53,31 @@ export const _TypeModel: TypeModel = {
 		}
 	},
 	"associations": {
+		"index": {
+			"id": 1103,
+			"type": "AGGREGATION",
+			"cardinality": "ZeroOrOne",
+			"final": true,
+			"refType": "CalendarEventIndexRef",
+			"dependency": null
+		},
 		"longEvents": {
-			"name": "longEvents",
 			"id": 955,
-			"since": 33,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "CalendarEvent",
 			"final": true,
-			"external": false
+			"refType": "CalendarEvent"
 		},
 		"shortEvents": {
-			"name": "shortEvents",
 			"id": 954,
-			"since": 33,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "CalendarEvent",
 			"final": true,
-			"external": false
+			"refType": "CalendarEvent"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createCalendarGroupRoot(values?: $Shape<$Exact<CalendarGroupRoot>>): CalendarGroupRoot {
@@ -99,6 +94,7 @@ export type CalendarGroupRoot = {
 	_ownerGroup: ?Id;
 	_permissions: Id;
 
+	index: ?CalendarEventIndexRef;
 	longEvents: Id;
 	shortEvents: Id;
 }

@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const RegistrationCaptchaServiceGetDataTypeRef: TypeRef<RegistrationCaptchaServiceGetData> = new TypeRef("sys", "RegistrationCaptchaServiceGetData")
@@ -14,36 +16,42 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1480,
-			"since": 40,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
+		"businessUseSelected": {
+			"id": 1752,
+			"type": "Boolean",
+			"cardinality": "One",
+			"final": false,
+			"encrypted": false
+		},
 		"mailAddress": {
-			"name": "mailAddress",
 			"id": 1482,
-			"since": 40,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
+		"paidSubscriptionSelected": {
+			"id": 1751,
+			"type": "Boolean",
+			"cardinality": "One",
+			"final": false,
+			"encrypted": false
+		},
 		"signupToken": {
-			"name": "signupToken",
 			"id": 1731,
-			"since": 58,
 			"type": "String",
 			"cardinality": "ZeroOrOne",
 			"final": false,
 			"encrypted": false
 		},
 		"token": {
-			"name": "token",
 			"id": 1481,
-			"since": 40,
 			"type": "String",
 			"cardinality": "ZeroOrOne",
 			"final": false,
@@ -52,7 +60,7 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createRegistrationCaptchaServiceGetData(values?: $Shape<$Exact<RegistrationCaptchaServiceGetData>>): RegistrationCaptchaServiceGetData {
@@ -63,7 +71,9 @@ export type RegistrationCaptchaServiceGetData = {
 	_type: TypeRef<RegistrationCaptchaServiceGetData>;
 
 	_format: NumberString;
+	businessUseSelected: boolean;
 	mailAddress: string;
+	paidSubscriptionSelected: boolean;
 	signupToken: ?string;
 	token: ?string;
 }

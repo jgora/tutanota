@@ -1,39 +1,18 @@
 // @flow
 import m from "mithril"
 import {lang} from "../misc/LanguageViewModel"
-import {BookingItemFeatureType, Const} from "../api/common/TutanotaConstants"
+import {BookingItemFeatureType} from "../api/common/TutanotaConstants"
 import type {BuyOptionBoxAttr} from "./BuyOptionBox"
-import {BuyOptionBox, getActiveSubscriptionActionButtonReplacement} from "./BuyOptionBox"
-import {load, serviceRequestVoid} from "../api/main/Entity"
+import {BuyOptionBox, updateBuyOptionBoxPriceInformation} from "./BuyOptionBox"
+import {load} from "../api/main/Entity"
 import {worker} from "../api/main/WorkerClient"
-import {getCountFromPriceData, getPriceFromPriceData} from "./PriceUtils"
 import {neverNull} from "../api/common/utils/Utils"
-import {formatPrice} from "../subscription/SubscriptionUtils"
 import {CustomerTypeRef} from "../api/entities/sys/Customer"
 import {CustomerInfoTypeRef} from "../api/entities/sys/CustomerInfo"
 import {logins} from "../api/main/LoginController"
 import {Dialog, DialogType} from "../gui/base/Dialog"
-import * as BuyDialog from "./BuyDialog"
-import {createBookingServiceData} from "../api/entities/sys/BookingServiceData"
-import {PreconditionFailedError} from "../api/common/error/RestError"
-import {SysService} from "../api/entities/sys/Services"
-import {HttpMethod} from "../api/common/EntityFunctions"
 import {ButtonN, ButtonType} from "../gui/base/ButtonN"
-
-/**
- * @returns True if it failed, false otherwise
- */
-export function buyAliases(amount: number): Promise<boolean> {
-	const bookingData = createBookingServiceData()
-	bookingData.amount = amount.toString()
-	bookingData.featureType = BookingItemFeatureType.Alias
-	bookingData.date = Const.CURRENT_DATE
-	return serviceRequestVoid(SysService.BookingService, HttpMethod.POST, bookingData)
-		.return(false)
-		.catch(PreconditionFailedError, error => {
-			return Dialog.error("emailAliasesTooManyActivatedForBooking_msg").return(true)
-		})
-}
+import {showBuyDialogToBookItem} from "./BuyDialog"
 
 export function show(): Promise<void> {
 	return load(CustomerTypeRef, neverNull(logins.getUserController().user.customer))
@@ -44,13 +23,9 @@ export function show(): Promise<void> {
 			return new Promise(resolve => {
 				const changeEmailAliasPackageAction = (amount: number) => {
 					dialog.close()
-					BuyDialog.show(BookingItemFeatureType.Alias, amount, freeEmailAliases, false).then(confirm => {
-						if (confirm) {
-							return buyAliases(amount)
-						} else {
-							show()
-						}
-					}).then(() => resolve())
+					showBuyDialogToBookItem(BookingItemFeatureType.Alias, amount, freeEmailAliases)
+						.then(cancelled => {if (cancelled) show()})
+						.then(() => resolve())
 				}
 
 				const emailAliasesBuyOptionsAttrs = [
@@ -89,7 +64,6 @@ function createEmailAliasPackageBox(amount: number, freeAmount: number, buyActio
 			}
 		},
 		price: lang.get("emptyString_msg"),
-		originalPrice: lang.get("emptyString_msg"),
 		helpLabel: "emptyString_msg",
 		features: () => [],
 		width: 230,
@@ -98,16 +72,6 @@ function createEmailAliasPackageBox(amount: number, freeAmount: number, buyActio
 		showReferenceDiscount: false
 	}
 
-	worker.getPrice(BookingItemFeatureType.Alias, amount, false).then(newPrice => {
-		if (amount === getCountFromPriceData(newPrice.currentPriceNextPeriod, BookingItemFeatureType.Alias)) {
-			attrs.actionButton = getActiveSubscriptionActionButtonReplacement()
-		}
-		let price = formatPrice(getPriceFromPriceData(newPrice.futurePriceNextPeriod, BookingItemFeatureType.Alias), true)
-		attrs.price = price
-		attrs.originalPrice = price
-		attrs.helpLabel = (neverNull(newPrice.futurePriceNextPeriod).paymentInterval
-			=== "12") ? "pricing.perYear_label" : "pricing.perMonth_label"
-		m.redraw()
-	})
+	updateBuyOptionBoxPriceInformation(worker, BookingItemFeatureType.Alias, amount, attrs)
 	return {amount, buyOptionBoxAttr: attrs}
 }

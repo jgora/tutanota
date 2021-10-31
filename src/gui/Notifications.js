@@ -1,8 +1,9 @@
 //@flow
 
 import {noOp} from "../api/common/utils/Utils"
-import {isApp, isDesktop} from "../api/Env"
+import {isApp, isDesktop} from "../api/common/Env"
 import {NotificationIcon} from "./base/icons/Icons"
+import type {clickHandler} from "./base/GuiUtils"
 
 function _showNotification(title: string, options: ?NotificationOptions, onclick: clickHandler): ?Notification {
 	if (window.Notification.permission === "granted") {
@@ -50,4 +51,4 @@ export class Notifications {
 	}
 }
 
-export const notifications = new Notifications()
+export const notifications: Notifications = new Notifications()

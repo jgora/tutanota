@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const NewDraftAttachmentTypeRef: TypeRef<NewDraftAttachment> = new TypeRef("tutanota", "NewDraftAttachment")
@@ -14,36 +16,28 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 487,
-			"since": 11,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"encCid": {
-			"name": "encCid",
 			"id": 925,
-			"since": 32,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"encFileName": {
-			"name": "encFileName",
 			"id": 488,
-			"since": 11,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"encMimeType": {
-			"name": "encMimeType",
 			"id": 489,
-			"since": 11,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
@@ -52,18 +46,15 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"fileData": {
-			"name": "fileData",
 			"id": 490,
-			"since": 11,
 			"type": "ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "FileData",
 			"final": true,
-			"external": false
+			"refType": "FileData"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createNewDraftAttachment(values?: $Shape<$Exact<NewDraftAttachment>>): NewDraftAttachment {

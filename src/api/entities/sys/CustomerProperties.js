@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {File} from "./File"
 import type {NotificationMailTemplate} from "./NotificationMailTemplate"
@@ -16,54 +18,42 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 660,
-			"since": 6,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"_id": {
-			"name": "_id",
 			"id": 658,
-			"since": 6,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerGroup": {
-			"name": "_ownerGroup",
 			"id": 985,
-			"since": 17,
 			"type": "GeneratedId",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_permissions": {
-			"name": "_permissions",
 			"id": 659,
-			"since": 6,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"externalUserWelcomeMessage": {
-			"name": "externalUserWelcomeMessage",
 			"id": 661,
-			"since": 6,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"lastUpgradeReminder": {
-			"name": "lastUpgradeReminder",
 			"id": 975,
-			"since": 15,
 			"type": "Date",
 			"cardinality": "ZeroOrOne",
 			"final": false,
@@ -72,35 +62,32 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"bigLogo": {
-			"name": "bigLogo",
 			"id": 923,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": false,
 			"refType": "File",
-			"final": false
+			"dependency": null
 		},
 		"notificationMailTemplates": {
-			"name": "notificationMailTemplates",
 			"id": 1522,
-			"since": 45,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "NotificationMailTemplate",
-			"final": false
+			"dependency": null
 		},
 		"smallLogo": {
-			"name": "smallLogo",
 			"id": 922,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": false,
 			"refType": "File",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createCustomerProperties(values?: $Shape<$Exact<CustomerProperties>>): CustomerProperties {

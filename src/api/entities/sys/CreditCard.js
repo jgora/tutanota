@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const CreditCardTypeRef: TypeRef<CreditCard> = new TypeRef("sys", "CreditCard")
@@ -14,54 +16,42 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 1314,
-			"since": 30,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"cardHolderName": {
-			"name": "cardHolderName",
 			"id": 1315,
-			"since": 30,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": true
 		},
 		"cvv": {
-			"name": "cvv",
 			"id": 1317,
-			"since": 30,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": true
 		},
 		"expirationMonth": {
-			"name": "expirationMonth",
 			"id": 1318,
-			"since": 30,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": true
 		},
 		"expirationYear": {
-			"name": "expirationYear",
 			"id": 1319,
-			"since": 30,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": true
 		},
 		"number": {
-			"name": "number",
 			"id": 1316,
-			"since": 30,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
@@ -70,7 +60,7 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createCreditCard(values?: $Shape<$Exact<CreditCard>>): CreditCard {

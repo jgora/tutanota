@@ -1,150 +1,253 @@
-const Promise = require('bluebird')
+import fs from "fs-extra"
+import {default as path, dirname} from "path"
+import {fileURLToPath} from "url"
+import * as LaunchHtml from "./LaunchHtml.js"
+import * as env from "./env.js"
+import {rollupDebugPlugins, writeNollupBundle} from "./RollupDebugConfig.js"
+import nodeResolve from "@rollup/plugin-node-resolve"
+import hmr from "nollup/lib/plugin-hmr.js"
+import os from "os"
+import {babelDesktopPlugins, bundleDependencyCheckPlugin} from "./RollupConfig.js"
+import {nativeDepWorkaroundPlugin, pluginNativeLoader} from "./RollupPlugins.js"
+import {spawn} from "child_process"
+import flow_bin from "flow-bin"
 
-const BuildCache = require('./BuildCache.js')
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const root = path.dirname(__dirname)
 
-const path = require("path")
-const fs = Promise.Promise.promisifyAll(require("fs-extra"))
-const babel = Promise.promisifyAll(require("babel-core"))
+async function createBootstrap(env) {
+	let jsFileName
+	let htmlFileName
+	switch (env.mode) {
+		case "App":
+			jsFileName = "index-app.js"
+			htmlFileName = "index-app.html"
+			break
+		case "Browser":
+			jsFileName = "index.js"
+			htmlFileName = "index.html"
+			break
+		case "Desktop":
+			jsFileName = "index-desktop.js"
+			htmlFileName = "index-desktop.html"
+	}
+	const imports = [{src: 'polyfill.js'}, {src: jsFileName}]
 
-const srcDir = "src"
-
-let flow
-try {
-	flow = require('flow-bin')
-} catch (e) {
-	// we don't have flow on F-Droid
-	console.log("flow-bin not found, stubbing it")
-	flow = 'true'
+	const template = `window.whitelabelCustomizations = null
+window.env = ${JSON.stringify(env, null, 2)}
+if (env.staticUrl == null && window.tutaoDefaultApiUrl) {
+    // overriden by js dev server
+    window.env.staticUrl = window.tutaoDefaultApiUrl
 }
-const spawn = require('child_process').spawn
+import('./app.js')`
+	await _writeFile(`./build/${jsFileName}`, template)
+	const html = await LaunchHtml.renderHtml(imports, env)
+	await _writeFile(`./build/${htmlFileName}`, html)
+}
 
-class Builder {
-	constructor(baseDir, destDir) {
-		this.baseDir = baseDir
-		this.destDir = destDir
-		this._buildCache = new BuildCache(this.destDir)
-		this._ready = false
+function _writeFile(targetFile, content) {
+	return fs.mkdirs(path.dirname(targetFile)).then(() => fs.writeFile(targetFile, content, 'utf-8'))
+}
+
+function getStaticUrl(stage, mode, host) {
+	if (stage === "local" && mode === "Browser") {
+		// We would like to use web app build for both JS server and actual server. For that we should avoid hardcoding URL as server
+		// might be running as one of testing HTTPS domains. So instead we override URL when the app is served from JS server
+		// (see DevServer).
+		// This is only relevant for browser environment.
+		return null
+	} else if (stage === 'test') {
+		return 'https://test.tutanota.com'
+	} else if (stage === 'prod') {
+		return 'https://mail.tutanota.com'
+	} else if (stage === 'local') {
+		return "http://" + os.hostname() + ":9000"
+	} else { // host
+		return host
+	}
+}
+
+async function prepareAssets(stage, host, version) {
+	let restUrl
+	await Promise.all([
+		await fs.emptyDir("build/images"),
+		fs.copy(path.join(root, '/resources/favicon'), path.join(root, '/build/images')),
+		fs.copy(path.join(root, '/resources/images/'), path.join(root, '/build/images')),
+		fs.copy(path.join(root, '/resources/desktop-icons'), path.join(root, '/build/icons')),
+		fs.copy(path.join(root, '/src/braintree.html'), path.join(root, 'build/braintree.html'))
+	])
+	if (stage === 'test') {
+		restUrl = 'https://test.tutanota.com'
+	} else if (stage === 'prod') {
+		restUrl = 'https://mail.tutanota.com'
+	} else if (stage === 'local') {
+		restUrl = "http://" + os.hostname() + ":9000"
+	} else { // host
+		restUrl = host
 	}
 
-	clean() {
-		return fs.emptyDirAsync(this.destDir + "/").then(() => this._buildCache = new BuildCache(this.destDir))
+	// write empty file
+	await fs.writeFile("build/polyfill.js", "")
+
+	for (const mode of ["Browser", "App", "Desktop"]) {
+		await createBootstrap(env.create({staticUrl: getStaticUrl(stage, mode, host), version, mode, dist: false}))
+	}
+}
+
+/**
+ * Use model map with all the TypeModels inlined so that worker doesn't have to async import them
+ * which doesn't work in non-Blink browsers at the moment.
+ * This is not ideal as nollup puts them into every chunk which uses modelMap but it'll do for now.
+ */
+function debugModels() {
+	return {
+		name: "debug-models",
+		resolveId(id) {
+			const imports = {
+				"../entities/base/baseModelMap": "src/api/entities/base/baseModelMapDebug.js",
+				"../entities/sys/sysModelMap": "src/api/entities/sys/sysModelMapDebug.js",
+				"../entities/tutanota/tutanotaModelMap": "src/api/entities/tutanota/tutanotaModelMapDebug.js",
+				"../entities/monitor/monitorModelMap": "src/api/entities/monitor/monitorModelMapDebug.js",
+				"../entities/accounting/accountingModelMap": "src/api/entities/accounting/accountingModelMapDebug.js",
+			}
+			return imports[id]
+		}
+	}
+}
+
+export async function preBuild(log) {
+	await runFlowChecks(log)
+}
+
+export async function postBuild(log) {
+
+}
+
+export async function build({desktop, stage, host}, {devServerPort, watchFolders}, log) {
+	log("Building app")
+
+	const {version} = JSON.parse(await fs.readFile("package.json", "utf8"))
+	await prepareAssets(stage, host, version)
+	const start = Date.now()
+	const nollup = (await import('nollup')).default
+
+	log("Bundling...")
+
+	const bundle = await nollup({
+		input: ["src/app.js", "src/api/worker/worker.js"],
+		plugins: rollupDebugPlugins(path.resolve("."))
+			.concat(devServerPort ? hmr({bundleId: '', hmrHost: `localhost:${devServerPort}`, verbose: true}) : [])
+			.concat(debugModels())
+			.concat(bundleDependencyCheckPlugin())
+	})
+	const generateBundle = async () => {
+		log("Generating")
+		const generateStart = Date.now()
+		const result = await bundle.generate({
+			format: "es", sourceMap: true, dir: "./build", chunkFileNames: "[name].js"
+		})
+
+		// Here we include polyfill first and then import worker
+		// as output is esm simply importing file is enough to execute it
+		await fs.promises.writeFile("build/worker-bootstrap.js", `importScripts("./polyfill.js")
+importScripts("./worker.js")
+`)
+
+		log("Generated in", Date.now() - generateStart)
+		// result.stats && log("Generated in", result.stats.time, result.stats)
+
+		log("Writing")
+		const writeStart = Date.now()
+		await writeNollupBundle(result, log)
+		log("Wrote in", Date.now() - writeStart)
+		return result
+	}
+
+	log("Bundled in", Date.now() - start)
+
+	let desktopBundles
+	if (desktop) {
+		desktopBundles = await buildAndStartDesktop(log, version)
+	} else {
+		desktopBundles = []
+	}
+	return [{bundle, generate: generateBundle}, ...desktopBundles]
+}
+
+async function buildAndStartDesktop(log, version) {
+	log("Building desktop client...")
+
+	const desktopIconsPath = path.join(root, "/resources/desktop-icons")
+	const packageJSON = (await import('./electron-package-json-template.js')).default({
+		nameSuffix: "-debug",
+		version,
+		updateUrl: "http://localhost:9000/client/build",
+		iconPath: path.join(desktopIconsPath, "logo-solo-red.png"),
+		sign: false
+	})
+	await fs.copy(desktopIconsPath, "./build/desktop/resources/icons", {overwrite: true})
+	const content = JSON.stringify(packageJSON, null, 2)
+
+	await fs.createFile(path.join(root, "./build/package.json"))
+	await fs.writeFile(path.join(root, "./build/package.json"), content, 'utf-8')
+
+	const nollup = (await import('nollup')).default
+	log("desktop main bundle")
+	const nodePreBundle = await nollup({
+		input: path.join(root, "src/desktop/DesktopMain.js"),
+		plugins: [
+			...rollupDebugPlugins(path.resolve("."), babelDesktopPlugins),
+			nativeDepWorkaroundPlugin(),
+			pluginNativeLoader(),
+			nodeResolve({preferBuiltins: true}),
+			env.preludeEnvPlugin(env.create({staticUrl: null, version, mode: "Desktop", dist: false}))
+		],
+	})
+
+	const nodeBundleWrapper = {
+		bundle: nodePreBundle,
+		async generate() {
+			log("generating main desktop bundle")
+			// Electron uses commonjs imports. We could wrap it in our own commonjs module which dynamically imports the rest with import() but
+			// it's not supported inside node 12 without --experimental-node-modules.
+			const nodeBundle = await nodePreBundle.generate({
+				format: "cjs",
+				sourceMap: true,
+				dir: "./build/desktop",
+				chunkFileNames: "[name].js"
+			})
+			await writeNollupBundle(nodeBundle, log, "build/desktop")
+		}
 	}
 
 	/**
-	 * Builds all files from srcDir to build/
-	 * @param srcDirs An array of source directories
-	 * @param watch Watch for changes of the src files, if a function is provided. The function will be invoked, after
-	 *   the src files were build to the destionation dir
+	 * the preload script is such a weird environment that trying to pipe it through flow, babel, rollup
+	 * without anything breaking is not worth it for the 3 lines of code it contains,
+	 * so it's just written in normal commonJS and copied over to be executed directly
 	 */
-	build(srcDirs, watch) {
-		return new Promise((resolve, reject) => {
-			const chokidar = require('chokidar')
-			let watcher = chokidar.watch(srcDirs, {ignoreInitial: true, followSymlinks: true, cwd: this.baseDir})
-			                      .on('change', (file) => this._translateIfChanged(file).then(() => watch()))
-			                      .on('add', (file) => this._translateIfChanged(file).then(() => watch()))
-			                      .on('unlink', file => this._deleteFile(file).then(() => watch()))
-			                      .on('ready', () => {
-				                      let watched = watcher.getWatched()
-				                      let dirs = Object.keys(watched)
-				                      let currentFiles = []
-				                      for (let dir of dirs) {
-					                      for (let filename of watched[dir]) {
-						                      var file = path.join(this.baseDir, dir + "/" + filename)
-						                      if (fs.statSync(file).isFile()) {
-							                      currentFiles.push(file)
-						                      }
-					                      }
-				                      }
+	log("copying preload script")
+	await fs.mkdir("build/desktop", {recursive: true})
+	await fs.copyFile("src/desktop/preload.js", "build/desktop/preload.js")
 
-				                      let cachedFiles = this._buildCache.getCachedFiles()
+	log("Bundled desktop client")
+	return [nodeBundleWrapper]
+}
 
-				                      let promises = currentFiles.map(file => this._translateIfChanged(file))
-				                      let deletedFiles = cachedFiles.filter(file => currentFiles.indexOf(file) === -1)
-				                      Promise.all(promises.concat(deletedFiles.map(file => this._deleteFile(file))))
-				                             .then(() => {
-					                             this._ready = true
-					                             this._runFlow()
-				                             })
-				                             .then(resolve)
-
-				                      if (!watch) {
-					                      watcher.close()
-				                      }
-			                      })
-		})
-
-	}
-
-	_translateIfChanged(srcFile) {
-		if (path.resolve(srcFile) !== srcFile) {
-			srcFile = path.join(this.baseDir, srcFile) // convert to absolute path, if it is relative
-		}
-		if (!this._buildCache.hasChanged(srcFile)) {
-			return Promise.resolve()
-		}
-		let targetFile = path.join(this.destDir, path.relative(this.baseDir, srcFile))
-
-		let start = process.hrtime()
-		return this._translate(srcFile, targetFile).then(result => {
-			this._buildCache.update(srcFile)
-			let end = process.hrtime(start);
-			console.log(` > ${path.relative(this.baseDir, targetFile)} ${end[0] * 1000 + (end[1] / 1000000)}ms`)
-		}).then(() => this._runFlow())
-	}
-
-	_translate(srcFile, targetFile) {
-		// only js files that are no libs are compiled. All other files are just copied as resources.
-		if (path.extname(srcFile) === '.js' && srcFile.indexOf("/lib/") === -1) {
-			return fs.readFileAsync(srcFile, 'utf-8').then(src => {
-				if (src.trim().length === 0) {
-					console.log(`Source file ${srcFile} is currently empty, re-scheduling transform!`)
-					// the changed event is issued too early sometimes (when the file is empty)
-					return Promise.fromCallback(cb => {
-						setTimeout(() => this._translateIfChanged(srcFile), 100)
-					})
+function runFlowChecks(log) {
+	log("Running flow checks")
+	return new Promise((resolve, reject) => {
+		const childProcess = spawn(flow_bin, ["--quiet"], {stdio: "pipe"})
+			.on("exit", (code) => {
+				if (code === 0) {
+					log("Flow checks ok")
+					resolve()
+				} else {
+					reject(new Error("Flow detected errors"))
 				}
-				let result = babelCompile(src, srcFile)
-				return this._writeFile(targetFile, result.code)
 			})
-		} else {
-			return fs.ensureDirAsync(path.dirname(targetFile)).then(() => fs.copyAsync(srcFile, targetFile, {replace: true}))
-		}
-	}
-
-	_writeFile(targetFile, content) {
-		return fs.ensureDirAsync(path.dirname(targetFile)).then(() => fs.writeFileAsync(targetFile, content, 'utf-8'))
-	}
-
-	_deleteFile(srcFile) {
-		let targetFile = path.join(this.destDir, srcFile)
-		console.log(` - ${srcFile}`)
-		this._buildCache.remove(srcFile)
-		return fs.removeAsync(targetFile)
-	}
-
-	_runFlow() {
-		if (this._ready) {
-			spawn(flow, [], {stdio: [process.stdin, process.stdout, process.stderr]})
-		}
-	}
-}
-
-function babelCompile(src, srcFile) {
-	return babel.transform(src, {
-		"plugins": [
-			"transform-flow-strip-types",
-			"transform-class-properties",
-		],
-		"presets": ["es2015"],
-		comments: false,
-		babelrc: false,
-		retainLines: true,
-		sourceMaps: srcFile != null ? "inline" : false,
-		filename: srcFile,
+		childProcess.on("error", reject)
+		// capture any output from the flow process and forward it to the log() function
+		childProcess.stdout.on("data", (data) => log(data))
+		childProcess.stderr.on("data", (data) => log(data))
 	})
-}
-
-module.exports = {
-	Builder,
-	babelCompile
 }

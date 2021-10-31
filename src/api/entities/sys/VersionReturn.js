@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {Version} from "./Version"
 
@@ -15,9 +17,7 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 494,
-			"since": 1,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -26,17 +26,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"versions": {
-			"name": "versions",
 			"id": 495,
-			"since": 1,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "Version",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createVersionReturn(values?: $Shape<$Exact<VersionReturn>>): VersionReturn {

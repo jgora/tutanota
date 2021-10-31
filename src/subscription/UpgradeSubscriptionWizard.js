@@ -1,35 +1,36 @@
 // @flow
-import {assertMainOrNode} from "../api/Env"
+import {assertMainOrNode} from "../api/common/Env"
 import {neverNull} from "../api/common/utils/Utils"
+import type {Customer} from "../api/entities/sys/Customer"
 import {CustomerTypeRef} from "../api/entities/sys/Customer"
+import type {CustomerInfo} from "../api/entities/sys/CustomerInfo"
 import {CustomerInfoTypeRef} from "../api/entities/sys/CustomerInfo"
+import type {AccountingInfo} from "../api/entities/sys/AccountingInfo"
 import {AccountingInfoTypeRef} from "../api/entities/sys/AccountingInfo"
 import {load, serviceRequest} from "../api/main/Entity"
 import {logins} from "../api/main/LoginController"
-import {Const, PaymentMethodType as PaymentMethod} from "../api/common/TutanotaConstants"
+import type {InvoiceData, PaymentData} from "../api/common/TutanotaConstants"
+import {Const, getPaymentMethodType, PaymentMethodType as PaymentMethod} from "../api/common/TutanotaConstants"
 import {getByAbbreviation} from "../api/common/CountryList"
-import {WizardDialog} from "../gui/base/WizardDialog"
-import {InvoiceAndPaymentDataPage} from "./InvoiceAndPaymentDataPage"
-import {UpgradeConfirmPage} from "./UpgradeConfirmPage"
-import {UpgradeSubscriptionPage} from "./UpgradeSubscriptionPage"
+import {UpgradeSubscriptionPage, UpgradeSubscriptionPageAttrs} from "./UpgradeSubscriptionPage"
 import {formatNameAndAddress} from "../misc/Formatter"
-import {SignupPage} from "./SignupPage"
 import {client} from "../misc/ClientDetector"
 import m from "mithril"
-import type {SubscriptionOptions, SubscriptionTypeEnum, UpgradeTypeEnum} from "./SubscriptionUtils"
+import type {SubscriptionOptions, SubscriptionPlanPrices, SubscriptionTypeEnum, UpgradeTypeEnum} from "./SubscriptionUtils"
 import {SubscriptionType, UpgradeType} from "./SubscriptionUtils"
 import stream from "mithril/stream/stream.js"
 import {HttpMethod} from "../api/common/EntityFunctions"
 import {createUpgradePriceServiceData} from "../api/entities/sys/UpgradePriceServiceData"
 import {SysService} from "../api/entities/sys/Services"
+import type {UpgradePriceServiceReturn} from "../api/entities/sys/UpgradePriceServiceReturn"
 import {UpgradePriceServiceReturnTypeRef} from "../api/entities/sys/UpgradePriceServiceReturn"
 import type {TranslationKey} from "../misc/LanguageViewModel"
 import {assertTranslation} from "../misc/LanguageViewModel"
-import type {AccountingInfo} from "../api/entities/sys/AccountingInfo"
-import type {PlanPrices} from "../api/entities/sys/PlanPrices"
-import type {UpgradePriceServiceReturn} from "../api/entities/sys/UpgradePriceServiceReturn"
-import type {Customer} from "../api/entities/sys/Customer"
-import type {CustomerInfo} from "../api/entities/sys/CustomerInfo"
+import {createWizardDialog, WizardPageWrapper} from "../gui/base/WizardDialogN"
+import {Dialog} from "../gui/base/Dialog"
+import {InvoiceAndPaymentDataPage, InvoiceAndPaymentDataPageAttrs} from "./InvoiceAndPaymentDataPage"
+import {UpgradeConfirmPage, UpgradeConfirmPageAttrs} from "./UpgradeConfirmPage"
+import {SignupPage, SignupPageAttrs} from "./SignupPage"
 
 assertMainOrNode()
 
@@ -48,14 +49,14 @@ export type UpgradeSubscriptionData = {
 	type: SubscriptionTypeEnum,
 	price: string,
 	priceNextYear: ?string,
-	accountingInfo: ?AccountingInfo,
+	accountingInfo: ?AccountingInfo, // not initially set for signup but loaded in InvoiceAndPaymentDataPage
+	customer: ?Customer, // not initially set for signup but loaded in InvoiceAndPaymentDataPage
 	newAccountData: ?NewAccountData,
 	campaign: ?string,
 	campaignInfoTextId: ?TranslationKey,
 	upgradeType: UpgradeTypeEnum,
-	premiumPrices: PlanPrices,
-	teamsPrices: PlanPrices,
-	proPrices: PlanPrices
+	planPrices: SubscriptionPlanPrices,
+	currentSubscription: ?SubscriptionTypeEnum,
 }
 
 const TOKEN_PARAM_NAME = "#token="
@@ -81,7 +82,7 @@ export function deleteCampaign(): void {
 	}
 }
 
-function loadUpgradePrices(): Promise<UpgradePriceServiceReturn> {
+export function loadUpgradePrices(): Promise<UpgradePriceServiceReturn> {
 	let data = createUpgradePriceServiceData()
 	data.date = Const.CURRENT_DATE
 	data.campaign = getCampaign()
@@ -99,8 +100,15 @@ function loadCustomerAndInfo(): Promise<{customer: Customer, customerInfo: Custo
 
 export function showUpgradeWizard(): void {
 	loadCustomerAndInfo()
-		.then(({customerInfo, accountingInfo}) => {
+		.then(({customer, accountingInfo}) => {
 				return loadUpgradePrices().then(prices => {
+					const planPrices: SubscriptionPlanPrices = {
+						Premium: prices.premiumPrices,
+						PremiumBusiness: prices.premiumBusinessPrices,
+						Teams: prices.teamsPrices,
+						TeamsBusiness: prices.teamsBusinessPrices,
+						Pro: prices.proPrices
+					}
 					const upgradeData: UpgradeSubscriptionData = {
 						options: {
 							businessUse: stream(prices.business),
@@ -112,35 +120,42 @@ export function showUpgradeWizard(): void {
 							vatNumber: accountingInfo.invoiceVatIdNo // only for EU countries otherwise empty
 						},
 						paymentData: {
-							paymentMethod: accountingInfo.paymentMethod || PaymentMethod.CreditCard,
+							paymentMethod: getPaymentMethodType(accountingInfo) || PaymentMethod.CreditCard,
 							creditCardData: null,
 						},
 						price: "",
 						type: SubscriptionType.Premium,
 						priceNextYear: null,
 						accountingInfo: accountingInfo,
+						customer: customer,
 						newAccountData: null,
 						campaign: getCampaign(),
 						campaignInfoTextId: prices.messageTextId ? assertTranslation(prices.messageTextId) : null,
 						upgradeType: UpgradeType.Initial,
-						premiumPrices: prices.premiumPrices,
-						teamsPrices: prices.teamsPrices,
-						proPrices: prices.proPrices,
+						planPrices: planPrices,
+						currentSubscription: SubscriptionType.Free
 					}
 					const wizardPages = [
-						new UpgradeSubscriptionPage(upgradeData, SubscriptionType.Free),
-						new InvoiceAndPaymentDataPage(upgradeData),
-						new UpgradeConfirmPage(upgradeData)
+						new WizardPageWrapper(UpgradeSubscriptionPage, new UpgradeSubscriptionPageAttrs(upgradeData)),
+						new WizardPageWrapper(InvoiceAndPaymentDataPage, new InvoiceAndPaymentDataPageAttrs(upgradeData)),
+						new WizardPageWrapper(UpgradeConfirmPage, new UpgradeConfirmPageAttrs(upgradeData)),
 					]
-					new WizardDialog(wizardPages, () => Promise.resolve()).show()
+					const wizardBuilder = createWizardDialog(upgradeData, wizardPages)
+					wizardBuilder.dialog.show()
 				})
 			}
 		)
 }
 
-
-export function loadSignupWizard(): Promise<WizardDialog<UpgradeSubscriptionData>> {
+export function loadSignupWizard(): Promise<Dialog> {
 	return loadUpgradePrices().then(prices => {
+		const planPrices: SubscriptionPlanPrices = {
+			Premium: prices.premiumPrices,
+			PremiumBusiness: prices.premiumBusinessPrices,
+			Teams: prices.teamsPrices,
+			TeamsBusiness: prices.teamsBusinessPrices,
+			Pro: prices.proPrices
+		}
 		const signupData: UpgradeSubscriptionData = {
 			options: {
 				businessUse: stream(prices.business),
@@ -159,21 +174,22 @@ export function loadSignupWizard(): Promise<WizardDialog<UpgradeSubscriptionData
 			priceNextYear: null,
 			type: SubscriptionType.Free,
 			accountingInfo: null,
+			customer: null,
 			newAccountData: null,
 			campaign: getCampaign(),
 			campaignInfoTextId: prices.messageTextId ? assertTranslation(prices.messageTextId) : null,
 			upgradeType: UpgradeType.Signup,
-			premiumPrices: prices.premiumPrices,
-			teamsPrices: prices.teamsPrices,
-			proPrices: prices.proPrices
+			planPrices: planPrices,
+			currentSubscription: null
 		}
 		const wizardPages = [
-			new UpgradeSubscriptionPage(signupData),
-			new SignupPage(signupData),
-			new InvoiceAndPaymentDataPage(signupData),
-			new UpgradeConfirmPage(signupData)
+			new WizardPageWrapper(UpgradeSubscriptionPage, new UpgradeSubscriptionPageAttrs(signupData)),
+			new WizardPageWrapper(SignupPage, new SignupPageAttrs(signupData)),
+			new WizardPageWrapper(InvoiceAndPaymentDataPage, new InvoiceAndPaymentDataPageAttrs(signupData)),
+			new WizardPageWrapper(UpgradeConfirmPage, new UpgradeConfirmPageAttrs(signupData)),
 		]
-		return new WizardDialog(wizardPages, () => {
+
+		const wizardBuilder = createWizardDialog(signupData, wizardPages, () => {
 			let promise
 			if (logins.isUserLoggedIn()) {
 				promise = logins.logout(false)
@@ -182,11 +198,15 @@ export function loadSignupWizard(): Promise<WizardDialog<UpgradeSubscriptionData
 			}
 			return promise.then(() => {
 				if (signupData.newAccountData) {
-					m.route.set("/login?loginWith=" + signupData.newAccountData.mailAddress)
+					m.route.set("/login", {loginWith: signupData.newAccountData.mailAddress})
 				} else {
-					m.route.set("/login")
+					m.route.set("/login", {noAutoLogin: true})
 				}
 			})
 		})
+		const wizard = wizardBuilder.dialog
+		//we only return the dialog so that it can be shown
+		return wizard
 	})
 }
+

@@ -9,17 +9,19 @@ import {Icon} from "./Icon"
 import {theme} from "../theme"
 import {styles} from "../styles"
 import {lazyStringValue} from "../../api/common/utils/StringUtils"
-import {assertMainOrNodeBoot} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import type {TranslationKey} from "../../misc/LanguageViewModel"
 import {lang} from "../../misc/LanguageViewModel"
 import {Keys} from "../../api/common/TutanotaConstants"
 import {isKeyPressed} from "../../misc/KeyManager"
+import type {clickHandler, dropHandler} from "./GuiUtils"
+import type {lazy} from "../../api/common/utils/Utils"
 
-assertMainOrNodeBoot()
+assertMainOrNode()
 
 export type NavButtonAttrs = {|
 	label: TranslationKey | lazy<string>,
-	icon: lazyIcon,
+	icon?: lazyIcon,
 	href: string | lazy<string>,
 	isSelectedPrefix?: string | boolean,
 	click?: clickHandler,
@@ -29,11 +31,14 @@ export type NavButtonAttrs = {|
 	hideLabel?: boolean,
 	vertical?: boolean,
 	fontSize?: number,
+	small?: boolean,
+	centred?: boolean,
 |}
 
-const navButtonSelector = (vertical) =>
-	"a.nav-button.noselect.flex-start.flex-no-shrink.items-center.click.plr-button.no-text-decoration.button-height"
+const navButtonSelector = (vertical, centred) =>
+	"a.nav-button.noselect.flex-no-shrink.items-center.click.plr-button.no-text-decoration.button-height"
 	+ (vertical ? ".col" : "")
+	+ (!centred ? ".flex-start" : ".flex-center")
 
 export class NavButtonN implements MComponent<NavButtonAttrs> {
 	_domButton: HTMLElement;
@@ -47,13 +52,13 @@ export class NavButtonN implements MComponent<NavButtonAttrs> {
 	}
 
 
-	view(vnode: Vnode<NavButtonAttrs>) {
+	view(vnode: Vnode<NavButtonAttrs>): Children {
 		const a = vnode.attrs
 		// allow nav button without label for registration button on mobile devices
-		return m((this._isExternalUrl(a.href) ? navButtonSelector(vnode.attrs.vertical) : m.route.Link),
+		return m((this._isExternalUrl(a.href) ? navButtonSelector(vnode.attrs.vertical, vnode.attrs.centred === true) : m.route.Link),
 			this.createButtonAttributes(a),
 			[
-				a.icon() ? m(Icon, {
+				a.icon && a.icon() ? m(Icon, {
 					icon: a.icon(),
 					class: this._getIconClass(a),
 					style: {
@@ -66,7 +71,7 @@ export class NavButtonN implements MComponent<NavButtonAttrs> {
 		)
 	}
 
-	getLabel(label: TranslationKey | lazy<string>) {
+	getLabel(label: TranslationKey | lazy<string>): string {
 		return lang.getMaybeLazy(label)
 	}
 
@@ -74,21 +79,23 @@ export class NavButtonN implements MComponent<NavButtonAttrs> {
 		return lazyStringValue(href)
 	}
 
-	_getIconClass(a: NavButtonAttrs) {
+	_getIconClass(a: NavButtonAttrs): string {
 		const isSelected = isNavButtonSelected(a)
 		if (a.colors === NavButtonColors.Header && !styles.isDesktopLayout()) {
 			return "flex-end items-center icon-xl" + (isSelected ? " selected" : "")
+		} else if (a.small === true) {
+			return "flex-center items-center icon" + (isSelected ? " selected" : "")
 		} else {
 			return "flex-center items-center icon-large" + (isSelected ? " selected" : "")
 		}
 	}
 
-	_isExternalUrl(href: string | lazy<string>) {
+	_isExternalUrl(href: string | lazy<string>): boolean {
 		let url = this._getUrl(href)
 		return url != null ? url.indexOf("http") === 0 : false
 	}
 
-	createButtonAttributes(a: NavButtonAttrs) {
+	createButtonAttributes(a: NavButtonAttrs): any {
 		let attr: any = {
 			role: "button", // role button for screen readers
 			href: this._getUrl(a.href),
@@ -96,11 +103,11 @@ export class NavButtonN implements MComponent<NavButtonAttrs> {
 				color: (isNavButtonSelected(a) || this._draggedOver)
 					? getColors(a.colors).button_selected
 					: getColors(a.colors).button,
-				"font-size": px(a.fontSize),
+				"font-size": a.fontSize ? px(a.fontSize) : "",
 			},
 			title: this.getLabel(a.label),
 			target: this._isExternalUrl(a.href) ? "_blank" : undefined,
-			oncreate: (vnode: VirtualElement) => {
+			oncreate: (vnode: Vnode<*>) => {
 				this._domButton = vnode.dom
 				addFlash(vnode.dom)
 			},

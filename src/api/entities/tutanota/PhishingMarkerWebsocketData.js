@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {PhishingMarker} from "./PhishingMarker"
 
@@ -15,18 +17,14 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1035,
-			"since": 40,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"lastId": {
-			"name": "lastId",
 			"id": 1036,
-			"since": 40,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": false,
@@ -35,17 +33,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"markers": {
-			"name": "markers",
 			"id": 1037,
-			"since": 40,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "PhishingMarker",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createPhishingMarkerWebsocketData(values?: $Shape<$Exact<PhishingMarkerWebsocketData>>): PhishingMarkerWebsocketData {

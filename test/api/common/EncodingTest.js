@@ -1,5 +1,5 @@
 // @flow
-import o from "ospec/ospec.js"
+import o from "ospec"
 import {
 	_replaceLoneSurrogates,
 	_stringToUtf8Uint8ArrayLegacy,
@@ -9,7 +9,7 @@ import {
 	base64ToBase64Url,
 	base64ToHex,
 	base64ToUint8Array,
-	base64UrlToBase64,
+	base64UrlToBase64, decodeBase64, decodeQuotedPrintable,
 	generatedIdToTimestamp,
 	hexToBase64,
 	hexToUint8Array,
@@ -18,13 +18,24 @@ import {
 	timestampToHexGeneratedId,
 	uint8ArrayToArrayBuffer,
 	uint8ArrayToBase64,
-	uint8ArrayToHex
+	uint8ArrayToHex, uint8ArrayToString
 } from "../../../src/api/common/utils/Encoding"
-import {GENERATED_MIN_ID} from "../../../src/api/common/EntityFunctions"
+import {GENERATED_MIN_ID} from "../../../src/api/common/utils/EntityUtils";
 
 o.spec("Encoding", function () {
 
 	//TODO test missing encoder functions (only tested partially)
+	o.before(async function () {
+		if (global.isBrowser) {
+			global.TextDecoder = window.TextDecoder
+			global.TextEncoder = window.TextEncoder
+		} else {
+			// $FlowIssue[prop-missing] TextEncoder *is* present in util.
+			const {TextDecoder: nodeTextDecoder, TextEncoder: nodeTextEncoder} = await import("util")
+			global.TextDecoder = nodeTextDecoder
+			global.TextEncoder = nodeTextEncoder
+		}
+	})
 
 	o("_replaceLoneSurrogates", function () {
 		o(_replaceLoneSurrogates("a\uD800\uDFFFb")).equals("a\uD800\uDFFFb") // high and low
@@ -155,5 +166,18 @@ o.spec("Encoding", function () {
 		o(Array.from(new Uint8Array(uint8ArrayToArrayBuffer(array.subarray(2))))).deepEquals([3, 4, 5])
 	})
 
+	o("uint8Array to string", function () {
+		o(uint8ArrayToString("utf-8", stringToUtf8Uint8Array("däß ißt ein teßt ü"))).equals("däß ißt ein teßt ü")
+		o(uint8ArrayToString("latin1", Uint8Array.from(["DC", "E7", "F1"].map(e => parseInt(e, 16))))).equals("Üçñ")
+	})
+
+	o("decode quoted-printable string", function () {
+		o(decodeQuotedPrintable("utf-8", "d=C3=A4=C3=9F i=C3=9Ft ein te=C3=9Ft =C3=BC")).equals("däß ißt ein teßt ü")
+		o(decodeQuotedPrintable("latin1", "Rua das Na=E7=F5es")).equals("Rua das Nações")
+	})
+	o("decode base64 string with utf8 charset", function () {
+		o(decodeBase64("utf-8", "ZMOkw58gacOfdCBlaW4gdGXDn3Qgw7w=")).equals("däß ißt ein teßt ü")
+		o(decodeBase64("latin1", "ZOTfIGnfdCBlaW4gdGXfdCD8")).equals("däß ißt ein teßt ü")
+	})
 
 })

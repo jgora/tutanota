@@ -6,52 +6,17 @@
  *   <li>The worker sends {ClientCommands}s to the client. The commands are executed by the client (without any response to the worker).
  * </ul>
  */
-import {isWorker} from "../Env"
-import {
-	AccessBlockedError,
-	AccessDeactivatedError,
-	AccessExpiredError,
-	BadGatewayError,
-	BadRequestError,
-	ConnectionError,
-	InsufficientStorageError,
-	InternalServerError,
-	InvalidDataError,
-	InvalidSoftwareVersionError,
-	LimitReachedError,
-	LockedError,
-	MethodNotAllowedError,
-	NotAuthenticatedError,
-	NotAuthorizedError,
-	NotFoundError,
-	PreconditionFailedError,
-	ResourceError,
-	ServiceUnavailableError,
-	SessionExpiredError,
-	TooManyRequestsError
-} from "./error/RestError"
-import {ProgrammingError} from "./error/ProgrammingError"
-import {RecipientsNotFoundError} from "./error/RecipientsNotFoundError"
-import {CryptoError} from "./error/CryptoError"
-import {PermissionError} from "./error/PermissionError"
-import {OutOfSyncError} from "./error/OutOfSyncError"
-import {SecondFactorPendingError} from "./error/SecondFactorPendingError"
-import {SessionKeyNotFoundError} from "./error/SessionKeyNotFoundError"
-import {DbError} from "./error/DbError"
-import {CancelledError} from "./error/CancelledError"
-import {RecipientNotResolvedError} from "./error/RecipientNotResolvedError"
-import {FileNotFoundError} from "./error/FileNotFoundError"
-import {FileOpenError} from "./error/FileOpenError"
-import {SseError} from "./error/SseError"
-import {IndexingNotSupportedError} from "./error/IndexingNotSupportedError"
-import {QuotaExceededError} from "./error/QuotaExceededError"
+import {isWorker} from "./Env"
+import {downcast, objToError} from "./utils/Utils"
+
+type Command = (msg: Request) => Promise<any>
 
 export class Request {
 	type: WorkerRequestType | MainRequestType | NativeRequestType | JsRequestType;
 	id: string;
 	args: any[];
 
-	constructor(type: WorkerRequestType | MainRequestType | NativeRequestType | JsRequestType, args: any[]) {
+	constructor(type: WorkerRequestType | MainRequestType | NativeRequestType | JsRequestType, args: $ReadOnlyArray<mixed>) {
 		this.type = type
 		this.id = _createRequestId()
 		this.args = Array.from(args)
@@ -82,13 +47,17 @@ export class RequestError {
 	}
 }
 
+type QueuedMessageCallbacks = {resolve: (any) => void, reject: (any) => void}
 
+/**
+ * Queue for the remote invocations (e.g. worker or native calls).
+ */
 export class Queue {
 	/**
 	 * Map from request id that have been sent to the callback that will be
 	 * executed on the results sent by the worker.
 	 */
-	_queue: {[key: string]: Callback<any>};
+	_queue: {[key: string]: QueuedMessageCallbacks};
 	_commands: {[key: WorkerRequestType | MainRequestType | NativeRequestType | JsRequestType]: Command};
 	_transport: Worker | DedicatedWorkerGlobalScope;
 
@@ -102,12 +71,12 @@ export class Queue {
 	}
 
 	postMessage(msg: Request): Promise<any> {
-		return Promise.fromCallback(cb => {
-			this._queue[msg.id] = cb
+		return new Promise((resolve, reject) => {
+			this._queue[msg.id] = {resolve, reject}
 			try {
 				this._transport.postMessage(msg)
 			} catch (e) {
-				console.log("error payload:", msg)
+				console.log("error payload:", msg.id, msg.type)
 				throw e
 			}
 		})
@@ -115,22 +84,28 @@ export class Queue {
 
 	_handleMessage(message: Response | Request | RequestError) {
 		if (message.type === 'response') {
-			this._queue[message.id](null, message.value)
+			this._queue[message.id].resolve(message.value)
 			delete this._queue[message.id]
 		} else if (message.type === 'requestError') {
-			this._queue[message.id](objToError((message: any).error), null)
+			this._queue[message.id].reject(objToError(downcast(message).error))
 			delete this._queue[message.id]
 		} else {
 			let command = this._commands[message.type]
 			let request = (message: any)
 			if (command != null) {
-				command(request).then(value => {
+				const commandResult = command(request)
+				// Every method exposed via worker protocol must return a promise. Failure to do so is a violation of contract so we
+				// try to catch it early and throw an error.
+				if (commandResult == null || typeof commandResult.then !== "function") {
+					throw new Error(`Handler returned non-promise result: ${message.type}`)
+				}
+				commandResult.then(value => {
 					this._transport.postMessage(new Response(request, value))
 				}).catch(e => {
 					this._transport.postMessage(new RequestError(request, e))
 				})
 			} else {
-				let error = new Error("unexpected request: " + JSON.stringify(message))
+				let error = new Error(`unexpected request: ${message.id}, ${message.type}`)
 				if (isWorker()) {
 					this._transport.postMessage(new RequestError(request, error))
 				} else {
@@ -161,7 +136,7 @@ function _createRequestId() {
 }
 
 // Serialize error stack traces, when they are sent via the websocket.
-export function errorToObj(error: Error) {
+export function errorToObj(error: Error): {|data: any, message: any, name: any, stack: any|} {
 	return {
 		name: (error: any)['name'],
 		message: (error: any)['message'],
@@ -170,62 +145,3 @@ export function errorToObj(error: Error) {
 	}
 }
 
-export function objToError(o: Object) {
-	let errorType = ErrorNameToType[o.name]
-	let e = (errorType != null ? new errorType(o.message) : new Error(o.message): any)
-	e.name = o.name
-	e.stack = o.stack || e.stack
-	e.data = o.data
-	return e
-}
-
-const ErrorNameToType = {
-	ConnectionError,
-	BadRequestError,
-	NotAuthenticatedError,
-	SessionExpiredError,
-	NotAuthorizedError,
-	NotFoundError,
-	MethodNotAllowedError,
-	PreconditionFailedError,
-	LockedError,
-	TooManyRequestsError,
-	AccessDeactivatedError,
-	AccessExpiredError,
-	AccessBlockedError,
-	InvalidDataError,
-	InvalidSoftwareVersionError,
-	LimitReachedError,
-	InternalServerError,
-	BadGatewayError,
-	ResourceError,
-	InsufficientStorageError,
-	CryptoError,
-	SessionKeyNotFoundError,
-	SseError,
-	ProgrammingError,
-	RecipientsNotFoundError,
-	RecipientNotResolvedError,
-	OutOfSyncError,
-	SecondFactorPendingError,
-	ServiceUnavailableError,
-	DbError,
-	IndexingNotSupportedError,
-	QuotaExceededError,
-	CancelledError,
-	FileOpenError,
-	Error,
-	"java.net.SocketTimeoutException": ConnectionError,
-	"java.net.ConnectException": ConnectionError,
-	"javax.net.ssl.SSLException": ConnectionError,
-	"javax.net.ssl.SSLHandshakeException": ConnectionError,
-	"java.io.EOFException": ConnectionError,
-	"java.net.UnknownHostException": ConnectionError,
-	"java.lang.SecurityException": PermissionError,
-	"java.io.FileNotFoundException": FileNotFoundError,
-	"de.tutao.tutanota.CryptoError": CryptoError, // Android app exception class name
-	"de.tutao.tutanota.TutCrypto": CryptoError, // iOS app crypto error domain
-	"android.content.ActivityNotFoundException": FileOpenError,
-	"de.tutao.tutanota.TutFileViewer": FileOpenError,
-	"NSURLErrorDomain": ConnectionError
-}

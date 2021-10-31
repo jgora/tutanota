@@ -1,37 +1,46 @@
 // @flow
-import {assertMainOrNode} from "../api/Env"
+import {assertMainOrNode} from "../api/common/Env"
 import type {lazyIcon} from "../gui/base/Icon"
 import type {TranslationKey} from "../misc/LanguageViewModel"
 import {isSelectedPrefix} from "../gui/base/NavButtonN"
+import type {UpdatableSettingsViewer} from "./SettingsView"
+import type {lazy} from "../api/common/utils/Utils"
 
 assertMainOrNode()
 
-export class SettingsFolder {
-	nameTextId: TranslationKey;
-	icon: lazyIcon;
-	path: string;
+type SettingsFolderPath = string | {folder: string, id: string}
+
+export class SettingsFolder<+T> {
 	url: string; // can be changed from outside
-	viewerCreator: lazy<UpdatableSettingsViewer>;
+	+data: T
+	+name: TranslationKey | lazy<string>;
+	+icon: lazyIcon;
+	+path: SettingsFolderPath;
+	+viewerCreator: lazy<UpdatableSettingsViewer>;
 	_isVisibleHandler: lazy<boolean>;
 
-	constructor(nameTextId: TranslationKey, icon: lazyIcon, path: string, viewerCreator: lazy<UpdatableSettingsViewer>) {
-		this.nameTextId = nameTextId
+	constructor(name: TranslationKey | lazy<string>, icon: lazyIcon, path: SettingsFolderPath, viewerCreator: lazy<UpdatableSettingsViewer>, data: T) {
+		this.data = data
+		this.name = name
 		this.icon = icon
 		this.path = path
-		this.url = `/settings/${path}`
+		this.url = typeof path === "string"
+			? `/settings/${encodeURIComponent(path)}`
+			: `/settings/${encodeURIComponent(path.folder)}/${encodeURIComponent(path.id)}`
+
 		this.viewerCreator = viewerCreator
 		this._isVisibleHandler = () => true
 	}
 
-	isActive() {
+	isActive(): boolean {
 		return isSelectedPrefix(this.url)
 	}
 
-	isVisible() {
+	isVisible(): boolean {
 		return this._isVisibleHandler()
 	}
 
-	setIsVisibleHandler(isVisibleHandler: lazy<boolean>): SettingsFolder {
+	setIsVisibleHandler(isVisibleHandler: lazy<boolean>): SettingsFolder<T> {
 		this._isVisibleHandler = isVisibleHandler
 		return this
 	}

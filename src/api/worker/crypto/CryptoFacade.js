@@ -2,10 +2,10 @@
 import {base64ToUint8Array, uint8ArrayToBase64} from "../../common/utils/Encoding"
 import {aes128RandomKey} from "./Aes"
 import {BucketPermissionType, GroupType, PermissionType} from "../../common/TutanotaConstants"
-import {load, loadAll, serviceRequestVoid} from "../EntityWorker"
+import {serviceRequestVoid} from "../EntityWorker"
 import {TutanotaService} from "../../entities/tutanota/Services"
 import {rsaDecrypt} from "./Rsa"
-import {HttpMethod, isSameTypeRef, isSameTypeRefByAttr, resolveTypeReference, TypeRef} from "../../common/EntityFunctions"
+import {HttpMethod, resolveTypeReference} from "../../common/EntityFunctions"
 import {GroupInfoTypeRef} from "../../entities/sys/GroupInfo"
 import {TutanotaPropertiesTypeRef} from "../../entities/tutanota/TutanotaProperties"
 import {createEncryptTutanotaPropertiesData} from "../../entities/tutanota/EncryptTutanotaPropertiesData"
@@ -15,14 +15,13 @@ import type {Group} from "../../entities/sys/Group"
 import {GroupTypeRef} from "../../entities/sys/Group"
 import type {Permission} from "../../entities/sys/Permission"
 import {PermissionTypeRef} from "../../entities/sys/Permission"
-import {assertWorkerOrNode} from "../../Env"
-import {downcast, neverNull} from "../../common/utils/Utils"
+import {assertWorkerOrNode} from "../../common/Env"
+import {downcast, neverNull, noOp} from "../../common/utils/Utils"
 import {typeRefToPath} from "../rest/EntityRestClient"
-import {restClient} from "../rest/RestClient"
 import {createUpdatePermissionKeyData} from "../../entities/sys/UpdatePermissionKeyData"
 import {SysService} from "../../entities/sys/Services"
 import {uint8ArrayToBitArray} from "./CryptoUtils"
-import {NotFoundError} from "../../common/error/RestError"
+import {LockedError, NotFoundError, PayloadTooLargeError} from "../../common/error/RestError"
 import {SessionKeyNotFoundError} from "../../common/error/SessionKeyNotFoundError" // importing with {} from CJS modules is not supported for dist-builds currently (must be a systemjs builder bug)
 import {locator} from "../WorkerLocator"
 import {MailBodyTypeRef} from "../../entities/tutanota/MailBody"
@@ -41,10 +40,13 @@ import {
 	encryptKey,
 	encryptRsaKey
 } from "./KeyCryptoUtils.js"
+import type {Contact} from "../../entities/tutanota/Contact"
 import {ContactTypeRef} from "../../entities/tutanota/Contact"
 import {birthdayToIsoDate, oldBirthdayToBirthday} from "../../common/utils/BirthdayUtils"
 import type {GroupMembership} from "../../entities/sys/GroupMembership"
-import type {Contact} from "../../entities/tutanota/Contact"
+import {isSameTypeRef, isSameTypeRefByAttr, TypeRef} from "../../common/utils/TypeRef";
+import type {TypeModel} from "../../common/EntityTypes"
+import {ofClass} from "../../common/utils/PromiseUtils"
 
 assertWorkerOrNode()
 
@@ -53,7 +55,7 @@ export {encryptKey, decryptKey, encrypt256Key, decrypt256Key, encryptRsaKey, dec
 
 // stores a mapping from mail body id to mail body session key. the mail body of a mail is encrypted with the same session key as the mail.
 // so when resolving the session key of a mail we cache it for the mail's body to avoid that the body's permission (+ bucket permission) have to be loaded.
-// this especially improves the performance when indexing mail bodys
+// this especially improves the performance when indexing mail bodies
 let mailBodySessionKeyCache: {[key: string]: Aes128Key} = {};
 
 export function applyMigrations<T>(typeRef: TypeRef<T>, data: Object): Promise<Object> {
@@ -63,7 +65,7 @@ export function applyMigrations<T>(typeRef: TypeRef<T>, data: Object): Promise<O
 		                                      .memberships
 		                                      .find((g: GroupMembership) => g.groupType === GroupType.Customer): any)
 		let customerGroupKey = locator.login.getGroupKey(customerGroupMembership.group)
-		return loadAll(PermissionTypeRef, data._id[0]).then((listPermissions: Permission[]) => {
+		return locator.cachingEntityClient.loadAll(PermissionTypeRef, data._id[0]).then((listPermissions: Permission[]) => {
 			let customerGroupPermission = listPermissions.find(p => p.group === customerGroupMembership.group)
 			if (!customerGroupPermission) throw new SessionKeyNotFoundError("Permission not found, could not apply OwnerGroup migration")
 			let listKey = decryptKey(customerGroupKey, (customerGroupPermission: any).symEncSessionKey)
@@ -86,7 +88,7 @@ export function applyMigrations<T>(typeRef: TypeRef<T>, data: Object): Promise<O
 		// set sessionKey for allowing encryption when old instance (< v43) is updated
 		return resolveTypeReference(typeRef)
 			.then(typeModel => _updateOwnerEncSessionKey(typeModel, data, locator.login.getUserGroupKey(), aes128RandomKey()))
-			.return(data)
+			.then(() => data)
 	}
 	return Promise.resolve(data)
 }
@@ -99,11 +101,15 @@ export function applyMigrationsForInstance<T>(decryptedInstance: T): Promise<T> 
 			contact.birthdayIso = birthdayToIsoDate(contact.oldBirthdayAggregate)
 			contact.oldBirthdayAggregate = null
 			contact.oldBirthdayDate = null
-			return update(contact).return(decryptedInstance)
+			return update(contact).catch(ofClass(LockedError, noOp)).then(() => decryptedInstance)
 		} else if (!contact.birthdayIso && contact.oldBirthdayDate) {
 			contact.birthdayIso = birthdayToIsoDate(oldBirthdayToBirthday(contact.oldBirthdayDate))
 			contact.oldBirthdayDate = null
-			return update(contact).return(decryptedInstance)
+			return update(contact).catch(ofClass(LockedError, noOp)).then(() => decryptedInstance)
+		} else if (contact.birthdayIso && (contact.oldBirthdayAggregate || contact.oldBirthdayDate)) {
+			contact.oldBirthdayAggregate = null
+			contact.oldBirthdayDate = null
+			return update(contact).catch(ofClass(LockedError, noOp)).then(() => decryptedInstance)
 		}
 	}
 	return Promise.resolve(decryptedInstance)
@@ -119,13 +125,13 @@ interface ResolveSessionKeyLoaders {
 
 const resolveSessionKeyLoaders: ResolveSessionKeyLoaders = {
 	loadPermissions: function (listId: Id): Promise<Permission[]> {
-		return loadAll(PermissionTypeRef, listId)
+		return locator.cachingEntityClient.loadAll(PermissionTypeRef, listId)
 	},
 	loadBucketPermissions: function (listId: Id): Promise<BucketPermission[]> {
-		return loadAll(BucketPermissionTypeRef, listId)
+		return locator.cachingEntityClient.loadAll(BucketPermissionTypeRef, listId)
 	},
 	loadGroup: function (groupId: Id): Promise<Group> {
-		return load(GroupTypeRef, groupId)
+		return locator.cachingEntityClient.load(GroupTypeRef, groupId)
 	}
 }
 
@@ -223,16 +229,20 @@ export function resolveSessionKey(typeModel: TypeModel, instance: Object, sessio
 								              }
 								              let sk = decryptKey(bucketKey, bucketEncSessionKey)
 
-								              let bucketPermissionOwnerGroupKey = locator
-									              .login.getGroupKey(neverNull(bucketPermission._ownerGroup))
-								              let bucketPermissionGroupKey = locator.login.getGroupKey(bucketPermission.group)
-								              return _updateWithSymPermissionKey(typeModel, instance, permission,
-									              bucketPermission, bucketPermissionOwnerGroupKey,
-									              bucketPermissionGroupKey, sk)
-									              .catch(NotFoundError, e => {
-										              console.log("w> could not find instance to update permission")
-									              })
-									              .then(() => sk)
+								              if (bucketPermission._ownerGroup) { // is not defined for some old AccountingInfos
+									              let bucketPermissionOwnerGroupKey = locator
+										              .login.getGroupKey(neverNull(bucketPermission._ownerGroup))
+									              let bucketPermissionGroupKey = locator.login.getGroupKey(bucketPermission.group)
+									              return _updateWithSymPermissionKey(typeModel, instance, permission,
+										              bucketPermission, bucketPermissionOwnerGroupKey,
+										              bucketPermissionGroupKey, sk)
+										              .catch(ofClass(NotFoundError, e => {
+											              console.log("w> could not find instance to update permission")
+										              }))
+										              .then(() => sk)
+								              } else {
+									              return sk
+								              }
 							              })
 						              })
 					              }
@@ -245,10 +255,10 @@ export function resolveSessionKey(typeModel: TypeModel, instance: Object, sessio
 			mailBodySessionKeyCache[instance.body] = sessionKey
 		}
 		return sessionKey
-	}).catch(CryptoError, e => {
+	}).catch(ofClass(CryptoError, e => {
 		console.log("failed to resolve session key", e)
 		throw new SessionKeyNotFoundError("Crypto error while resolving session key for instance " + instance._id)
-	})
+	}))
 }
 
 /**
@@ -261,7 +271,7 @@ export function resolveSessionKey(typeModel: TypeModel, instance: Object, sessio
  */
 export function resolveServiceSessionKey(typeModel: TypeModel, instance: Object): Promise<?Aes128Key> {
 	if (instance._ownerPublicEncSessionKey) {
-		return load(GroupTypeRef, instance._ownerGroup).then(group => {
+		return locator.cachingEntityClient.load(GroupTypeRef, instance._ownerGroup).then(group => {
 			let keypair = group.keys[0]
 			let gk = locator.login.getGroupKey(instance._ownerGroup)
 			let privKey
@@ -279,7 +289,7 @@ export function resolveServiceSessionKey(typeModel: TypeModel, instance: Object)
 }
 
 /**
- * Updates the given public permission with the given symmetric key for faster access.
+ * Updates the given public permission with the given symmetric key for faster access if the client is the leader and otherwise does nothing.
  * @param typeModel: the type model of the instance
  * @param instance The unencrypted (client-side) or encrypted (server-side) instance
  * @param permission The permission.
@@ -289,8 +299,9 @@ export function resolveServiceSessionKey(typeModel: TypeModel, instance: Object)
  * @param sessionKey The symmetric session key.
  */
 function _updateWithSymPermissionKey(typeModel: TypeModel, instance: Object, permission: Permission, bucketPermission: BucketPermission, permissionOwnerGroupKey: Aes128Key, permissionGroupKey: Aes128Key, sessionKey: Aes128Key): Promise<void> {
-	if (typeof instance._type !== 'undefined') {
+	if (typeof instance._type !== 'undefined' || !locator.login.isLeader()) {
 		// do not update the session key in case of an unencrypted (client-side) instance
+		// or in case we are not the leader client
 		return Promise.resolve()
 	}
 	if (!instance._ownerEncSessionKey && permission._ownerGroup === instance._ownerGroup) {
@@ -313,7 +324,10 @@ function _updateOwnerEncSessionKey(typeModel: TypeModel, instance: Object, owner
 
 	let headers = locator.login.createAuthHeaders()
 	headers["v"] = typeModel.version
-	return restClient.request(path, HttpMethod.PUT, {updateOwnerEncSessionKey: "true"}, headers, JSON.stringify(instance))
+	return locator.restClient.request(path, HttpMethod.PUT, {updateOwnerEncSessionKey: "true"}, headers, JSON.stringify(instance))
+	              .catch(ofClass(PayloadTooLargeError, (e) => {
+		              console.log("Could not update owner enc session key - PayloadTooLargeError", e)
+	              }))
 }
 
 export function setNewOwnerEncSessionKey(model: TypeModel, entity: Object): ?Aes128Key {

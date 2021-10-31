@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {PriceItemData} from "./PriceItemData"
 
@@ -15,36 +17,28 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 854,
-			"since": 9,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"paymentInterval": {
-			"name": "paymentInterval",
 			"id": 857,
-			"since": 9,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"price": {
-			"name": "price",
 			"id": 855,
-			"since": 9,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"taxIncluded": {
-			"name": "taxIncluded",
 			"id": 856,
-			"since": 9,
 			"type": "Boolean",
 			"cardinality": "One",
 			"final": false,
@@ -53,17 +47,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"items": {
-			"name": "items",
 			"id": 858,
-			"since": 9,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "PriceItemData",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createPriceData(values?: $Shape<$Exact<PriceData>>): PriceData {

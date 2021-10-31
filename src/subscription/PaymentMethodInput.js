@@ -4,97 +4,88 @@ import type {TranslationKey} from "../misc/LanguageViewModel"
 import {lang} from "../misc/LanguageViewModel"
 import type {Country} from "../api/common/CountryList"
 import {CountryType} from "../api/common/CountryList"
-import type {PaymentMethodTypeEnum} from "../api/common/TutanotaConstants"
+import type {PaymentData, PaymentMethodTypeEnum} from "../api/common/TutanotaConstants"
 import {PaymentMethodType} from "../api/common/TutanotaConstants"
-import {CreditCardInput} from "./CreditCardInput"
+import {CreditCardAttrs, CreditCardInput} from "./CreditCardInput"
 import {PayPalLogo} from "../gui/base/icons/Icons"
-import {load} from "../api/main/Entity"
 import {LazyLoaded} from "../api/common/utils/LazyLoaded"
-import {showProgressDialog} from "../gui/base/ProgressDialog"
+import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
+import type {AccountingInfo} from "../api/entities/sys/AccountingInfo"
 import {AccountingInfoTypeRef} from "../api/entities/sys/AccountingInfo"
 import {locator} from "../api/main/MainLocator"
 import {isUpdateForTypeRef} from "../api/main/EventController"
 import type {SubscriptionOptions} from "./SubscriptionUtils"
 import {MessageBoxN} from "../gui/base/MessageBoxN"
 import {px} from "../gui/size"
-import type {AccountingInfo} from "../api/entities/sys/AccountingInfo"
+import type {EntityEventsListener} from "../api/main/EventController"
+import {isValidCreditCardNumber} from "../misc/FormatValidator"
+import {noOp} from "../api/common/utils/Utils"
+import {promiseMap} from "../api/common/utils/PromiseUtils"
 
 /**
  * Component to display the input fields for a payment method. The selector to switch between payment methods is not included.
  */
 export class PaymentMethodInput {
-	view: Function;
-	_currentPaymentMethodComponent: Component;
-	_creditCardComponent: CreditCardInput;
-	_payPalComponent: Component;
-	_invoiceComponent: Component;
-	_selectedCountry: Stream<?Country>;
-	_selectedPaymentMethod: PaymentMethodTypeEnum;
-	_subscriptionOptions: SubscriptionOptions;
-	_payPalRequestUrl: LazyLoaded<string>;
-	_accountingInfo: AccountingInfo;
-	oncreate: Function;
-	onremove: Function;
+	_creditCardAttrs: CreditCardAttrs
+	_payPalAttrs: PaypalAttrs
+	_selectedCountry: Stream<?Country>
+	_selectedPaymentMethod: PaymentMethodTypeEnum
+	_subscriptionOptions: SubscriptionOptions
+	_accountingInfo: AccountingInfo
+	_entityEventListener: EntityEventsListener
 
 	constructor(subscriptionOptions: SubscriptionOptions, selectedCountry: Stream<?Country>, accountingInfo: AccountingInfo, payPalRequestUrl: LazyLoaded<string>) {
 		this._selectedCountry = selectedCountry
 		this._subscriptionOptions = subscriptionOptions;
-		this._creditCardComponent = new CreditCardInput()
+		this._creditCardAttrs = new CreditCardAttrs()
 		this._accountingInfo = accountingInfo;
-		this._payPalRequestUrl = payPalRequestUrl
+		this._payPalAttrs = {
+			payPalRequestUrl,
+			accountingInfo: this._accountingInfo
+		}
 
 
-		const accountingInfoListener = (updates) => {
-			for (let update of updates) {
+		this._entityEventListener = (updates) => {
+			return promiseMap(updates, update => {
 				if (isUpdateForTypeRef(AccountingInfoTypeRef, update)) {
-					load(AccountingInfoTypeRef, update.instanceId).then(accountingInfo => {
+					return locator.entityClient.load(AccountingInfoTypeRef, update.instanceId).then(accountingInfo => {
 						this._accountingInfo = accountingInfo
+						this._payPalAttrs.accountingInfo = accountingInfo
 						m.redraw()
 					})
 				}
-			}
-		}
-		this._payPalComponent = {
-			view: () => {
-				return [
-					m(".flex-center", {style: {'margin-top': "50px"}},
-						m("button.button-height.flex.items-center.plr.border.border-radius.bg-white", {
-							title: "PayPal",
-							style: {
-								cursor: "pointer"
-							},
-							onclick: () => {
-								if (this._payPalRequestUrl.isLoaded()) {
-									window.open(this._payPalRequestUrl.getSync())
-								} else {
-									showProgressDialog("payPalRedirect_msg", this._payPalRequestUrl.getAsync())
-										.then(url => window.open(url))
-								}
-							}
-						}, m("img[src=" + PayPalLogo + "]")),
-					),
-					m(".small.pt.center", this.isPaypalAssigned() ? lang.get("paymentDataPayPalFinished_msg", {"{accountAddress}": this._accountingInfo.paymentMethodInfo}) : lang.get("paymentDataPayPalLogin_msg"))
-				]
-			},
+			}).then(noOp)
 		}
 
-		this._invoiceComponent = {
-			view: () => {
-				return m(".flex-center", m(MessageBoxN, {
-					style: {marginTop: px(16)},
-				}, lang.get(this.isOnAccountAllowed() ? "paymentMethodOnAccount_msg" : "paymentMethodNotAvailable_msg")))
-			}
-		}
-
-		this._currentPaymentMethodComponent = this._creditCardComponent
 		this._selectedPaymentMethod = PaymentMethodType.CreditCard
-		this.view = () => m(this._currentPaymentMethodComponent)
-		this.oncreate = () => locator.eventController.addEntityListener(accountingInfoListener)
-		this.onremove = () => locator.eventController.removeEntityListener(accountingInfoListener)
 	}
 
-	isPaypalAssigned() {
-		return this._accountingInfo.paypalBillingAgreement != null
+	oncreate() {
+		locator.eventController.addEntityListener(this._entityEventListener)
+	}
+
+	onremove() {
+		locator.eventController.removeEntityListener(this._entityEventListener)
+	}
+
+	view(): Children {
+		if (this._selectedPaymentMethod === PaymentMethodType.Invoice) {
+			return m(".flex-center", m(MessageBoxN, {
+					style: {marginTop: px(16)},
+				},
+				this.isOnAccountAllowed()
+					? lang.get("paymentMethodOnAccount_msg") + " " + lang.get("paymentProcessingTime_msg")
+					: lang.get("paymentMethodNotAvailable_msg")
+			))
+		} else if (this._selectedPaymentMethod === PaymentMethodType.AccountBalance) {
+			return m(".flex-center", m(MessageBoxN, {
+				style: {marginTop: px(16)},
+			}, lang.get("paymentMethodAccountBalance_msg")))
+		} else if (this._selectedPaymentMethod === PaymentMethodType.Paypal) {
+			return m(PaypalInput, this._payPalAttrs)
+		} else {
+			return m(CreditCardInput, this._creditCardAttrs)
+		}
 	}
 
 	isOnAccountAllowed(): boolean {
@@ -110,6 +101,10 @@ export class PaymentMethodInput {
 		}
 	}
 
+	isPaypalAssigned(): boolean {
+		return isPaypalAssigned(this._accountingInfo)
+	}
+
 	validatePaymentData(): ?TranslationKey {
 		const country = this._selectedCountry()
 		if (!this._selectedPaymentMethod) {
@@ -119,17 +114,20 @@ export class PaymentMethodInput {
 				return "paymentMethodNotAvailable_msg"
 			}
 		} else if (this._selectedPaymentMethod === PaymentMethodType.Paypal) {
-			return this.isPaypalAssigned() ? null : "paymentDataPayPalLogin_msg"
+			return isPaypalAssigned(this._accountingInfo) ? null : "paymentDataPayPalLogin_msg"
 		} else if (this._selectedPaymentMethod === PaymentMethodType.CreditCard) {
-			let cc = this._creditCardComponent.getCreditCardData()
+			let cc = this._creditCardAttrs.getCreditCardData()
 			if (cc.number === "") {
 				return "creditCardNumberFormat_msg"
+			} else if (!isValidCreditCardNumber(cc.number)) {
+				return "creditCardNumberInvalid_msg"
 			} else if (cc.cardHolderName === "") {
 				return "creditCardCardHolderName_msg"
-			} else if (cc.cvv === "") {
+			} else if (cc.cvv === "" || cc.cvv.length < 3 || cc.cvv.length > 4) { // CVV2 is 3- or 4-digit
 				return "creditCardCVVFormat_label"
-			} else if (cc.expirationMonth.length !== 2 || (cc.expirationYear.length !== 4
-				&& cc.expirationYear.length !== 2)) {
+			} else if (cc.expirationMonth.length !== 2
+				|| (cc.expirationYear.length !== 4 && cc.expirationYear.length !== 2)
+				|| parseInt(cc.expirationMonth) < 1 || parseInt(cc.expirationMonth) > 12) {
 				return "creditCardExprationDateInvalid_msg"
 			}
 		}
@@ -138,15 +136,11 @@ export class PaymentMethodInput {
 	updatePaymentMethod(value: PaymentMethodTypeEnum, paymentData: ?PaymentData) {
 		this._selectedPaymentMethod = value
 		if (value === PaymentMethodType.CreditCard) {
-			this._currentPaymentMethodComponent = this._creditCardComponent
 			if (paymentData) {
-				this._creditCardComponent.setCreditCardData(paymentData.creditCardData)
+				this._creditCardAttrs.setCreditCardData(paymentData.creditCardData)
 			}
 		} else if (value === PaymentMethodType.Paypal) {
-			this._payPalRequestUrl.getAsync().then(() => m.redraw())
-			this._currentPaymentMethodComponent = this._payPalComponent
-		} else if (value === PaymentMethodType.Invoice) {
-			this._currentPaymentMethodComponent = this._invoiceComponent
+			this._payPalAttrs.payPalRequestUrl.getAsync().then(() => m.redraw())
 		}
 		m.redraw()
 	}
@@ -156,7 +150,7 @@ export class PaymentMethodInput {
 		return {
 			paymentMethod: this._selectedPaymentMethod,
 			creditCardData: this._selectedPaymentMethod === PaymentMethodType.CreditCard ?
-				this._creditCardComponent.getCreditCardData() : null,
+				this._creditCardAttrs.getCreditCardData() : null,
 		}
 	}
 
@@ -173,7 +167,50 @@ export class PaymentMethodInput {
 				value: PaymentMethodType.Invoice
 			})
 		}
+
+		// show account balance only if this is the current payment method
+		if (this._accountingInfo.paymentMethod === PaymentMethodType.AccountBalance) {
+			availablePaymentMethods.push({
+				name: lang.get("paymentMethodAccountBalance_label"),
+				value: PaymentMethodType.AccountBalance
+			})
+		}
+
 		return availablePaymentMethods
 	}
 
+}
+
+type PaypalAttrs = {|
+	payPalRequestUrl: LazyLoaded<string>;
+	accountingInfo: AccountingInfo;
+|}
+
+class PaypalInput {
+	view(vnode: Vnode<PaypalAttrs>): Children {
+		let attrs = vnode.attrs
+		return [
+			m(".flex-center", {style: {'margin-top': "50px"}},
+				m("button.button-height.flex.items-center.plr.border.border-radius.bg-white", {
+					title: "PayPal",
+					style: {
+						cursor: "pointer"
+					},
+					onclick: () => {
+						if (attrs.payPalRequestUrl.isLoaded()) {
+							window.open(attrs.payPalRequestUrl.getSync())
+						} else {
+							showProgressDialog("payPalRedirect_msg", attrs.payPalRequestUrl.getAsync())
+								.then(url => window.open(url))
+						}
+					}
+				}, m("img[src=" + PayPalLogo + "]")),
+			),
+			m(".small.pt.center", isPaypalAssigned(attrs.accountingInfo) ? lang.get("paymentDataPayPalFinished_msg", {"{accountAddress}": attrs.accountingInfo.paymentMethodInfo}) : lang.get("paymentDataPayPalLogin_msg"))
+		]
+	}
+}
+
+function isPaypalAssigned(accountingInfo: AccountingInfo): boolean {
+	return accountingInfo.paypalBillingAgreement != null
 }

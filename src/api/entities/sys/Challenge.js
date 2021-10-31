@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {OtpChallenge} from "./OtpChallenge"
 import type {U2fChallenge} from "./U2fChallenge"
@@ -16,18 +18,14 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 1188,
-			"since": 23,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"type": {
-			"name": "type",
 			"id": 1189,
-			"since": 23,
 			"type": "Number",
 			"cardinality": "One",
 			"final": true,
@@ -36,26 +34,24 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"otp": {
-			"name": "otp",
 			"id": 1247,
-			"since": 24,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "OtpChallenge",
-			"final": true
+			"dependency": null
 		},
 		"u2f": {
-			"name": "u2f",
 			"id": 1190,
-			"since": 23,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "U2fChallenge",
-			"final": true
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createChallenge(values?: $Shape<$Exact<Challenge>>): Challenge {

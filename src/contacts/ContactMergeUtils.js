@@ -163,7 +163,7 @@ export function _compareFullName(contact1: Contact, contact2: Contact): ContactC
  * Provides name1 if it is not empty, otherwise name2
  * Export for testing
  */
-export function _getMergedNameField(name1: string, name2: string) {
+export function _getMergedNameField(name1: string, name2: string): string {
 	if (name1) {
 		return name1
 	} else {
@@ -205,7 +205,8 @@ export function _comparePhoneNumbers(contact1PhoneNumbers: ContactPhoneNumber[],
  */
 export function _getMergedPhoneNumbers(phoneNumbers1: ContactPhoneNumber[], phoneNumbers2: ContactPhoneNumber[]): ContactPhoneNumber[] {
 	let filteredNumbers2 = phoneNumbers2.filter(ma2 => {
-		return !phoneNumbers1.find(ma1 => ma1.number === ma2.number)
+		const isIncludedInPhoneNumbers1 = phoneNumbers1.find(ma1 => ma1.number.replace(/\s/g, "") === ma2.number.replace(/\s/g, ""))
+		return !isIncludedInPhoneNumbers1
 	})
 	return phoneNumbers1.concat(filteredNumbers2)
 }

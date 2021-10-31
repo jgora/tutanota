@@ -2,16 +2,16 @@
 import m from "mithril"
 import {List} from "../gui/base/List"
 import {load, loadAll} from "../api/main/Entity"
-import {GENERATED_MAX_ID} from "../api/common/EntityFunctions"
-import {assertMainOrNode} from "../api/Env"
+import {assertMainOrNode} from "../api/common/Env"
 import {lang} from "../misc/LanguageViewModel"
 import {NotFoundError} from "../api/common/error/RestError"
 import {size} from "../gui/size"
+import type {GroupInfo} from "../api/entities/sys/GroupInfo"
 import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
 import {CustomerTypeRef} from "../api/entities/sys/Customer"
-import {compareGroupInfos, neverNull} from "../api/common/utils/Utils"
+import {neverNull, noOp} from "../api/common/utils/Utils"
 import {UserViewer} from "./UserViewer"
-import {SettingsView} from "./SettingsView"
+import type {SettingsView, UpdatableSettingsViewer} from "./SettingsView"
 import {LazyLoaded} from "../api/common/utils/LazyLoaded"
 import {FeatureType, GroupType, OperationType} from "../api/common/TutanotaConstants"
 import {logins} from "../api/main/LoginController"
@@ -26,8 +26,11 @@ import {contains} from "../api/common/utils/ArrayUtils"
 import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
 import {ButtonN, ButtonType} from "../gui/base/ButtonN"
-import {showNotAvailableForFreeDialog} from "../misc/ErrorHandlerImpl"
-import type {GroupInfo} from "../api/entities/sys/GroupInfo"
+import {compareGroupInfos} from "../api/common/utils/GroupUtils";
+import {GENERATED_MAX_ID} from "../api/common/utils/EntityUtils";
+import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
+import {ListColumnWrapper} from "../gui/ListColumnWrapper"
+import {ofClass, promiseMap} from "../api/common/utils/PromiseUtils"
 
 assertMainOrNode()
 
@@ -42,6 +45,7 @@ export class UserListView implements UpdatableSettingsViewer {
 	_adminUserGroupInfoIds: Id[];
 	onremove: Function;
 
+
 	constructor(settingsView: SettingsView) {
 		this._adminUserGroupInfoIds = []
 		this._settingsView = settingsView
@@ -49,6 +53,7 @@ export class UserListView implements UpdatableSettingsViewer {
 			return load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)).then(customer => {
 				return customer.userGroups
 			})
+
 		})
 
 		this.list = new List({
@@ -80,9 +85,9 @@ export class UserListView implements UpdatableSettingsViewer {
 			},
 			loadSingle: (elementId) => {
 				return this._listId.getAsync().then(listId => {
-					return load(GroupInfoTypeRef, [listId, elementId]).catch(NotFoundError, (e) => {
+					return load(GroupInfoTypeRef, [listId, elementId]).catch(ofClass(NotFoundError, (e) => {
 						// we return null if the entity does not exist
-					})
+					}))
 				})
 			},
 			sortCompare: compareGroupInfos,
@@ -94,27 +99,25 @@ export class UserListView implements UpdatableSettingsViewer {
 			swipe: {
 				renderLeftSpacer: () => [],
 				renderRightSpacer: () => [],
-				swipeLeft: (listElement) => Promise.resolve(),
-				swipeRight: (listElement) => Promise.resolve(),
+				swipeLeft: (listElement) => Promise.resolve(false),
+				swipeRight: (listElement) => Promise.resolve(false),
 				enabled: false
 			},
-			elementsDraggable: false,
 			multiSelectionAllowed: false,
 			emptyMessage: lang.get("noEntries_msg")
 		})
 
 		this.view = (): Children => {
 			return !logins.isEnabled(FeatureType.WhitelabelChild)
-				? m(".flex.flex-column.fill-absolute", [
-					m(".flex.flex-column.justify-center.plr-l.list-border-right.list-bg.list-header",
-						m(".mr-negative-s.align-self-end", m(ButtonN, {
+				? m(ListColumnWrapper, {
+						headerContent: m(".mr-negative-s.align-self-end", m(ButtonN, {
 							label: "addUsers_action",
 							type: ButtonType.Primary,
 							click: () => this.addButtonClicked()
 						}))
-					),
-					m(".rel.flex-grow", m(this.list))
-				])
+					},
+					m(this.list)
+				)
 				: null
 		}
 
@@ -137,17 +140,14 @@ export class UserListView implements UpdatableSettingsViewer {
 		}
 	}
 
-	_loadAdmins(): Promise<void> {
+	async _loadAdmins(): Promise<void> {
 		let adminGroupMembership = logins.getUserController()
 		                                 .user
 		                                 .memberships
 		                                 .find(gm => gm.groupType === GroupType.Admin)
 		if (adminGroupMembership == null) return Promise.resolve()
-		return loadAll(GroupMemberTypeRef, adminGroupMembership.groupMember[0]).map(adminGroupMember => {
-			return adminGroupMember.userGroupInfo[1]
-		}).then(userGroupInfoIds => {
-			this._adminUserGroupInfoIds = userGroupInfoIds
-		})
+		const members = await loadAll(GroupMemberTypeRef, adminGroupMembership.groupMember[0])
+		this._adminUserGroupInfoIds = members.map((adminGroupMember) => adminGroupMember.userGroupInfo[1])
 	}
 
 	_setLoadedCompletely() {
@@ -181,37 +181,37 @@ export class UserListView implements UpdatableSettingsViewer {
 		}
 	}
 
-	entityEventsReceived<T>(updates: $ReadOnlyArray<EntityUpdateData>): void {
-		for (let update of updates) {
+	entityEventsReceived<T>(updates: $ReadOnlyArray<EntityUpdateData>): Promise<void> {
+		return promiseMap(updates, update => {
 			const {instanceListId, instanceId, operation} = update
 			if (isUpdateForTypeRef(GroupInfoTypeRef, update) && this._listId.getSync() === instanceListId) {
 				if (!logins.getUserController().isGlobalAdmin()) {
 					let listEntity = this.list.getEntity(instanceId)
-					load(GroupInfoTypeRef, [neverNull(instanceListId), instanceId]).then(gi => {
+					return load(GroupInfoTypeRef, [neverNull(instanceListId), instanceId]).then(gi => {
 						let localAdminGroupIds = logins.getUserController()
 						                               .getLocalAdminGroupMemberships()
 						                               .map(gm => gm.group)
 						if (listEntity) {
 							if (localAdminGroupIds.indexOf(gi.localAdmin) === -1) {
-								this.list.entityEventReceived(instanceId, OperationType.DELETE)
+								return this.list.entityEventReceived(instanceId, OperationType.DELETE)
 							} else {
-								this.list.entityEventReceived(instanceId, operation)
+								return this.list.entityEventReceived(instanceId, operation)
 							}
 						} else {
 							if (localAdminGroupIds.indexOf(gi.localAdmin) !== -1) {
-								this.list.entityEventReceived(instanceId, OperationType.CREATE)
+								return this.list.entityEventReceived(instanceId, OperationType.CREATE)
 							}
 						}
 					})
 				} else {
-					this.list.entityEventReceived(instanceId, operation)
+					return this.list.entityEventReceived(instanceId, operation)
 				}
 			} else if (isUpdateForTypeRef(UserTypeRef, update) && operation === OperationType.UPDATE) {
-				this._loadAdmins().then(() => {
+				return this._loadAdmins().then(() => {
 					this.list.redraw()
 				})
 			}
-		}
+		}).then(noOp)
 	}
 }
 

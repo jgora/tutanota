@@ -39,11 +39,13 @@ static TUTLogger *singleton = nil;
 }
 
 -(void)addEntry:(NSString *)entry {
+  @synchronized (self) {
     self.buffer[self.index] = entry;
     self.index++;
     if (self.index == LOG_SIZE) {
         self.index = 0;
     }
+  }
 }
 
 -(NSArray<NSString *> *)entries {
@@ -54,13 +56,17 @@ static TUTLogger *singleton = nil;
 @end
 
 void TUTLog(NSString *format, ...) {
-    let log = [TUTLogger sharedInstance];
     va_list args;
     va_start(args, format);
     NSString *contents = [[NSString alloc] initWithFormat:format arguments:args];
     va_end(args);
+    TUTSLog(contents);
+}
+
+void TUTSLog(NSString *message) {
+    let log = [TUTLogger sharedInstance];
     let dateString = [log.dateFormatter stringFromDate:NSDate.date];
-    let entry = [NSString stringWithFormat:@"%@ %@ %@", dateString, @"I", contents];
+    let entry = [NSString stringWithFormat:@"%@ %@ %@", dateString, @"I", message];
     [log addEntry:entry];
-    NSLog(@"%@", contents);
+    NSLog(@"%@", message);
 }

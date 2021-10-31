@@ -28,7 +28,6 @@ public final class PushNotificationService extends LifecycleJobService {
 
 	private volatile JobParameters jobParameters;
 	private LocalNotificationsFacade localNotificationsFacade;
-	private AlarmNotificationsManager alarmNotificationsManager;
 	private SseClient sseClient;
 
 	public static Intent startIntent(Context context, String sender) {
@@ -43,11 +42,10 @@ public final class PushNotificationService extends LifecycleJobService {
 		AppDatabase appDatabase = AppDatabase.getDatabase(this, /*allowMainThreadAccess*/true);
 
 		AndroidKeyStoreFacade keyStoreFacade = new AndroidKeyStoreFacade(this);
-		SseStorage sseStorage = new SseStorage(this, appDatabase, keyStoreFacade);
+		SseStorage sseStorage = new SseStorage(appDatabase, keyStoreFacade);
 
-		sseStorage.migrateToDB();
 		localNotificationsFacade = new LocalNotificationsFacade(this);
-		alarmNotificationsManager = new AlarmNotificationsManager(keyStoreFacade, sseStorage, new Crypto(this),
+		AlarmNotificationsManager alarmNotificationsManager = new AlarmNotificationsManager(sseStorage, new Crypto(this),
 				new SystemAlarmFacade(this), localNotificationsFacade);
 		TutanotaNotificationsHandler tutanotaNotificationsHandler = new TutanotaNotificationsHandler(localNotificationsFacade, sseStorage,
 				alarmNotificationsManager);
@@ -77,10 +75,8 @@ public final class PushNotificationService extends LifecycleJobService {
 			}
 
 			@Override
-			public void onNotAuthorized() {
-				tutanotaNotificationsHandler.onNotAuthorized();
-				removeBackgroundServiceNotification();
-				finishJobIfNeeded();
+			public void onNotAuthorized(String userId) {
+				tutanotaNotificationsHandler.onNotAuthorized(userId);
 			}
 
 			@Override
@@ -99,6 +95,7 @@ public final class PushNotificationService extends LifecycleJobService {
 			if (userIds.isEmpty()) {
 				sseClient.stopConnection();
 				removeBackgroundServiceNotification();
+				finishJobIfNeeded();
 			} else {
 				sseClient.restartConnectionIfNeeded(new SseInfo(sseStorage.getPushIdentifier(), userIds, sseStorage.getSseOrigin()));
 			}

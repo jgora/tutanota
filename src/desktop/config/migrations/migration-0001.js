@@ -1,6 +1,8 @@
 // @flow
-function migrate(oldConfig: any) {
-	return Object.assign(oldConfig, {"desktopConfigVersion": 1, "showAutoUpdateOption": true})
+import type {Config} from "../ConfigCommon"
+
+async function migrate(oldConfig: Config): Promise<void> {
+	Object.assign(oldConfig, {"desktopConfigVersion": 1, "showAutoUpdateOption": true})
 }
 
 export const migrateClient = migrate

@@ -1,50 +1,64 @@
 // @flow
 import m from "mithril"
-import {assertMainOrNode} from "../api/Env"
+import {assertMainOrNode} from "../api/common/Env"
 import {lang} from "../misc/LanguageViewModel"
 import {load, loadRange, update} from "../api/main/Entity"
-import * as AddSpamRuleDialog from "./AddSpamRuleDialog"
-import type {SpamRuleFieldTypeEnum, SpamRuleTypeEnum} from "../api/common/TutanotaConstants"
-import {getSparmRuleField, GroupType, OperationType, SpamRuleFieldType, SpamRuleType} from "../api/common/TutanotaConstants"
-import {getCustomMailDomains, getUserGroupMemberships, neverNull, noOp, objectEntries} from "../api/common/utils/Utils"
+import {getSpamRuleFieldToName, getSpamRuleTypeNameMapping, showAddSpamRuleDialog} from "./AddSpamRuleDialog"
+import {getSpamRuleField, GroupType, OperationType, SpamRuleFieldType, SpamRuleType} from "../api/common/TutanotaConstants"
+import {getCustomMailDomains, neverNull, noOp} from "../api/common/utils/Utils"
+import type {CustomerServerProperties} from "../api/entities/sys/CustomerServerProperties"
 import {CustomerServerPropertiesTypeRef} from "../api/entities/sys/CustomerServerProperties"
 import {worker} from "../api/main/WorkerClient"
-import {GENERATED_MAX_ID} from "../api/common/EntityFunctions"
 import {DropDownSelector} from "../gui/base/DropDownSelector"
 import stream from "mithril/stream/stream.js"
 import {logins} from "../api/main/LoginController"
+import type {AuditLogEntry} from "../api/entities/sys/AuditLogEntry"
 import {AuditLogEntryTypeRef} from "../api/entities/sys/AuditLogEntry"
 import {formatDateTime, formatDateTimeFromYesterdayOn} from "../misc/Formatter"
+import type {Customer} from "../api/entities/sys/Customer"
 import {CustomerTypeRef} from "../api/entities/sys/Customer"
 import {Dialog} from "../gui/base/Dialog"
+import type {GroupInfo} from "../api/entities/sys/GroupInfo"
 import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
-import {NotAuthorizedError, PreconditionFailedError} from "../api/common/error/RestError"
+import {LockedError, NotAuthorizedError, PreconditionFailedError} from "../api/common/error/RestError"
 import {LazyLoaded} from "../api/common/utils/LazyLoaded"
+import type {CustomerInfo} from "../api/entities/sys/CustomerInfo"
 import {CustomerInfoTypeRef} from "../api/entities/sys/CustomerInfo"
 import {loadEnabledTeamMailGroups, loadEnabledUserMailGroups, loadGroupDisplayName} from "./LoadingUtils"
 import {GroupTypeRef} from "../api/entities/sys/Group"
 import {UserTypeRef} from "../api/entities/sys/User"
-import {showNotAvailableForFreeDialog} from "../misc/ErrorHandlerImpl"
 import {Icons} from "../gui/base/icons/Icons"
-import {showProgressDialog} from "../gui/base/ProgressDialog"
+import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
 import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
 import type {TableLineAttrs} from "../gui/base/TableN"
-import {ColumnWidth, createRowActions, TableN} from "../gui/base/TableN"
-import {ExpanderButtonN, ExpanderPanelN} from "../gui/base/ExpanderN"
-import {createDropdown} from "../gui/base/DropdownN"
+import {ColumnWidth, createRowActions} from "../gui/base/TableN"
+import {attachDropdown, createDropdown} from "../gui/base/DropdownN"
 import {ButtonType} from "../gui/base/ButtonN"
-import {showAddDomainDialog} from "./AddDomainDialog"
 import {DomainDnsStatus} from "./DomainDnsStatus"
 import {showDnsCheckDialog} from "./CheckDomainDnsStatusDialog"
-import type {CustomerServerProperties} from "../api/entities/sys/CustomerServerProperties"
-import type {Customer} from "../api/entities/sys/Customer"
-import type {CustomerInfo} from "../api/entities/sys/CustomerInfo"
-import type {AuditLogEntry} from "../api/entities/sys/AuditLogEntry"
-import type {GroupInfo} from "../api/entities/sys/GroupInfo"
 import type {DomainInfo} from "../api/entities/sys/DomainInfo"
+import {BootIcons} from "../gui/base/icons/BootIcons"
+import {DAY_IN_MILLIS} from "../api/common/utils/DateUtils"
+import {RejectedSenderTypeRef} from "../api/entities/sys/RejectedSender"
+import {generatedIdToTimestamp, timestampToGeneratedId} from "../api/common/utils/Encoding"
+import {ExpandableTable} from "./ExpandableTable"
+import {showRejectedSendersInfoDialog} from "./RejectedSendersInfoDialog"
+import {createEmailSenderListElement} from "../api/entities/sys/EmailSenderListElement"
+import {showAddDomainWizard} from "./emaildomain/AddDomainWizard"
+import {getUserGroupMemberships} from "../api/common/utils/GroupUtils";
+import {GENERATED_MAX_ID, getElementId, sortCompareByReverseId} from "../api/common/utils/EntityUtils";
+import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
+import {getDomainPart} from "../misc/parsing/MailAddressParser";
+import type {UpdatableSettingsViewer} from "./SettingsView"
+import {ofClass, promiseMap} from "../api/common/utils/PromiseUtils"
 
 assertMainOrNode()
+
+// Number of days for that we load rejected senders
+const REJECTED_SENDERS_TO_LOAD_MS = 5 * DAY_IN_MILLIS
+// Max number of rejected sender entries that we display in the ui
+const REJECTED_SENDERS_MAX_NUMBER = 100
 
 export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 	view: Function;
@@ -52,11 +66,10 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 	_customer: Stream<Customer>;
 	_customerInfo: LazyLoaded<CustomerInfo>;
 	_spamRuleLines: Stream<Array<TableLineAttrs>>;
-	_spamRulesExpandedState: Stream<boolean>;
+	_rejectedSenderLines: Stream<Array<TableLineAttrs>>;
 	_customDomainLines: Stream<Array<TableLineAttrs>>;
-	_customDomainsExpandedState: Stream<boolean>;
 	_auditLogLines: Stream<Array<TableLineAttrs>>;
-	_auditLogExpandedState: Stream<boolean>;
+
 	/**
 	 * caches the current status for the custom email domains
 	 * map from domain name to status
@@ -69,13 +82,10 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 				.then(customer => load(CustomerInfoTypeRef, customer.customerInfo))
 		})
 		this._domainDnsStatus = {}
-
 		this._spamRuleLines = stream([])
-		this._spamRulesExpandedState = stream(false)
+		this._rejectedSenderLines = stream([])
 		this._customDomainLines = stream([])
-		this._customDomainsExpandedState = stream(false)
 		this._auditLogLines = stream([])
-		this._auditLogExpandedState = stream(false)
 		this._props = stream()
 		this._customer = stream()
 
@@ -85,7 +95,8 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 			{name: lang.get("yes_label"), value: true},
 			{name: lang.get("no_label"), value: false}
 		], saveIpAddress, 250).setSelectionChangedHandler(v => {
-			update(Object.assign({}, this._props(), {saveEncryptedIpAddressInSession: v}))
+			const newProps: CustomerServerProperties = Object.assign({}, this._props(), {saveEncryptedIpAddressInSession: v})
+			update(newProps)
 		})
 
 		let requirePasswordUpdateAfterReset = stream(false)
@@ -94,7 +105,8 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 			{name: lang.get("yes_label"), value: true},
 			{name: lang.get("no_label"), value: false}
 		], requirePasswordUpdateAfterReset, 250).setSelectionChangedHandler(v => {
-			update(Object.assign({}, this._props(), {requirePasswordUpdateAfterReset: v}))
+			const newProps: CustomerServerProperties = Object.assign({}, this._props(), {requirePasswordUpdateAfterReset: v})
+			update(newProps)
 		})
 
 		this.view = () => {
@@ -104,24 +116,44 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 				showActionButtonColumn: true,
 				addButtonAttrs: {
 					label: "addSpamRule_action",
-					click: () => AddSpamRuleDialog.show(),
+					click: () => showAddSpamRuleDialog(),
 					icon: () => Icons.Add
 				},
 				lines: this._spamRuleLines()
 			}
 
+
+			const rejectedSenderTableAttrs = {
+				columnHeading: ["emailSender_label"],
+				columnWidths: [ColumnWidth.Largest],
+				showActionButtonColumn: true,
+				addButtonAttrs: {
+					label: "refresh_action",
+					click: () => {
+						this._updateRejectedSenderTable()
+					},
+					icon: () => BootIcons.Progress
+				},
+				lines: this._rejectedSenderLines()
+			}
+
+
 			const customDomainTableAttrs = {
 				columnHeading: ["adminCustomDomain_label", "catchAllMailbox_label"],
-				columnWidths: [ColumnWidth.Largest, ColumnWidth.Largest],
+				columnWidths: [ColumnWidth.Largest, ColumnWidth.Small],
 				showActionButtonColumn: true,
 				addButtonAttrs: {
 					label: "addCustomDomain_action",
 					click: () => {
-						if (logins.getUserController().isFreeAccount()) {
-							showNotAvailableForFreeDialog(true)
-						} else {
-							this._customerInfo.getAsync().then(customerInfo => showAddDomainDialog(customerInfo, this._domainDnsStatus))
-						}
+						this._customerInfo.getAsync().then(customerInfo => {
+							if (logins.getUserController().isFreeAccount()) {
+								showNotAvailableForFreeDialog(getCustomMailDomains(customerInfo).length === 0)
+							} else {
+								showAddDomainWizard("", customerInfo).then(() => {
+									this._updateDomains()
+								})
+							}
+						})
 					},
 					icon: () => Icons.Add
 				},
@@ -137,22 +169,24 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 
 			return [
 				m("#global-settings.fill-absolute.scroll.plr-l", [
-					m(".flex-space-between.items-center.mb-s.mt-l", [
-						m(".h4", lang.get('adminSpam_action')),
-						m(ExpanderButtonN, {label: "show_action", expanded: this._spamRulesExpandedState})
-					]),
-					m(ExpanderPanelN, {expanded: this._spamRulesExpandedState}, m(TableN, spamRuleTableAttrs)),
-					m("small", lang.get("adminSpamRuleInfo_msg")),
-					m("small.text-break", [m(`a[href=${lang.getInfoLink('spamRules_link')}][target=_blank]`, lang.getInfoLink('spamRules_link'))]),
-
-					m(".flex-space-between.items-center.mb-s.mt-l", [
-						m(".h4", lang.get('customEmailDomains_label')),
-						m(ExpanderButtonN, {label: "show_action", expanded: this._customDomainsExpandedState})
-					]),
-					m(ExpanderPanelN, {expanded: this._customDomainsExpandedState}, m(TableN, customDomainTableAttrs)),
-					m("small", lang.get("moreInfo_msg") + " "),
-					m("small.text-break", [m(`a[href=${lang.getInfoLink("domainInfo_link")}][target=_blank]`, lang.getInfoLink("domainInfo_link"))]),
-
+					m(ExpandableTable, {
+						title: "adminSpam_action",
+						table: spamRuleTableAttrs,
+						infoMsg: "adminSpamRuleInfo_msg",
+						infoLinkId: "spamRules_link"
+					}),
+					m(ExpandableTable, {
+						title: "rejectedEmails_label",
+						table: rejectedSenderTableAttrs,
+						infoMsg: "rejectedSenderListInfo_msg",
+						onExpand: () => this._updateRejectedSenderTable()
+					}),
+					m(ExpandableTable, {
+						title: "customEmailDomains_label",
+						table: customDomainTableAttrs,
+						infoMsg: "moreInfo_msg",
+						infoLinkId: "domainInfo_link"
+					}),
 					m(".mt-l", [
 						m(".h4", lang.get('security_title')),
 						m(saveIpAddressDropdown),
@@ -160,14 +194,11 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 							? m("", [
 								m(requirePasswordUpdateAfterResetDropdown),
 								this._customer() ?
-									m(".mt-l", [
-										m(".flex-space-between.items-center.mb-s", [
-											m(".h4", lang.get('auditLog_title')),
-											m(ExpanderButtonN, {label: "show_action", expanded: this._auditLogExpandedState})
-										]),
-										m(ExpanderPanelN, {expanded: this._auditLogExpandedState}, m(TableN, auditLogTableAttrs)),
-										m("small", lang.get("auditLogInfo_msg")),
-									]) : null
+									m(".mt-l", m(ExpandableTable, {
+										title: "auditLog_title",
+										table: auditLogTableAttrs,
+										infoMsg: "auditLogInfo_msg"
+									})) : null
 							]) : null,
 					]),
 
@@ -180,16 +211,16 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 		this._updateAuditLog()
 	}
 
-	_updateCustomerServerProperties(): void {
-		worker.loadCustomerServerProperties().then(props => {
+	_updateCustomerServerProperties(): Promise<void> {
+		return worker.customerFacade.loadCustomerServerProperties().then(props => {
 			this._props(props)
 			const fieldToName = getSpamRuleFieldToName()
 			this._spamRuleLines(props.emailSenderList.map((rule, index) => {
 				return {
 					cells: () => [
 						{
-							main: fieldToName[getSparmRuleField(rule)],
-							info: rule.value,
+							main: fieldToName[getSpamRuleField(rule)],
+							info: [rule.value],
 						},
 						{
 							main: neverNull(getSpamRuleTypeNameMapping().find(t => t.value === rule.type)).name,
@@ -197,11 +228,11 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 					],
 					actionButtonAttrs: createRowActions({
 						getArray: () => props.emailSenderList,
-						updateInstance: () => update(props)
+						updateInstance: () => update(props).catch(ofClass(LockedError, noOp))
 					}, rule, index, [
 						{
 							label: "edit_action",
-							click: () => AddSpamRuleDialog.show(rule),
+							click: () => showAddSpamRuleDialog(rule),
 							type: ButtonType.Dropdown,
 						}
 					])
@@ -211,10 +242,76 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 		})
 	}
 
-	_updateAuditLog() {
-		load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)).then(customer => {
+	_updateRejectedSenderTable(): void {
+		const customer = this._customer()
+		if (customer && customer.rejectedSenders) {
+			// Rejected senders are written with TTL for seven days.
+			// We have to avoid that we load too many (already deleted) rejected senders form the past.
+			// First we load REJECTED_SENDERS_MAX_NUMBER items starting from the past timestamp into the future. If there are
+			// more entries available we can safely load REJECTED_SENDERS_MAX_NUMBER from GENERATED_MAX_ID in reverse order.
+			// Otherwise we will just use what has been returned in the first request.
+			const senderListId = customer.rejectedSenders.items
+			const startId = timestampToGeneratedId(Date.now() - REJECTED_SENDERS_TO_LOAD_MS)
+			const loadingPromise = loadRange(RejectedSenderTypeRef, senderListId, startId, REJECTED_SENDERS_MAX_NUMBER, false)
+				.then(rejectedSenders => {
+					if (REJECTED_SENDERS_MAX_NUMBER === rejectedSenders.length) {
+						// There are more entries available, we need to load from GENERATED_MAX_ID.
+						// we don't need to sort here because we load in reverse direction
+						return loadRange(RejectedSenderTypeRef, senderListId, GENERATED_MAX_ID, REJECTED_SENDERS_MAX_NUMBER, true)
+					} else {
+						// ensure that rejected senders are sorted in descending order
+						return rejectedSenders.sort(sortCompareByReverseId)
+					}
+				})
+				.then(rejectedSenders => {
+					const tableEntries = rejectedSenders.map(rejectedSender => {
+						const rejectDate = formatDateTime(new Date(generatedIdToTimestamp(getElementId(rejectedSender))))
+						return {
+							cells: () => {
+								return [
+									{
+										main: rejectedSender.senderMailAddress,
+										info: [`${rejectDate}, ${rejectedSender.senderHostname} (${rejectedSender.senderIp})`],
+										click: () => showRejectedSendersInfoDialog(rejectedSender)
+									}
+								]
+							},
+							actionButtonAttrs: attachDropdown({
+									label: "showMore_action",
+									icon: () => Icons.More,
+								},
+								() => [
+									{
+										label: "showRejectReason_action",
+										type: ButtonType.Dropdown,
+										click: () => showRejectedSendersInfoDialog(rejectedSender)
+									},
+									{
+										label: "addSpamRule_action",
+										type: ButtonType.Dropdown,
+										click: () => {
+											const domainPart = getDomainPart(rejectedSender.senderMailAddress)
+											showAddSpamRuleDialog(createEmailSenderListElement({
+												value: domainPart ? domainPart : "",
+												type: SpamRuleType.WHITELIST,
+												field: SpamRuleFieldType.FROM,
+											}))
+										}
+									},
+								]
+							)
+						}
+					})
+					this._rejectedSenderLines(tableEntries)
+				})
+			showProgressDialog("loading_msg", loadingPromise).then(() => m.redraw())
+		}
+	}
+
+	_updateAuditLog(): Promise<void> {
+		return load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)).then(customer => {
 			this._customer(customer)
-			loadRange(AuditLogEntryTypeRef, neverNull(customer.auditLog).items, GENERATED_MAX_ID, 200, true)
+			return loadRange(AuditLogEntryTypeRef, neverNull(customer.auditLog).items, GENERATED_MAX_ID, 200, true)
 				.then(auditLog => {
 					this._auditLogLines(auditLog.map(auditLogEntry => {
 						return {
@@ -239,16 +336,16 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 				.then(gi => {
 					modifiedGroupInfo(gi)
 				})
-				.catch(NotAuthorizedError, e => {
+				.catch(ofClass(NotAuthorizedError, e => {
 					// If the admin is removed from the free group, he does not have the permission to access the groupinfo of that group anymore
-				}))
+				})))
 		}
 		if (entry.groupInfo) {
 			groupInfoLoadingPromises.push(load(GroupInfoTypeRef, entry.groupInfo).then(gi => {
 				groupInfo(gi)
-			}).catch(NotAuthorizedError, e => {
+			}).catch(ofClass(NotAuthorizedError, e => {
 				// If the admin is removed from the free group, he does not have the permission to access the groupinfo of that group anymore
-			}))
+			})))
 		}
 		Promise.all(groupInfoLoadingPromises).then(() => {
 			let dialog = Dialog.showActionDialog({
@@ -293,7 +390,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 		})
 	}
 
-	_getGroupInfoDisplayText(groupInfo: GroupInfo) {
+	_getGroupInfoDisplayText(groupInfo: GroupInfo): string {
 		if (groupInfo.name && groupInfo.mailAddress) {
 			return groupInfo.name + " <" + groupInfo.mailAddress + ">"
 		} else if (groupInfo.mailAddress) {
@@ -303,8 +400,9 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 		}
 	}
 
-	_updateDomains() {
-		this._customerInfo.getAsync().then(customerInfo => {
+
+	_updateDomains(): Promise<void> {
+		return this._customerInfo.getAsync().then(customerInfo => {
 			let customDomainInfos = getCustomMailDomains(customerInfo)
 			// remove dns status instances for all removed domains
 			Object.keys(this._domainDnsStatus).forEach(domain => {
@@ -312,7 +410,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 					delete this._domainDnsStatus[domain]
 				}
 			})
-			Promise.map(customDomainInfos, domainInfo => {
+			return promiseMap(customDomainInfos, domainInfo => {
 				// create dns status instances for all new domains
 				if (!this._domainDnsStatus[domainInfo.domain]) {
 					this._domainDnsStatus[domainInfo.domain] = new DomainDnsStatus(domainInfo.domain)
@@ -330,14 +428,13 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 						cells: () => [
 							{
 								main: domainInfo.domain,
-								info: domainDnsStatus.getDnsStatusInfo(),
+								info: [domainDnsStatus.getDnsStatusInfo()],
 								click: (domainDnsStatus.status.isLoaded() && !domainDnsStatus.areAllRecordsFine()) ? () => {
 									showDnsCheckDialog(domainDnsStatus)
 								} : noOp
 							},
 							{
 								main: catchAllGroupName,
-								info: null
 							}
 						],
 						actionButtonAttrs: {
@@ -346,9 +443,11 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 							click: createDropdown(() => (domainDnsStatus.status.isLoaded() && !domainDnsStatus.areAllRecordsFine() ? [
 								{
 									type: ButtonType.Dropdown,
-									label: "checkDnsRecords_action",
+									label: "resumeSetup_label",
 									click: () => {
-										showDnsCheckDialog(domainDnsStatus)
+										showAddDomainWizard(domainDnsStatus.domain, customerInfo).then(() => {
+											domainDnsStatus.loadCurrentStatus().then(() => m.redraw())
+										})
 									}
 								}
 							] : []).concat([
@@ -362,11 +461,14 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 									label: "delete_action",
 									click: () => this._deleteCustomDomain(domainInfo)
 								}
-							]), 250)
+							]), 260)
 						}
 					}
 				})
-			}).then(tableLines => this._customDomainLines(tableLines))
+			}).then(tableLines => {
+				this._customDomainLines(tableLines)
+				m.redraw()
+			})
 		})
 	}
 
@@ -409,63 +511,41 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 			const valueStream = stream(availableAndSelectedGroupDatas.selected ? availableAndSelectedGroupDatas.selected.groupId : null)
 			return Dialog.showDropDownSelectionDialog("setCatchAllMailbox_action", "catchAllMailbox_label", null, availableAndSelectedGroupDatas.available, valueStream, 250)
 			             .then(selectedMailGroupId => {
-				             return worker.setCatchAllGroup(domainInfo.domain, selectedMailGroupId)
+				             return worker.customerFacade.setCatchAllGroup(domainInfo.domain, selectedMailGroupId)
 			             })
 		})
 	}
 
 	_deleteCustomDomain(domainInfo: DomainInfo) {
-		worker.removeDomain(domainInfo.domain).catch(PreconditionFailedError, e => {
-			let registrationDomains = this._props() != null ? this._props()
-			                                                      .whitelabelRegistrationDomains
-			                                                      .map(domainWrapper => domainWrapper.value) : []
-			if (registrationDomains.indexOf(domainInfo.domain) !== -1) {
-				Dialog.error(() => lang.get("customDomainDeletePreconditionWhitelabelFailed_msg", {"{domainName}": domainInfo.domain}))
-			} else {
-				Dialog.error(() => lang.get("customDomainDeletePreconditionFailed_msg", {"{domainName}": domainInfo.domain}))
-			}
-		})
+		Dialog.confirm(() => lang.get("confirmCustomDomainDeletion_msg", {"{domain}": domainInfo.domain}))
+		      .then(confirmed => {
+			      if (confirmed) {
+				      worker.customerFacade.removeDomain(domainInfo.domain)
+				            .catch(ofClass(PreconditionFailedError, e => {
+					            let registrationDomains = this._props() != null ? this._props()
+					                                                                  .whitelabelRegistrationDomains
+					                                                                  .map(domainWrapper => domainWrapper.value) : []
+					            if (registrationDomains.indexOf(domainInfo.domain) !== -1) {
+						            Dialog.error(() => lang.get("customDomainDeletePreconditionWhitelabelFailed_msg", {"{domainName}": domainInfo.domain}))
+					            } else {
+						            Dialog.error(() => lang.get("customDomainDeletePreconditionFailed_msg", {"{domainName}": domainInfo.domain}))
+					            }
+				            }))
+				            .catch(ofClass(LockedError, e => Dialog.error("operationStillActive_msg")))
+			      }
+		      })
 	}
 
-	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>) {
-		for (let update of updates) {
+	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>): Promise<void> {
+		return promiseMap(updates, update => {
 			if (isUpdateForTypeRef(CustomerServerPropertiesTypeRef, update) && update.operation === OperationType.UPDATE) {
-				this._updateCustomerServerProperties()
+				return this._updateCustomerServerProperties()
 			} else if (isUpdateForTypeRef(AuditLogEntryTypeRef, update)) {
-				this._updateAuditLog()
+				return this._updateAuditLog()
 			} else if (isUpdateForTypeRef(CustomerInfoTypeRef, update) && update.operation === OperationType.UPDATE) {
 				this._customerInfo.reset()
-				this._updateDomains()
+				return this._updateDomains()
 			}
-		}
-	}
-}
-
-export function getSpamRuleTypeNameMapping(): {value: SpamRuleTypeEnum, name: string}[] {
-	return [
-		{value: SpamRuleType.WHITELIST, name: lang.get("emailSenderWhitelist_action")},
-		{value: SpamRuleType.BLACKLIST, name: lang.get("emailSenderBlacklist_action")},
-		{value: SpamRuleType.DISCARD, name: lang.get("emailSenderDiscardlist_action")}
-	]
-}
-
-function getSpamRuleFieldToName(): {[SpamRuleFieldTypeEnum]: string} {
-	return {
-		[SpamRuleFieldType.FROM]: lang.get("from_label"),
-		[SpamRuleFieldType.TO]: lang.get("to_label"),
-		[SpamRuleFieldType.CC]: "CC",
-		[SpamRuleFieldType.BCC]: "BCC",
-	}
-}
-
-export function getSpamRuleFieldMapping(): Array<{value: SpamRuleFieldTypeEnum, name: string}> {
-	return objectEntries(getSpamRuleFieldToName()).map(([value, name]) => ({value, name}))
-}
-
-function escape(s: string) {
-	if (s.indexOf('"') !== -1 || s.indexOf(',') !== -1) {
-		return '"' + s.replace(new RegExp('"', 'g'), `\\"`) + '"'
-	} else {
-		return s
+		}).then(noOp)
 	}
 }

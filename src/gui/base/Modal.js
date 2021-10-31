@@ -2,77 +2,112 @@
 import m from "mithril"
 import {alpha, animations} from "./../animation/Animations"
 import {theme} from "../theme"
-import {assertMainOrNodeBoot} from "../../api/Env"
+import {assertMainOrNodeBoot} from "../../api/common/Env"
 import type {Shortcut} from "../../misc/KeyManager"
 import {keyManager} from "../../misc/KeyManager"
-import {module as replaced} from "@hot"
 import {windowFacade} from "../../misc/WindowFacade"
+import {remove} from "../../api/common/utils/ArrayUtils"
+import {downcast, insideRect} from "../../api/common/utils/Utils"
+import {LayerType} from "../../RootView"
 
 assertMainOrNodeBoot()
 
+type ModalComponentWrapper = {key: number, component: ModalComponent, needsBg: boolean}
+
 class Modal {
-	components: {key: number, component: ModalComponent}[];
+	components: Array<ModalComponentWrapper>;
 	_uniqueComponent: ?ModalComponent;
 	_domModal: HTMLElement;
 	view: Function;
 	visible: boolean;
 	currentKey: number;
+	_closingComponents: Array<ModalComponent>
 
 	constructor() {
 		this.currentKey = 0
 		this.components = []
 		this.visible = false
 		this._uniqueComponent = null
+		this._closingComponents = []
 
 		// modal should never get removed, so not saving unsubscriber
 		windowFacade.addHistoryEventListener(e => this._popState(e))
 
-		this.view = (): VirtualElement => {
+		this.view = (): Children => {
 			return m("#modal.fill-absolute", {
-				oncreate: (vnode) => this._domModal = vnode.dom,
-				onclick: (e: MouseEvent) => this.components.forEach(c => c.component.backgroundClick(e)),
+				oncreate: (vnode) => {
+					this._domModal = vnode.dom
+					// TODO
+					// const lastComponent = last(this.components)
+					// if (lastComponent) {
+					// 	lastComponent.component.backgroundClick(e)
+					// }
+				},
 				style: {
-					'z-index': 99,
+					'z-index': LayerType.Modal,
 					display: this.visible ? "" : 'none' // display: null not working for IE11
 				}
-			}, [
-				this.components.map((wrapper, i, array) => {
-					return m(".layer.fill-absolute", {
-							key: wrapper.key,
-							oncreate: vnode => {
-								// do not set visible=true already in display() because it leads to modal staying open in a second window in Chrome
-								// because onbeforeremove is not called in that case to set visible=false. this is probably an optimization in Chrome to reduce
-								// UI updates if the window is not visible. setting visible=true here is fine because this code is not even called then
-								this.visible = true
-								m.redraw()
-								this.addAnimation(vnode.dom, true)
-							},
-							style: {
-								zIndex: 100 + i,
-							},
-							onbeforeremove: vnode => Promise.all([
-								this.addAnimation(vnode.dom, false).then(() => {
-									if (this.components.length === 0) {
-										this.visible = false
-									}
-								}),
-								wrapper.component.hideAnimation()
-							]).then(() => m.redraw()),
+			}, this.components.map((wrapper, i, array) => {
+				return m(".layer.fill-absolute", {
+						key: wrapper.key,
+						oncreate: vnode => {
+							// do not set visible=true already in display() because it leads to modal staying open in a second window in Chrome
+							// because onbeforeremove is not called in that case to set visible=false. this is probably an optimization in Chrome to reduce
+							// UI updates if the window is not visible. setting visible=true here is fine because this code is not even called then
+							this.visible = true
+							m.redraw()
+							if (wrapper.needsBg) this.addAnimation(vnode.dom, true)
 						},
-						[
-							m(wrapper.component)
-						]
-					)
-				})
-			])
+						onclick: (event: MouseEvent) => {
+							// flow only recognizes currentTarget as an EventTarget, but we know here that it's an HTMLElement
+							const element: HTMLElement = downcast(event.currentTarget)
+							// This layer div has a single child, the modal component
+							const child = element.firstElementChild
+							// child shouldn't be null but maybe the user click fast idk
+							if (child) {
+								const childRect = child.getBoundingClientRect()
+								if (!insideRect(event, childRect)) {
+									wrapper.component.backgroundClick(event)
+								}
+							}
+						},
+						style: {
+							zIndex: LayerType.Modal + 1 + i,
+						},
+						onbeforeremove: vnode => {
+							if (wrapper.needsBg) {
+								this._closingComponents.push(wrapper.component)
+								return Promise.all([
+									this.addAnimation(vnode.dom, false).then(() => {
+										remove(this._closingComponents, wrapper.component)
+										if (this.components.length === 0 && this._closingComponents.length === 0) {
+											this.visible = false
+										}
+									}),
+									wrapper.component.hideAnimation()
+								]).then(() => {
+									m.redraw()
+								})
+							} else {
+								if (this.components.length === 0 && this._closingComponents.length === 0) {
+									this.visible = false
+								}
+								return wrapper.component.hideAnimation()
+								              .then(() => m.redraw())
+							}
+						}
+					},
+					m(wrapper.component)
+				)
+			}))
 		}
 	}
 
-	display(component: ModalComponent) {
+	display(component: ModalComponent, needsBg: boolean = true) {
 		if (this.components.length > 0) {
 			keyManager.unregisterModalShortcuts(this.components[this.components.length - 1].component.shortcuts())
 		}
-		this.components.push({key: this.currentKey++, component: component})
+		this.components.push({key: this.currentKey++, component: component, needsBg})
 		m.redraw()
 		keyManager.registerModalShortcuts(component.shortcuts())
 	}
@@ -112,11 +147,11 @@ class Modal {
 	 * multiple calls will be ignored if the first component is still visible
 	 * @param component
 	 */
-	displayUnique(component: ModalComponent) {
+	displayUnique(component: ModalComponent, needsBg: boolean = true) {
 		if (this._uniqueComponent) {
 			return
 		}
-		this.display(component)
+		this.display(component, needsBg)
 		this._uniqueComponent = component
 	}
 
@@ -140,9 +175,7 @@ class Modal {
 			this._uniqueComponent = null
 		}
 		m.redraw()
-		if (this.components.length === 0) {
-			this.currentKey = 0
-		} else if (componentIsLastComponent) {
+		if (this.components.length > 0 && componentIsLastComponent) {
 			// the removed component was the last component, so we can now register the shortcuts of the now last component
 			keyManager.registerModalShortcuts(this.components[this.components.length - 1].component.shortcuts())
 		}
@@ -162,18 +195,14 @@ class Modal {
 
 export const modal: Modal = new Modal()
 
-if (replaced && replaced.components) {
-	replaced.components.map(wrapper => replaced.remove(wrapper.component))
-}
-
-interface ModalComponent {
+export interface ModalComponent {
 	hideAnimation(): Promise<void>;
 
 	onClose(): void;
 
 	shortcuts(): Shortcut[];
 
-	view(vnode: Vnode<any>): Vnode<any>;
+	view(vnode: Vnode<any>): Children;
 
 	backgroundClick(e: MouseEvent): void;
 

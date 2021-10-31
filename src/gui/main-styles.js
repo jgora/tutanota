@@ -2,21 +2,35 @@
 import {styles} from "./styles"
 import {px, size} from "./size"
 import {client} from "../misc/ClientDetector"
+import {lang} from "../misc/LanguageViewModel"
 import {noselect, position_absolute, positionValue} from "./mixins"
-import {assertMainOrNodeBoot, isAdminClient, isApp, isDesktop} from "../api/Env"
+import {assertMainOrNodeBoot, isAdminClient, isApp, isDesktop} from "../api/common/Env"
 import {theme} from "./theme.js"
 import {BrowserType} from "../misc/ClientConstants"
-import {getContentButtonIconBackground, getElevatedBackground, getNavButtonIconBackground, getNavigationMenuBg} from "./theme"
+import {getContentButtonIconBackground, getElevatedBackground, getNavigationMenuBg} from "./theme"
 
 assertMainOrNodeBoot()
 
-export function requiresStatusBarHack() {
+export function requiresStatusBarHack(): boolean {
 	return isApp() && client.device === "iPhone" && client.browserVersion < 11
 }
 
+export function getFonts(): string {
+	// see https://bitsofco.de/the-new-system-font-stack/
+	const fonts: Array<string> = [
+		'-apple-system', 'system-ui', 'BlinkMacSystemFont', "Segoe UI", 'Roboto', 'Helvetica Neue', 'Helvetica', 'Arial', 'sans-serif'
+	]
+	// workaround for incorrect Japanese font see https://github.com/tutao/tutanota/issues/1909
+	if (env.platformId === 'win32' && lang.code === 'ja') fonts.push('SimHei', "黑体")
+	fonts.push("Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol")
+	return fonts.join(', ')
+}
+
+const boxShadow = `0 2px 12px rgba(0, 0, 0, 0.4), 0 10px 40px rgba(0, 0, 0, 0.3)`
+
 styles.registerStyle('main', () => {
 	return {
-		"#link-tt": isDesktop() ? {
+		"#link-tt": isDesktop() || isAdminClient() ? {
 			"pointer-events": "none",
 			"font-size": px(size.font_size_small),
 			"padding-left": px(size.hpad_small),
@@ -35,9 +49,10 @@ styles.registerStyle('main', () => {
 			"font-family": "monospace"
 		} : {},
 
-		"#link-tt.reveal": isDesktop() ? {
+		"#link-tt.reveal": isDesktop() || isAdminClient() ? {
 			"opacity": 1,
 			"transition": "opacity .1s linear",
+			"z-index": 100,
 		} : {},
 
 		"*:not(input):not(textarea)": isAdminClient() ? {} : {
@@ -71,7 +86,7 @@ styles.registerStyle('main', () => {
 
 		"@font-face": {
 			"font-family": "'Ionicons'",
-			"src": `url('${System.getConfig().baseURL}images/ionicons.ttf') format('truetype')`,
+			"src": `url('${window.tutao.appState.prefixWithoutFile}/images/ionicons.ttf') format('truetype')`,
 			"font-weight": "normal",
 			"font-style": "normal"
 		},
@@ -96,7 +111,8 @@ styles.registerStyle('main', () => {
 		'html': {'-webkit-font-smoothing': 'subpixel-antialiased'}, // define font-smoothing for css animation in safari
 		'body': {
 			position: 'fixed',  // Fix body for iOS & Safari
-			'background-color': theme.content_bg,
+			// It is inlined to "transparent" in HTML so we have to overwrite it.
+			'background-color': `${theme.content_bg} !important`,
 		},
 		'button, textarea': {
 			padding: 0,
@@ -105,10 +121,13 @@ styles.registerStyle('main', () => {
 		'button': {
 			'background': 'transparent', // removes default browser style for buttons
 		},
+		'button:disabled': {
+			cursor: "default"
+		},
 		'body, button': { // Yes we have to tell buttons separately because browser button styles override general body ones
 			overflow: 'hidden',
 			// see: https://www.smashingmagazine.com/2015/11/using-system-ui-fonts-practical-guide/ and github
-			'font-family': `-apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol"`,
+			'font-family': getFonts(),
 			'font-size': px(size.font_size_base),
 			'line-height': size.line_height,
 			color: theme.content_fg,
@@ -118,7 +137,9 @@ styles.registerStyle('main', () => {
 		'small, .small': {
 			'font-size': px(size.font_size_small),
 		},
-
+		'.smaller': {
+			'font-size': px(size.font_size_smaller),
+		},
 		'.b': {
 			'font-weight': 'bold',
 		},
@@ -139,7 +160,9 @@ styles.registerStyle('main', () => {
 		'.overflow-x-hidden': {
 			'overflow-x': 'hidden'
 		},
-
+		'.overflow-y-visible': {
+			"overflow-y": 'visible !important'
+		},
 
 		'h1, h2, h3, h4, h5, h6': {margin: 0, 'font-weight': 'normal'},
 		'h1, .h1': {'font-size': px(size.font_size_base * 2)},
@@ -156,8 +179,14 @@ styles.registerStyle('main', () => {
 
 		".hr": {margin: 0, border: 'none', height: '1px', 'background-color': theme.content_border},
 		".border": {border: `1px solid ${theme.content_border}`},
+		".border-top": {borderTop: `1px solid ${theme.content_border}`},
 
 		".white-space-pre": {'white-space': "pre"},
+
+		".min-content": {
+			width: "min-content",
+			height: "min-content"
+		},
 
 		// margins
 		'.m-0': {margin: 0},
@@ -177,11 +206,20 @@ styles.registerStyle('main', () => {
 		'.mlr': {'margin-left': px(size.hpad), 'margin-right': px(size.hpad)},
 		'.mlr-l': {'margin-left': px(size.hpad_large), 'margin-right': px(size.hpad_large)},
 		'.mr-s': {'margin-right': px(size.vpad_small)},
+		'.mr-xs': {'margin-right': px(size.vpad_xs)},
 		'.ml-s': {'margin-left': px(size.vpad_small)},
 		'.ml-m': {'margin-left': px(size.hpad_medium)},
+		'.ml-l': {'margin-left': px(size.hpad_large)},
 		'.mr-m': {'margin-right': px(size.hpad_medium)},
+		'.mr-l': {'margin-right': px(size.hpad_large)},
+		'.mlr-s': {'margin-left': px(size.hpad_small), 'margin-right': px(size.hpad_small)},
+		'.mtb-0': {'margin-top': px(0), 'margin-bottom': px(0)},
+		'.mr': {'margin-right': px(size.hpad)},
+		'.ml': {'margin-left': px(size.hpad)},
+
 
 		// paddings
+		'.p0': {padding: '0'},
 		'.pt-responsive': {'padding-top': px(size.hpad_large * 3)},
 		'.pt': {'padding-top': px(size.vpad)},
 		'.pt-0': {'padding-top': 0},
@@ -209,6 +247,8 @@ styles.registerStyle('main', () => {
 		'.pr': {'padding-right': px(size.hpad)},
 		'.pr-s': {'padding-right': px(size.hpad_small)},
 		'.pr-m': {'padding-right': px(size.vpad)},
+		'.plr-s': {'padding-left': px(size.hpad_small), 'padding-right': px(size.hpad_small),},
+		'.plr-m': {'padding-left': px(size.hpad), 'padding-right': px(size.hpad)},
 
 		// p-l will be overwritten in media query mobile
 		'.plr-l': {'padding-left': px(size.hpad_large), 'padding-right': px(size.hpad_large)},
@@ -222,6 +262,8 @@ styles.registerStyle('main', () => {
 		'.mr-button': {'margin-right': px(size.hpad_button)},
 
 		'.mt-negative-s': {'margin-top': px(-size.hpad_button)},
+		'.mt-negative-m': {'margin-top': px(-size.vpad)},
+		'.mt-negative-l': {'margin-top': px(-size.hpad_large)},
 		'.mr-negative-s': {'margin-right': px(-size.hpad_button)},
 		'.ml-negative-s': {'margin-left': px(-size.hpad_button)}, // negative margin to handle the default padding of a button
 		'.ml-negative-l': {'margin-left': px(-size.hpad_large)},
@@ -229,15 +271,17 @@ styles.registerStyle('main', () => {
 		'.ml-negative-bubble': {'margin-left': px(-7)},
 		'.mr-negative-m': {'margin-right': px(-(size.hpad_button + size.hpad_nav_button))}, // negative margin to handle the padding of a nav button
 		".fixed-bottom-right": {position: "fixed", bottom: px(size.hpad), right: px(size.hpad_large)},
+		'.mr-negative-xs': {'margin-right': px(-3)},
 
 		// common setting
 		'.text-ellipsis': {overflow: 'hidden', 'text-overflow': 'ellipsis', 'min-width': 0, 'white-space': 'nowrap'},
-		'.min-width-0': {'min-width': 0},
+		'.min-width-0': {'min-width': 0}, // used to enable text ellipsis in flex child elements see https://css-tricks.com/flexbox-truncated-text/
 		'.text-break': {overflow: 'hidden', 'word-break': 'break-word'},
 		'.break-word-links a': {'word-wrap': 'break-word'},
 		'.text-prewrap': {'white-space': 'pre-wrap'},
 		'.text-preline': {'white-space': 'pre-line'},
 		'.text-pre': {'white-space': 'pre'},
+		'.line-break-anywhere': {'line-break': 'anywhere'},
 		'.z1': {'z-index': '1'},
 		'.z2': {'z-index': '2'},
 		'.z3': {'z-index': '3'},
@@ -247,7 +291,7 @@ styles.registerStyle('main', () => {
 		'.height-100p': {height: "100%"},
 
 
-		'.view-columns': {'overflow-x': 'hidden'},
+		'.view-columns': {'overflow': 'hidden'},
 
 		'.view-column': {'will-change': 'transform'},
 
@@ -256,7 +300,11 @@ styles.registerStyle('main', () => {
 		// borders
 		'.password-indicator-border': {'border': `1px solid ${theme.content_button}`},
 
+		'.border': {'border': `1px solid ${theme.content_border}`},
 		'.border-top': {'border-top': `1px solid ${theme.content_border}`},
+		'.border-bottom': {'border-bottom': `1px solid ${theme.content_border}`},
+		'.border-left': {'border-left': `1px solid ${theme.content_border}`},
+
 
 		// colors
 		'.bg-transparent': {'background-color': 'transparent'},
@@ -283,10 +331,12 @@ styles.registerStyle('main', () => {
 
 		'.password-indicator-bg': {'background-color': theme.content_button},
 
-		'.accent-bg': {'background-color': theme.content_accent},
+		'.accent-bg': {
+			'background-color': theme.content_accent,
+			color: theme.content_button_icon_selected
+		},
 		'.accent-fg': {color: theme.content_button_icon},
 		'.accent-fg path': {fill: theme.content_button_icon},
-
 		'.red': {
 			'background-color': '#840010',
 		},
@@ -300,7 +350,7 @@ styles.registerStyle('main', () => {
 		'.underline': {'text-decoration': 'underline'},
 		'.hover-ul:hover': {'text-decoration': isApp() ? 'none' : 'underline'},
 
-		// positioning
+		// positioning1
 		'.fill-absolute': {position: 'absolute', top: 0, bottom: 0, left: 0, right: 0},
 		'.abs': {position: 'absolute'},
 		'.fixed': {position: 'fixed'},
@@ -340,13 +390,27 @@ styles.registerStyle('main', () => {
 				"border-radius": "4px",
 			}
 			: {},
+		// scrollbar will be disabled for mobile devices, even with .scroll applied,
+		// apply this class if you need it to show
+		'.visible-scrollbar::-webkit-scrollbar': {
+			background: "transparent",
+			width: "8px"
+		},
+		'.visible-scrollbar::-webkit-scrollbar-thumb': {
+			background: theme.content_button,
+			"border-radius": "4px",
+		},
 		'.center': {'text-align': 'center'}, //TODO: migrate to .text-center
+		'.dropdown-info': {
+			"padding-bottom": "5px",
+			"padding-top": "5px"
+		},
 		'.text-center': {'text-align': 'center'},
 		'.right': {'text-align': 'right'},
 		'.left': {'text-align': 'left'},
+		'.start': {'text-align': 'start'},
 		'.statusTextColor': {color: theme.content_accent},
 		'.button-height': {height: px(size.button_height)},
-		'.button-height-accent': {height: px(size.button_height_accent) + " !important"},
 		'.button-min-height': {'min-height': px(size.button_height)},
 		'.button-width-fixed': {width: px(size.button_height)},
 		'.large-button-height': {height: px(size.button_floating_size)},
@@ -356,28 +420,33 @@ styles.registerStyle('main', () => {
 		'.full-width': {width: '100%'},
 		'.half-width': {width: '50%'},
 		'.block': {display: 'block'},
+		'.inline-block': {display: 'inline-block'},
 		'.no-text-decoration': {'text-decoration': 'none'},
 		'.strike': {'text-decoration': 'line-through'},
+		'.text-align-vertical': {'vertical-align': 'text-top'},
 
 		// flex box
 		'.flex-space-around': {display: 'flex', 'justify-content': 'space-around'},
 		'.flex-space-between': {display: 'flex', 'justify-content': 'space-between'},
 		'.flex-fixed': {flex: "0 0 auto"},
-		'.flex-center': {display: 'flex', 'justify-content': 'center'}, // TODO: migrate to .flex.center-horizontal
+		'.flex-center': {display: 'flex', 'justify-content': 'center'},
 		'.flex-end': {display: 'flex', 'justify-content': 'flex-end'},
 		'.flex-start': {display: 'flex', 'justify-content': 'flex-start'},
 		'.flex-v-center': {display: 'flex', 'flex-direction': "column", 'justify-content': 'center'},
 		'.flex-direction-change': {display: 'flex', 'justify-content': 'center'},
 		'.flex-column': {'flex-direction': "column"}, //TODO migrate to .col
 		".col": {'flex-direction': "column"},
+		".row": {'flex-direction': "row"},
 		'.flex-column-reverse': {'flex-direction': "column-reverse"}, //TODO: migrate to col-reverse
 		'.col-reverse': {'flex-direction': "column-reverse"},
 		'.flex': {display: 'flex'},
 		'.flex-grow': {flex: "1"},
+		'.flex-hide': {flex: "0"},
 		'.flex-third': {flex: '1 0 0', 'min-width': "100px"}, // splits a flex layout into three same width columns
 		'.flex-third-middle': {flex: '2 1 0'}, // take up more space for the middle column
 		'.flex-half': {flex: '0 0 50%'}, // splits a flex layout into two same width columns
 		'.flex-grow-shrink-half': {flex: '1 1 50%'},
+		'.flex-nogrow-shrink-half': {flex: '0 1 50%'},
 		'.flex-grow-shrink-auto': {flex: "1 1 auto"}, // allow element to grow and shrink using the elements width as default size.
 		'.flex-grow-shrink-150': {flex: "1 1 150px"},
 		'.flex-no-shrink': {flex: "1 0 0"},
@@ -393,6 +462,7 @@ styles.registerStyle('main', () => {
 		'.items-start': {'align-items': 'flex-start'},
 		'.items-base': {'align-items': 'baseline'},
 		'.items-stretch': {'align-items': 'stretch'},
+		'.align-self-start': {'align-self': 'start'},
 		'.align-self-center': {'align-self': 'center'},
 		'.align-self-end': {'align-self': 'flex-end'},
 		'.align-self-stretch': {'align-self': 'stretch'},
@@ -401,9 +471,11 @@ styles.registerStyle('main', () => {
 		'.justify-between': {'justify-content': 'space-between'},
 		'.justify-end': {'justify-content': 'flex-end'},
 		'.justify-start': {'justify-content': 'flex-start'},
+		'.justify-right': {'justify-content': 'right'},
 		'.child-grow > *': {flex: "1 1 auto"},
 		'.last-child-fixed > *:last-child': {flex: "1 0 100px"},
 		'.limit-width': {'max-width': '100%'},
+		'.flex-transition': {transition: 'flex 200ms linear'},
 
 		'.border-radius': {'border-radius': px(size.border_radius)},
 		'.editor-border': {
@@ -440,6 +512,14 @@ styles.registerStyle('main', () => {
 		'.icon-progress-search > svg': {
 			height: px(20),
 			width: px(20),
+		},
+		'.icon-progress-tiny': {
+			height: px(15),
+			width: px(15),
+		},
+		'.icon-progress-tiny > svg': {
+			height: px(15),
+			width: px(15),
 		},
 		'.icon-small': {
 			height: px(size.font_size_small),
@@ -549,7 +629,7 @@ styles.registerStyle('main', () => {
 			'border-radius': "50%",
 			overflow: "hidden"
 		},
-		'.circle': {
+		'.dot': {
 			width: px(size.hpad_large_mobile + 1),
 			height: px(size.hpad_large_mobile + 1),
 			'border-radius': "50%",
@@ -595,6 +675,11 @@ styles.registerStyle('main', () => {
 			padding: px(size.hpad_large),
 			width: `calc(100% - ${2 * size.hpad}px)`
 		},
+		'.faq-items img': {
+			"max-width": "100%",
+			"height": "auto"
+		},
+
 		'.dialog-container': position_absolute(size.button_height + 1, 0, 0, 0),
 		'.dialog-contentButtonsBottom': {padding: `0 ${px(size.hpad_large)} ${px(size.vpad)} ${px(size.hpad_large)}`},
 		'.dialog-img': {width: px(150), height: "auto"},
@@ -620,16 +705,16 @@ styles.registerStyle('main', () => {
 		'.folders': {'margin-bottom': px(12)},
 		'.folder-row': {
 			'border-left': px(size.border_selection) + ' solid transparent',
-			'margin-right': px(-size.hpad_button),
 			'align-items': 'center',
 			position: "relative"
 		},
-		'.folder-counter': {
+		'.template-list-row': {
+			'border-left': px(size.border_selection) + ' solid transparent',
+			'align-items': 'center',
+			position: "relative"
+		},
+		'.counter-badge': {
 			position: 'absolute',
-			top: px(0),
-			left: px(3),
-			color: theme.navigation_button_icon,
-			background: getNavButtonIconBackground(),
 			"padding-left": px(4),
 			"padding-right": px(4),
 			"border-radius": px(8),
@@ -642,6 +727,7 @@ styles.registerStyle('main', () => {
 		},
 		'.row-selected': {'border-color': `${theme.list_accent_fg} !important`, color: `${theme.list_accent_fg}`},
 		'.folder-row > a': {'flex-grow': 1, 'margin-left': px(-size.hpad_button - size.border_selection)},
+		'.hoverable-list-item:hover': {'border-color': `${theme.list_accent_fg} !important`, color: `${theme.list_accent_fg}`},
 
 		'.expander': {height: px(size.button_height), 'min-width': px(size.button_height)},
 
@@ -740,7 +826,14 @@ styles.registerStyle('main', () => {
 		'.dropdown-content:first-child': {'padding-top': px(size.vpad_small)},
 		'.dropdown-content:last-child': {'padding-bottom': px(size.vpad_small)},
 		'.dropdown-content > *': {width: '100%'},
-		'.dropdown-content': {overflow: 'hidden'},
+		'.dropdown-shadow': {
+			'box-shadow': boxShadow
+		},
+
+		".minimized-shadow": {
+			// shadow params: 1.offset-x 2.offset-y 3.blur 4.spread 5.color
+			'box-shadow': `0px 0px 4px 2px ${theme.header_box_shadow_bg}`, // similar to header bar shadow
+		},
 
 		//dropdown filter bar
 		'.dropdown-bar': {
@@ -816,6 +909,26 @@ styles.registerStyle('main', () => {
 			border: `${px(size.bubble_border_width)} solid ${theme.content_bg}`,
 			'background-color': theme.button_bubble_bg,
 			color: theme.button_bubble_fg,
+		},
+		'.keyword-bubble': {
+			'max-width': "300px",
+			'border-radius': px(size.border_radius),
+			'margin-bottom': px(size.vpad_small / 2),
+			'margin-right': px(size.vpad_small / 2),
+			'background-color': theme.button_bubble_bg,
+			'padding': `${px(size.vpad_small / 2)} ${px(size.vpad_small)} ${px(size.vpad_small / 2)} ${px(size.vpad_small)}`,
+		},
+		'.keyword-bubble-no-padding': {
+			'max-width': "300px",
+			'border-radius': px(size.border_radius),
+			'margin': px(size.vpad_small / 2),
+			'background-color': theme.button_bubble_bg,
+		},
+		'mark': {
+			// 'background-color': theme.content_button,
+			// 'color': theme.content_button_icon,
+			'background-color': theme.content_accent,
+			'color': theme.content_button_icon_selected,
 		},
 		'.on': {
 			'background-color': theme.content_button_selected
@@ -896,6 +1009,10 @@ styles.registerStyle('main', () => {
 			display: 'none'
 		},
 
+		'.resize-none': {
+			resize: 'none'
+		},
+
 		// table
 
 		'.table': {
@@ -904,7 +1021,7 @@ styles.registerStyle('main', () => {
 			width: '100%'
 		},
 
-		'.table tr:first-child': {
+		'.table-header-border tr:first-child': {
 			'border-bottom': `1px solid ${theme.content_border}`
 		},
 
@@ -993,9 +1110,15 @@ styles.registerStyle('main', () => {
 		'.calendar-day:hover': {
 			'background': theme.list_alternate_bg
 		},
+		'.calendar-day:hover .calendar-day-header-button': {
+			opacity: 1,
+		},
+		'.calendar-day-header-button': {
+			opacity: 0,
+		},
+
 
 		'.calendar-hour': {
-			'cursor': 'pointer',
 			'border-bottom': `1px solid ${theme.content_border}`,
 			height: px(size.calendar_hour_height),
 			flex: '1 0 auto',
@@ -1020,20 +1143,27 @@ styles.registerStyle('main', () => {
 		'.calendar-day': {
 			'border-top': `1px solid ${theme.content_border}`,
 			'transition': 'background 0.4s',
-			'background': theme.list_bg,
+			'background': theme.list_bg
+		},
+		'.cursor-pointer': {
 			'cursor': 'pointer'
 		},
 
 		'.calendar-day-indicator': { // overriden for mobile
-			height: "24px",
+			height: "22px",
 			"line-height": "24px",
 			"text-align": "center",
 			"font-size": "14px",
 		},
 
+		'.calendar-day .calendar-day-indicator:hover': {
+			"background": theme.list_message_bg,
+			"opacity": .7
+		},
+
 		'.calendar-day-number': {
-			margin: "4px auto",
-			width: "24px",
+			margin: "3px auto",
+			width: "22px",
 		},
 
 		'.calendar-event': {
@@ -1042,9 +1172,7 @@ styles.registerStyle('main', () => {
 			'padding-left': '4px',
 			'font-weight': '600',
 			'box-sizing': 'content-box',
-			'cursor': 'pointer',
 		},
-
 		'.fade-in': {
 			opacity: 1,
 			'animation-name': 'fadeInOpacity',
@@ -1114,7 +1242,6 @@ styles.registerStyle('main', () => {
 			overflow: "hidden",
 			"background-color": theme.content_bg,
 			"border-bottom": `1px solid ${theme.content_border}`,
-			transition: 'height 200ms ease-in-out'
 		},
 
 		'.calendar-month-week-number': {
@@ -1129,6 +1256,10 @@ styles.registerStyle('main', () => {
 			width: px(100)
 		},
 
+		'.calendar-invite-field': {
+			'min-width': '80px',
+		},
+
 		'button.floating': {
 			'border-radius': '50%',
 			'box-shadow': `0 3px 5px -1px rgba(0,0,0,.2), 0 6px 10px 0 rgba(0,0,0,.14), 0 1px 18px 0 rgba(0,0,0,.12)`,
@@ -1138,6 +1269,21 @@ styles.registerStyle('main', () => {
 		},
 		'button.floating:active': {
 			'box-shadow': '0 7px 8px -4px rgba(0,0,0,.2),0 12px 17px 2px rgba(0,0,0,.14),0 5px 22px 4px rgba(0,0,0,.12)'
+		},
+
+		'.block-list': {
+			'list-style': 'none',
+			padding: 0,
+		},
+
+		'.block-list li': {
+			display: 'block',
+		},
+		'.sticky': {
+			position: 'sticky'
+		},
+		'.text-fade': {
+			color: theme.content_button
 		},
 
 		// media query for small devices where elements should be arranged in one column
@@ -1177,19 +1323,10 @@ styles.registerStyle('main', () => {
 		},
 
 		'.transition-margin': {'transition': `margin-bottom 200ms ease-in-out`},
-
-		'.date-selected': {
-			'border-radius': '50%',
-			background: theme.content_accent,
-			color: theme.content_button_icon_selected,
+		'.circle': {
+			'border-radius': '50%'
 		},
-		'.date-current': {
-			'border-radius': '50%',
-			background: getContentButtonIconBackground(),
-			color: theme.navigation_button_icon,
-		},
-
-		'.switch-month-button': {
+		'.clickable': {
 			'cursor': 'pointer',
 		},
 
@@ -1226,14 +1363,20 @@ styles.registerStyle('main', () => {
 			left: 'auto',
 			width: `${px(size.navbar_edge_width_mobile)}`
 		},
-
-		// media query for mobile devices, should be one pixel less than style.isDesktopLayout
+		'.menu-shadow': {
+			"box-shadow": "0 4px 5px 2px rgba(0,0,0,0.14), 0 4px 5px 2px rgba(0,0,0,0.14), 0 4px 5px 2px rgba(0,0,0,0.14)",
+		},
+		'.big-input input': {
+			'font-size': px(size.font_size_base * 1.4),
+			'line-height': `${px(size.font_size_base * 1.4 + 2)} !important`,
+		},
 		[`@media (max-width: ${size.desktop_layout_width - 1}px)`]: {
 			'.main-view': {top: 0, bottom: 0},
 			'.logo-height': {height: px(size.header_logo_height_mobile)},
 			'.logo-height > svg': {height: px(size.header_logo_height_mobile)},
 			".fixed-bottom-right": {bottom: px(size.hpad_large_mobile + size.bottom_nav_bar), right: px(size.hpad_large_mobile)},
 			'.pt-responsive': {'padding-top': px(size.hpad_large)},
+
 
 			'.custom-logo': {width: px(40)},
 
@@ -1265,9 +1408,29 @@ styles.registerStyle('main', () => {
 			},
 		},
 
+		'.cursor-grabbing *': {
+			cursor: "grabbing !important"
+		},
+
+		// This is applied to elements that should indicate they will be draggable when some key is pressed.
+		// Ideally we would use cursor: grab here, but it doesn't seem to be supported in electron
+		'.drag-mod-key *': {
+			cursor: "copy !important"
+		},
+		//We us this class to hide contents that should just be visible for printing
+		".noscreen": {
+			"display": "none",
+		},
 		"@media print": {
+			".color-adjust-exact": {
+				"color-adjust": "exact",
+				"-webkit-print-color-adjust": "exact"
+			},
 			".noprint": {
 				"display": "none",
+			},
+			".noscreen": {
+				"display": "initial",
 			},
 			".print": {
 				"color": "black",
@@ -1327,6 +1490,9 @@ styles.registerStyle('main', () => {
 			},
 			".mobile .view-column:nth-child(2)": {
 				display: "initial",
+			},
+			".folder-column": {
+				display: "none"
 			},
 		},
 

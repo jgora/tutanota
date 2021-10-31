@@ -1,15 +1,15 @@
 // @flow
 import m from "mithril"
 import stream from "mithril/stream/stream.js"
+import type {ModalComponent} from "./Modal"
 import {modal} from "./Modal"
 import {alpha, animations, DefaultAnimationTime, opacity, transform} from "../animation/Animations"
 import {ease} from "../animation/Easing"
-import type {TranslationKey} from "../../misc/LanguageViewModel"
+import type {TranslationKey, TranslationText} from "../../misc/LanguageViewModel"
 import {lang} from "../../misc/LanguageViewModel"
-import {assertMainOrNode} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import type {KeyPress, Shortcut} from "../../misc/KeyManager"
-import {focusNext, focusPrevious} from "../../misc/KeyManager"
-import {neverNull} from "../../api/common/utils/Utils"
+import {focusNext, focusPrevious, keyManager} from "../../misc/KeyManager"
 import {getElevatedBackground} from "../theme"
 import {px, size} from "../size"
 import {HabReminderImage} from "./icons/Icons"
@@ -21,10 +21,15 @@ import type {DialogHeaderBarAttrs} from "./DialogHeaderBar"
 import {DialogHeaderBar} from "./DialogHeaderBar"
 import type {TextFieldAttrs} from "./TextFieldN"
 import {TextFieldN, Type} from "./TextFieldN"
+import type {SelectorItemList} from "./DropDownSelectorN"
 import {DropDownSelectorN} from "./DropDownSelectorN"
-import {showProgressDialog} from "./ProgressDialog"
 import {Keys} from "../../api/common/TutanotaConstants"
-import {dialogAttrs} from "../../api/common/utils/AriaUtils"
+import {dialogAttrs} from "../AriaUtils"
+import {styles} from "../styles"
+import type {lazy, MaybeLazy} from "../../api/common/utils/Utils"
+import {getAsLazy, mapLazily, noOp} from "../../api/common/utils/Utils"
+import type {DialogInjectionRightAttrs} from "./DialogInjectionRight"
+import {DialogInjectionRight} from "./DialogInjectionRight"
 
 assertMainOrNode()
 
@@ -41,32 +46,37 @@ export const DialogType = Object.freeze({
 })
 export type DialogTypeEnum = $Values<typeof DialogType>;
 
+type validator = () => ?TranslationKey | Promise<?TranslationKey>;
+
 type ActionDialogProps = {|
 	title: lazy<string> | string,
-	child: Component | lazy<Children>,
+	child: MComponent<void> | lazy<Children>,
 	validator?: ?validator,
 	okAction: null | (Dialog) => mixed,
-	allowCancel?: boolean,
+	allowCancel?: MaybeLazy<boolean>,
 	allowOkWithReturn?: boolean,
-	okActionTextId?: TranslationKey,
+	okActionTextId?: MaybeLazy<TranslationKey>,
 	cancelAction?: ?(Dialog) => mixed,
 	cancelActionTextId?: TranslationKey,
 	type?: DialogTypeEnum,
 |}
 
-export class Dialog {
-	static _keyboardHeight = 0;
+export class Dialog implements ModalComponent {
+	static _keyboardHeight: number = 0;
 	_domDialog: HTMLElement;
 	_shortcuts: Shortcut[];
 	view: Function;
 	visible: boolean;
 	_focusOnLoadFunction: Function;
+	_wasFocusOnLoadCalled: boolean
 	_closeHandler: ?() => mixed;
 	_focusedBeforeShown: ?HTMLElement
+	_injectionRightAttrs: ?DialogInjectionRightAttrs<*>
 
-	constructor(dialogType: DialogTypeEnum, childComponent: MComponent<any>) {
+	constructor(dialogType: DialogTypeEnum, childComponent: MComponent<void>) {
 		this.visible = false
-		this._focusOnLoadFunction = this._defaultFocusOnLoad
+		this._focusOnLoadFunction = () => this._defaultFocusOnLoad()
+		this._wasFocusOnLoadCalled = false
 		this._shortcuts = [
 			{
 				key: Keys.TAB,
@@ -81,8 +91,9 @@ export class Dialog {
 				help: "selectNext_action"
 			},
 		]
-		this.view = (): VirtualElement => {
-			let mobileMargin = px(size.hpad)
+		this.view = (): Children => {
+			let marginPx = px(size.hpad)
+			const sidesMargin = styles.isSingleColumnLayout() && dialogType === DialogType.EditLarge ? "4px" : marginPx
 			return m(this._getDialogWrapperStyle(dialogType), {
 					style: {
 						paddingTop: requiresStatusBarHack() ? '20px' : 'env(safe-area-inset-top)'
@@ -92,46 +103,55 @@ export class Dialog {
 				m(".flex.justify-center.align-self-stretch.rel.overflow-hidden"
 					+ (dialogType === DialogType.EditLarge ? ".flex-grow" : ".transition-margin"), {  // controls horizontal alignment
 						style: {
-							'margin-top': mobileMargin,
-							'margin-left': mobileMargin,
-							'margin-right': mobileMargin,
+							marginTop: marginPx,
+							marginLeft: sidesMargin,
+							marginRight: sidesMargin,
 							'margin-bottom': (Dialog._keyboardHeight > 0)
 								? px(Dialog._keyboardHeight)
-								: dialogType === DialogType.EditLarge ? 0 : mobileMargin,
+								: dialogType === DialogType.EditLarge ? 0 : marginPx,
 						},
-					}, m(this._getDialogStyle(dialogType) + dialogAttrs("dialog-title", "dialog-message"), {
-						onclick: (e: MouseEvent) => e.stopPropagation(), // do not propagate clicks on the dialog as the Modal expects all propagated clicks to be clicks on the background
-						oncreate: vnode => {
-							this._domDialog = vnode.dom
-							let animation = null
-							if (dialogType === DialogType.EditLarge) {
-								vnode.dom.style.transform = `translateY(${window.innerHeight}px)`
-								animation = animations.add(this._domDialog, transform(transform.type.translateY, window.innerHeight, 0))
-							} else {
-								let bgcolor = getElevatedBackground()
-								let children = Array.from(this._domDialog.children)
-								children.forEach(child => child.style.opacity = '0')
-								this._domDialog.style.backgroundColor = `rgba(0, 0, 0, 0)`
-								animation = Promise.all([
-									animations.add(this._domDialog, alpha(alpha.type.backgroundColor, bgcolor, 0, 1)),
-									animations.add(children, opacity(0, 1, true), {delay: DefaultAnimationTime / 2})
-								])
-							}
+					}, [
 
-							// select first input field. blur first to avoid that users can enter text in the previously focused element while the animation is running
-							window.requestAnimationFrame(() => {
-								if (document.activeElement && typeof document.activeElement.blur === "function") {
-									document.activeElement.blur()
+						m(this._getDialogStyle(dialogType) + dialogAttrs("dialog-title", "dialog-message"), {
+							onclick: (e: MouseEvent) => e.stopPropagation(), // do not propagate clicks on the dialog as the Modal expects all propagated clicks to be clicks on the background
+							oncreate: vnode => {
+								this._domDialog = vnode.dom
+								let animation = null
+								if (dialogType === DialogType.EditLarge) {
+									vnode.dom.style.transform = `translateY(${window.innerHeight}px)`
+									animation = animations.add(this._domDialog, transform(transform.type.translateY, window.innerHeight, 0))
+								} else {
+									let bgcolor = getElevatedBackground()
+									let children = Array.from(this._domDialog.children)
+									children.forEach(child => child.style.opacity = '0')
+									this._domDialog.style.backgroundColor = `rgba(0, 0, 0, 0)`
+									animation = Promise.all([
+										animations.add(this._domDialog, alpha(alpha.type.backgroundColor, bgcolor, 0, 1)),
+										animations.add(children, opacity(0, 1, true), {delay: DefaultAnimationTime / 2})
+									])
 								}
-							})
-							animation.then(() => {
-								this._focusOnLoadFunction()
-							})
-						},
-					}, m(childComponent))
+
+								// select first input field. blur first to avoid that users can enter text in the previously focused element while the animation is running
+								window.requestAnimationFrame(() => {
+									if (document.activeElement && typeof document.activeElement.blur === "function") {
+										document.activeElement.blur()
+									}
+								})
+								animation.then(() => {
+									this._focusOnLoadFunction()
+									this._wasFocusOnLoadCalled = true
+								})
+							},
+						}, m(childComponent)),
+						this._injectionRightAttrs ? m(DialogInjectionRight, this._injectionRightAttrs) : null
+					]
 				)
 			)
 		}
+	}
+
+	setInjectionRight(injectionRightAttrs: DialogInjectionRightAttrs<*>) {
+		this._injectionRightAttrs = injectionRightAttrs
 	}
 
 	_defaultFocusOnLoad() {
@@ -146,14 +166,19 @@ export class Dialog {
 		}
 	}
 
+
 	/**
-	 * By default the focus is set on the first text field after this dialog is fully visible. This behavor can be overwritten by calling this function.
+	 * By default the focus is set on the first text field after this dialog is fully visible. This behavior can be overwritten by calling this function.
+	 * If it has already been called, then calls it instantly
 	 */
 	setFocusOnLoadFunction(callback: Function): void {
 		this._focusOnLoadFunction = callback
+		if (this._wasFocusOnLoadCalled) {
+			this._focusOnLoadFunction()
+		}
 	}
 
-	_getDialogWrapperStyle(dialogType: DialogTypeEnum) {
+	_getDialogWrapperStyle(dialogType: DialogTypeEnum): string {
 		// change direction of axis to handle resize of dialogs (iOS keyboard open changes size)
 		let dialogWrapperStyle = ".fill-absolute.flex.items-stretch.flex-column"
 		if (dialogType === DialogType.EditLarge) {
@@ -164,7 +189,7 @@ export class Dialog {
 		return dialogWrapperStyle
 	}
 
-	_getDialogStyle(dialogType: DialogTypeEnum) {
+	_getDialogStyle(dialogType: DialogTypeEnum): string {
 		let dialogStyle = ".dialog.elevated-bg.flex-grow"
 		if (dialogType === DialogType.Progress) {
 			dialogStyle += ".dialog-width-s.dialog-progress"
@@ -184,6 +209,9 @@ export class Dialog {
 
 	addShortcut(shortcut: Shortcut): Dialog {
 		this._shortcuts.push(shortcut)
+		if (this.visible) {
+			keyManager.registerModalShortcuts([shortcut])
+		}
 		return this
 	}
 
@@ -196,7 +224,7 @@ export class Dialog {
 		return this
 	}
 
-	shortcuts() {
+	shortcuts(): Shortcut[] {
 		return this._shortcuts
 	}
 
@@ -246,7 +274,7 @@ export class Dialog {
 					delay: DefaultAnimationTime / 2,
 					easing: ease.linear
 				})
-			]).return()
+			]).then(noOp)
 		} else {
 			return Promise.resolve()
 		}
@@ -255,7 +283,14 @@ export class Dialog {
 	backgroundClick(e: MouseEvent) {
 	}
 
-	static error(messageIdOrMessageFunction: TranslationKey | lazy<string>, infoToAppend?: string): Promise<void> {
+	/**
+	 * show a dialog with only a "ok" button
+	 *
+	 * @param messageIdOrMessageFunction {TranslationKey | lazy<string>} the text to display
+	 * @param infoToAppend {?string | lazy<Children>} some text or UI elements to show below the message
+	 * @returns {Promise<void>} a promise that resolves after the dialog is fully closed
+	 */
+	static error(messageIdOrMessageFunction: TranslationKey | lazy<string>, infoToAppend?: string | lazy<Children>): Promise<void> {
 		return new Promise(resolve => {
 			let dialog: Dialog
 			const closeAction = () => {
@@ -263,7 +298,7 @@ export class Dialog {
 				setTimeout(() => resolve(), DefaultAnimationTime)
 			}
 			let lines = lang.getMaybeLazy(messageIdOrMessageFunction).split("\n")
-			if (infoToAppend) {
+			if (typeof infoToAppend === "string") {
 				lines.push(infoToAppend)
 			}
 			const buttonAttrs: ButtonAttrs = {
@@ -276,8 +311,8 @@ export class Dialog {
 			dialog = new Dialog(DialogType.Alert, {
 				view: () =>
 					lines.map(line => m(".dialog-contentButtonsBottom.text-break.selectable", line))
-					     .concat(m(".flex-center.dialog-buttons", m(ButtonN, buttonAttrs))
-					     )
+					     .concat(typeof infoToAppend == "function" ? infoToAppend() : null)
+					     .concat(m(".flex-center.dialog-buttons", m(ButtonN, buttonAttrs)))
 			}).setCloseHandler(closeAction)
 			  .addShortcut({
 				  key: Keys.RETURN,
@@ -335,42 +370,98 @@ export class Dialog {
 	}
 
 
-	static confirm(messageIdOrMessageFunction: TranslationKey | lazy<string>, confirmId: TranslationKey = "ok_action"): Promise<boolean> {
+	/**
+	 * Simpler version of {@link Dialog#confirmMultiple} with just two options: no and yes (or another confirmation).
+	 * @return Promise, which is resolved with user selection - true for confirm, false for cancel.
+	 */
+	static confirm(
+		messageIdOrMessageFunction: TranslationKey | lazy<string>,
+		confirmId: TranslationKey = "ok_action",
+		infoToAppend?: string | lazy<Children>
+	): Promise<boolean> {
 		return new Promise(resolve => {
-			let dialog: Dialog
 			const closeAction = conf => {
 				dialog.close()
 				setTimeout(() => resolve(conf), DefaultAnimationTime)
 			}
+
 			const buttonAttrs: Array<ButtonAttrs> = [
 				{label: "cancel_action", click: () => closeAction(false), type: ButtonType.Secondary},
-				{label: confirmId, click: () => closeAction(true), type: ButtonType.Primary}
+				{label: confirmId, click: () => closeAction(true), type: ButtonType.Primary},
 			]
 
-			dialog = new Dialog(DialogType.Alert, {
-				view: () => [
-					m("#dialog-message.dialog-contentButtonsBottom.text-break.text-prewrap.selectable",
-						lang.getMaybeLazy(messageIdOrMessageFunction)),
-					m(".flex-center.dialog-buttons", buttonAttrs.map(a => m(ButtonN, a)))
-				]
-			}).setCloseHandler(
-				() => closeAction(false)
-			).addShortcut({
-				key: Keys.ESC,
-				shift: false,
-				exec: () => closeAction(false),
-				help: "cancel_action"
-			}).addShortcut({
-				key: Keys.RETURN,
-				shift: false,
-				exec: () => closeAction(true),
-				help: neverNull(confirmId) //ok?
-			}).show()
+			const dialog = Dialog.confirmMultiple(messageIdOrMessageFunction, buttonAttrs, resolve, infoToAppend)
+		})
+	}
+
+
+	/**
+	 * Show a dialog with multiple selection options below the message.
+	 * @param messageIdOrMessageFunction which displayed in the body
+	 * @param buttons which are displayed below
+	 * @param onclose which is called on shortcut or when dialog is closed any other way (e.g. back navigation). Not called when pressing
+	 * @param enableConfirmShortcut whether or not the enter key should be a shortcut to trigger confirmation, otherwise it will count as a
+	 *                              click on whichever button is selected
+	 * one of the buttons.
+	 * @param infoToAppend additional UI elements to show below the message
+	 */
+	static confirmMultiple(
+		messageIdOrMessageFunction: TranslationKey | lazy<string>,
+		buttons: $ReadOnlyArray<ButtonAttrs>,
+		onclose?: (positive: boolean) => mixed,
+		infoToAppend?: string | lazy<Children>): Dialog {
+		let dialog: Dialog
+		const closeAction = (positive) => {
+			dialog.close()
+			setTimeout(() => onclose && onclose(positive), DefaultAnimationTime)
+		}
+
+
+		// ensure that m() is called in every view() update for the infoToAppend
+		let getContent = () => {
+			let content = [lang.getMaybeLazy(messageIdOrMessageFunction)]
+			if (typeof infoToAppend === "string") {
+				content = content.concat(m(".dialog-contentButtonsBottom.text-break.selectable", infoToAppend))
+			} else if (typeof infoToAppend === "function") {
+				content = content.concat(infoToAppend())
+			}
+			return content
+		}
+
+		dialog = new Dialog(DialogType.Alert, {
+			view: () => [
+				m("#dialog-message.dialog-contentButtonsBottom.text-break.text-prewrap.selectable", getContent()),
+				m(".flex-center.dialog-buttons", buttons.map(a => m(ButtonN, a)))
+			]
+		}).setCloseHandler(() => closeAction(false))
+		  .addShortcut({
+			  key: Keys.ESC,
+			  shift: false,
+			  exec: () => closeAction(false),
+			  help: "cancel_action"
+		  })
+
+		dialog.show()
+		return dialog
+	}
+
+	static choice<T>(message: TranslationText, choices: Array<{text: TranslationText, value: T}>): Promise<T> {
+		return new Promise(resolve => {
+			const choose = choice => {
+				dialog.close()
+				setTimeout(() => resolve(choice), DefaultAnimationTime)
+			}
+
+			const buttonAttrs = choices.map(choice => {
+				return {label: choice.text, click: () => choose(choice.value), type: ButtonType.Secondary}
+			})
+
+			const dialog = Dialog.confirmMultiple(message, buttonAttrs)
 		})
 	}
 
 	// used in admin client
-	static save(title: lazy<string>, saveAction: action, child: Component): Promise<void> {
+	static save(title: lazy<string>, saveAction: () => Promise<void>, child: MComponent<void>): Promise<void> {
 		return new Promise(resolve => {
 			let saveDialog: Dialog
 			const closeAction = () => {
@@ -437,7 +528,7 @@ export class Dialog {
 
 	/**
 	 * Shows a dialog with a text field input and ok/cancel buttons.
-	 * @param   props.child either a component (object with view function that returns a VirtualElement) or a naked view Function
+	 * @param   props.child either a component (object with view function that returns a Children) or a naked view Function
 	 * @param   props.validator Called when "Ok" is clicked. Must return null if the input is valid or an error messageID if it is invalid, so an error message is shown.
 	 * @param   props.okAction called after successful validation.
 	 * @param   props.cancelAction called when allowCancel is true and the cancel button/shortcut was pressed.
@@ -448,7 +539,7 @@ export class Dialog {
 		return dialog.show()
 	}
 
-	static createActionDialog(props: ActionDialogProps) {
+	static createActionDialog(props: ActionDialogProps): Dialog {
 		let dialog: Dialog
 		const {title, child, okAction, validator, allowCancel, allowOkWithReturn, okActionTextId, cancelActionTextId, cancelAction, type} =
 			Object.assign({}, {
@@ -481,13 +572,14 @@ export class Dialog {
 				}
 			})
 			if (validationResult instanceof Promise) {
-				showProgressDialog("pleaseWait_msg", finalizer)
+				// breaking hard circular dependency
+				import("../dialogs/ProgressDialog").then((module) => module.showProgressDialog("pleaseWait_msg", finalizer))
 			}
 		}
 
 		const actionBarAttrs: DialogHeaderBarAttrs = {
-			left: allowCancel ? [{label: cancelActionTextId, click: doCancel, type: ButtonType.Secondary}] : [],
-			right: okAction ? [{label: okActionTextId, click: doAction, type: ButtonType.Primary}] : [],
+			left: mapLazily(allowCancel, allow => allow ? [{label: cancelActionTextId, click: doCancel, type: ButtonType.Secondary}] : []),
+			right: okAction ? [{label: mapLazily(okActionTextId, id => lang.get(id)), click: doAction, type: ButtonType.Primary}] : [],
 			middle: typeof title === 'function' ? title : () => title
 		}
 
@@ -498,14 +590,13 @@ export class Dialog {
 			]
 		}).setCloseHandler(doCancel)
 
-		if (allowCancel) {
-			dialog.addShortcut({
-				key: Keys.ESC,
-				shift: false,
-				exec: doCancel,
-				help: "cancel_action"
-			})
-		}
+		dialog.addShortcut({
+			key: Keys.ESC,
+			shift: false,
+			exec: mapLazily(allowCancel, allow => allow && doCancel()),
+			help: "cancel_action",
+			enabled: getAsLazy(allowCancel)
+		})
 
 		if (allowOkWithReturn) {
 			dialog.addShortcut({
@@ -590,7 +681,9 @@ export class Dialog {
 	 * @param dropdownWidth width of the dropdown
 	 * @returns A promise resolving to the selected item. The returned promise is only resolved if "ok" is clicked.
 	 */
-	static showDropDownSelectionDialog<T>(titleId: TranslationKey, label: TranslationKey, infoMsgId: ?TranslationKey, items: {name: string, value: T}[], selectedValue: Stream<T>, dropdownWidth: ?number): Promise<T> {
+	static showDropDownSelectionDialog<T>(titleId: TranslationKey, label: TranslationKey, infoMsgId: ?TranslationKey,
+	                                      items: SelectorItemList<T>, selectedValue: Stream<T>, dropdownWidth: ?number
+	): Promise<T> {
 		return new Promise(resolve => {
 			Dialog.showActionDialog({
 				title: lang.get(titleId),
@@ -603,13 +696,28 @@ export class Dialog {
 		})
 	}
 
-	static largeDialog(headerBarAttrs: DialogHeaderBarAttrs, child: (Component | Class<MComponent<void>>)): Dialog {
+	/**
+	 * @deprecated useLargeDialogN instead
+	 */
+	static largeDialog(headerBarAttrs: DialogHeaderBarAttrs, child: MComponent<void>): Dialog {
 		return new Dialog(DialogType.EditLarge, {
 			view: () => {
 				return m("", [
 					m(".dialog-header.plr-l", m(DialogHeaderBar, headerBarAttrs)),
 					m(".dialog-container.scroll",
 						m(".fill-absolute.plr-l", m(child)))
+				])
+			}
+		})
+	}
+
+	static largeDialogN<T>(headerBarAttrs: DialogHeaderBarAttrs, child: Class<MComponent<$Attrs<T>>>, childAttrs: $Attrs<T>): Dialog {
+		return new Dialog(DialogType.EditLarge, {
+			view: () => {
+				return m("", [
+					m(".dialog-header.plr-l", m(DialogHeaderBar, headerBarAttrs)),
+					m(".dialog-container.scroll",
+						m(".fill-absolute.plr-l", m(child, childAttrs)))
 				])
 			}
 		})
@@ -655,5 +763,7 @@ export class Dialog {
 		m.redraw()
 	}
 }
+
+export type stringValidator = (string) => ?TranslationKey | Promise<?TranslationKey>;
 
 windowFacade.addKeyboardSizeListener(Dialog._onKeyboardSizeChanged)

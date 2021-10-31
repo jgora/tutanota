@@ -1,10 +1,11 @@
 //@flow
 import m from "mithril"
 import {px} from "../size"
-import {assertMainOrNodeBoot} from "../../api/Env"
-import {AriaLandmarks, landmarkAttrs} from "../../api/common/utils/AriaUtils"
+import {assertMainOrNode} from "../../api/common/Env"
+import {AriaLandmarks, landmarkAttrs} from "../AriaUtils"
+import type {lazy} from "../../api/common/utils/Utils"
 
-assertMainOrNodeBoot()
+assertMainOrNode()
 
 export class InfoView {
 	title: lazy<string>;
@@ -15,7 +16,7 @@ export class InfoView {
 		this.content = content
 	}
 
-	view() {
+	view(): Children {
 		return m(".main-view.flex.items-center.justify-center.mlr" + landmarkAttrs(AriaLandmarks.Main), {
 			style: {
 				'max-height': px(450),

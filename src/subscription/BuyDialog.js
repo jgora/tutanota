@@ -1,8 +1,8 @@
 // @flow
 import m from "mithril"
-import {assertMainOrNode} from "../api/Env"
+import {assertMainOrNode} from "../api/common/Env"
 import {worker} from "../api/main/WorkerClient"
-import {TextField} from "../gui/base/TextField"
+import {TextFieldN, Type} from "../gui/base/TextFieldN"
 import {ButtonType} from "../gui/base/ButtonN"
 import {Dialog, DialogType} from "../gui/base/Dialog"
 import {lang} from "../misc/LanguageViewModel"
@@ -16,35 +16,37 @@ import {CustomerInfoTypeRef} from "../api/entities/sys/CustomerInfo"
 import {AccountingInfoTypeRef} from "../api/entities/sys/AccountingInfo"
 import {logins} from "../api/main/LoginController"
 import {NotAuthorizedError} from "../api/common/error/RestError"
-import {getPriceItem} from "./PriceUtils"
-import {formatPrice} from "./SubscriptionUtils"
+import {formatPrice, getPriceItem} from "./PriceUtils"
+import {bookItem} from "./SubscriptionUtils"
 import type {DialogHeaderBarAttrs} from "../gui/base/DialogHeaderBar"
 import {DialogHeaderBar} from "../gui/base/DialogHeaderBar"
 import type {PriceServiceReturn} from "../api/entities/sys/PriceServiceReturn"
 import type {PriceData} from "../api/entities/sys/PriceData"
+import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
+import stream from "mithril/stream/stream.js"
+import {ofClass} from "../api/common/utils/PromiseUtils"
 
 assertMainOrNode()
 
 /**
  * Returns true if the order is accepted by the user, false otherwise.
  */
-export function show(featureType: BookingItemFeatureTypeEnum, count: number, freeAmount: number, reactivate: boolean): Promise<boolean> {
+export function showBuyDialog(featureType: BookingItemFeatureTypeEnum, count: number, freeAmount: number, reactivate: boolean): Promise<boolean> {
 	if (logins.isEnabled(FeatureType.HideBuyDialogs)) {
 		return Promise.resolve(true)
 	}
 	return load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)).then(customer => {
 		if (customer.type === AccountType.PREMIUM && customer.canceledPremiumAccount) {
-			return Dialog.error("subscriptionCancelledMessage_msg").return(false)
+			return Dialog.error("subscriptionCancelledMessage_msg").then(() => false)
 		} else {
-			return worker.getPrice(featureType, count, reactivate).then(price => {
+			return worker.bookingFacade.getPrice(featureType, count, reactivate).then(price => {
 				if (!_isPriceChange(price, featureType)) {
 					return Promise.resolve(true)
 				} else {
 
 					return load(CustomerInfoTypeRef, customer.customerInfo).then(customerInfo => {
 						return load(AccountingInfoTypeRef, customerInfo.accountingInfo)
-							.catch(NotAuthorizedError, e => {/* local admin */
-							})
+							.catch(ofClass(NotAuthorizedError, e => {})) // local admin
 							.then(accountingInfo => {
 								if (accountingInfo && (accountingInfo.paymentMethod == null)) {
 									return Dialog.confirm("enterPaymentDataFirst_msg").then(confirm => {
@@ -55,16 +57,27 @@ export function show(featureType: BookingItemFeatureTypeEnum, count: number, fre
 									})
 								} else {
 									let buy = _isBuy(price, featureType)
-									let orderField = new TextField("bookingOrder_label")
-										.setValue(_getBookingText(price, featureType, count, freeAmount))
-										.setDisabled()
-									let buyField = (buy) ? new TextField("subscription_label",
-										() => _getSubscriptionInfoText(price)).setValue(_getSubscriptionText(price))
-									                                          .setDisabled() : null
-									let priceField = new TextField("price_label",
-										() => _getPriceInfoText(price, featureType))
-										.setValue(_getPriceText(price, featureType))
-										.setDisabled()
+
+									const orderFieldAttrs = {
+										label: "bookingOrder_label",
+										value: stream(_getBookingText(price, featureType, count, freeAmount)),
+										type: Type.Area,
+										disabled: true
+									}
+
+									const buyFieldAttrs = {
+										label: "subscription_label",
+										helpLabel: () => _getSubscriptionInfoText(price),
+										value: stream(_getSubscriptionText(price)),
+										disabled: true
+									}
+
+									const priceFieldAttrs = {
+										label: "price_label",
+										helpLabel: () => _getPriceInfoText(price, featureType),
+										value: stream(_getPriceText(price, featureType)),
+										disabled: true
+									}
 
 									return new Promise(resolve => {
 										let dialog: Dialog
@@ -95,9 +108,9 @@ export function show(featureType: BookingItemFeatureTypeEnum, count: number, fre
 											view: (): Children => [
 												m(".dialog-header.plr-l", m(DialogHeaderBar, actionBarAttrs)),
 												m(".plr-l.pb", m("", [
-													m(orderField),
-													buyField ? m(buyField) : null,
-													m(priceField),
+													m(TextFieldN, orderFieldAttrs),
+													buy ? m(TextFieldN, buyFieldAttrs) : null,
+													m(TextFieldN, priceFieldAttrs),
 												]))
 											]
 										}).setCloseHandler(() => doAction(false)).show()
@@ -111,16 +124,72 @@ export function show(featureType: BookingItemFeatureTypeEnum, count: number, fre
 	})
 }
 
+/**
+ * Shows the buy dialog to enable or disable the whitelabel package.
+ * @param enable true if the whitelabel package should be enabled otherwise false.
+ * @returns false if the execution was successful. True if the action has been cancelled by user or the precondition has failed.
+ */
+export function showWhitelabelBuyDialog(enable: boolean): Promise<boolean> {
+	return showBuyDialogToBookItem(BookingItemFeatureType.Whitelabel, enable ? 1 : 0)
+}
+
+/**
+ * Shows the buy dialog to enable or disable the sharing package.
+ * @param enable true if the whitelabel package should be enabled otherwise false.
+ * @returns false if the execution was successful. True if the action has been cancelled by user or the precondition has failed.
+ */
+export function showSharingBuyDialog(enable: boolean): Promise<boolean> {
+	return (enable ? Promise.resolve(true) : Dialog.confirm("sharingDeletionWarning_msg")).then(ok => {
+		if (ok) {
+			return showBuyDialogToBookItem(BookingItemFeatureType.Sharing, enable ? 1 : 0)
+		} else {
+			return true
+		}
+	})
+}
+
+/**
+ * Shows the buy dialog to enable or disable the business package.
+ * @param enable true if the business package should be enabled otherwise false.
+ * @returns false if the execution was successful. True if the action has been cancelled by user or the precondition has failed.
+ */
+export function showBusinessBuyDialog(enable: boolean): Promise<boolean> {
+	return (enable ? Promise.resolve(true) : Dialog.confirm("businessDeletionWarning_msg")).then(ok => {
+		if (ok) {
+			return showBuyDialogToBookItem(BookingItemFeatureType.Business, enable ? 1 : 0)
+		} else {
+			return true
+		}
+	})
+}
+
+/**
+ * @returns True if it failed, false otherwise
+ */
+export function showBuyDialogToBookItem(bookingItemFeatureType: BookingItemFeatureTypeEnum, amount: number, freeAmount: number = 0, reactivate: boolean = false): Promise<boolean> {
+	return showProgressDialog("pleaseWait_msg", showBuyDialog(bookingItemFeatureType, amount, freeAmount, reactivate))
+		.then(accepted => {
+			if (accepted) {
+				return bookItem(bookingItemFeatureType, amount)
+			} else {
+				return true
+			}
+		})
+}
+
 function _getBookingText(price: PriceServiceReturn, featureType: NumberString, count: number, freeAmount: number): string {
 	if (_isSinglePriceType(price.currentPriceThisPeriod, price.futurePriceNextPeriod, featureType)) {
 		if (featureType === BookingItemFeatureType.Users) {
 			if (count > 0) {
 				let additionalFeatures = []
-				if (_getPriceFromPriceData(price.futurePriceNextPeriod, BookingItemFeatureType.Branding) > 0) {
-					additionalFeatures.push(lang.get("whitelabel_label"))
+				if (_getPriceFromPriceData(price.futurePriceNextPeriod, BookingItemFeatureType.Whitelabel) > 0) {
+					additionalFeatures.push(lang.get("whitelabelFeature_label"))
 				}
 				if (_getPriceFromPriceData(price.futurePriceNextPeriod, BookingItemFeatureType.Sharing) > 0) {
-					additionalFeatures.push(lang.get("sharing_label"))
+					additionalFeatures.push(lang.get("sharingFeature_label"))
+				}
+				if (_getPriceFromPriceData(price.futurePriceNextPeriod, BookingItemFeatureType.Business) > 0) {
+					additionalFeatures.push(lang.get("businessFeature_label"))
 				}
 				if (additionalFeatures.length > 0) {
 					return count + " " + lang.get("bookingItemUsersIncluding_label") + " " + additionalFeatures.join(", ")
@@ -132,17 +201,23 @@ function _getBookingText(price: PriceServiceReturn, featureType: NumberString, c
 			}
 
 
-		} else if (featureType === BookingItemFeatureType.Branding) {
+		} else if (featureType === BookingItemFeatureType.Whitelabel) {
 			if (count > 0) {
-				return lang.get("whitelabelBooking_label", {"{1}": neverNull(getPriceItem(price.futurePriceNextPeriod, BookingItemFeatureType.Branding)).count})
+				return lang.get("whitelabelBooking_label", {"{1}": neverNull(getPriceItem(price.futurePriceNextPeriod, BookingItemFeatureType.Whitelabel)).count})
 			} else {
-				return lang.get("cancelWhitelabelBooking_label", {"{1}": neverNull(getPriceItem(price.currentPriceNextPeriod, BookingItemFeatureType.Branding)).count})
+				return lang.get("cancelWhitelabelBooking_label", {"{1}": neverNull(getPriceItem(price.currentPriceNextPeriod, BookingItemFeatureType.Whitelabel)).count})
 			}
 		} else if (featureType === BookingItemFeatureType.Sharing) {
 			if (count > 0) {
 				return lang.get("sharingBooking_label", {"{1}": neverNull(getPriceItem(price.futurePriceNextPeriod, BookingItemFeatureType.Sharing)).count})
 			} else {
 				return lang.get("cancelSharingBooking_label", {"{1}": neverNull(getPriceItem(price.currentPriceNextPeriod, BookingItemFeatureType.Sharing)).count})
+			}
+		} else if (featureType === BookingItemFeatureType.Business) {
+			if (count > 0) {
+				return lang.get("businessBooking_label", {"{1}": neverNull(getPriceItem(price.futurePriceNextPeriod, BookingItemFeatureType.Business)).count})
+			} else {
+				return lang.get("cancelBusinessBooking_label", {"{1}": neverNull(getPriceItem(price.currentPriceNextPeriod, BookingItemFeatureType.Business)).count})
 			}
 		} else if (featureType === BookingItemFeatureType.ContactForm) {
 			if (count > 0) {
@@ -257,8 +332,10 @@ function _getPriceFromPriceData(priceData: ?PriceData, featureType: NumberString
 	let item = getPriceItem(priceData, featureType)
 	let itemPrice = item ? Number(item.price) : 0
 	if (featureType === BookingItemFeatureType.Users) {
-		itemPrice += _getPriceFromPriceData(priceData, BookingItemFeatureType.Branding)
+		itemPrice += _getPriceFromPriceData(priceData, BookingItemFeatureType.Whitelabel)
 		itemPrice += _getPriceFromPriceData(priceData, BookingItemFeatureType.Sharing)
 	}
 	return itemPrice
 }
+
+

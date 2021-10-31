@@ -1,60 +1,27 @@
 // @flow
-import * as keytar from 'keytar'
-import type {DeferredObject} from "../../api/common/utils/Utils"
-import {defer, downcast} from "../../api/common/utils/Utils"
-import {CryptoError} from '../../api/common/error/CryptoError'
-import type {DesktopConfigHandler} from "../config/DesktopConfigHandler"
-import {DesktopConfigKey} from "../config/DesktopConfigHandler"
-import type {TimeoutData} from "./DesktopAlarmScheduler"
-import {elementIdPart} from "../../api/common/EntityFunctions"
+import type {DesktopConfig} from "../config/DesktopConfig"
+import type {EncryptedAlarmNotification} from "./DesktopAlarmScheduler"
 import {DesktopCryptoFacade} from "../DesktopCryptoFacade"
-import {uint8ArrayToBitArray} from "../../api/worker/crypto/CryptoUtils"
-import {base64ToUint8Array} from "../../api/common/utils/Encoding"
-import type {AlarmNotification} from "../../api/entities/sys/AlarmNotification"
+import {elementIdPart} from "../../api/common/utils/EntityUtils"
+import {DesktopConfigKey} from "../config/ConfigKeys"
+import type {DeviceKeyProvider} from "../DeviceKeyProviderImpl"
+import {findAllAndRemove} from "../../api/common/utils/ArrayUtils"
 
-const SERVICE_NAME = 'tutanota-vault'
-const ACCOUNT_NAME = 'tuta'
 
 /**
  * manages session keys used for decrypting alarm notifications, encrypting & persisting them to disk
  */
 export class DesktopAlarmStorage {
-	_initialized: DeferredObject<BitArray>;
-	_conf: DesktopConfigHandler;
+	_deviceKeyProvider: DeviceKeyProvider
+	_conf: DesktopConfig;
 	_crypto: DesktopCryptoFacade
 	_sessionKeysB64: {[pushIdentifierId: string]: string};
 
-	constructor(conf: DesktopConfigHandler, desktopCryptoFacade: DesktopCryptoFacade) {
+	constructor(conf: DesktopConfig, desktopCryptoFacade: DesktopCryptoFacade, deviceKeyProvider: DeviceKeyProvider) {
+		this._deviceKeyProvider = deviceKeyProvider
 		this._conf = conf
 		this._crypto = desktopCryptoFacade
-		this._initialized = defer()
 		this._sessionKeysB64 = {}
-	}
-
-	/**
-	 * needs to be called before using any of the public methods.
-	 * ensures there is a device key in the local secure storage
-	 */
-	init(): Promise<void> {
-		return keytar.findPassword(SERVICE_NAME)
-		             .then(pw => pw
-			             ? pw
-			             : this._generateAndStoreDeviceKey()
-		             )
-		             .then(pw => this._initialized.resolve(uint8ArrayToBitArray(base64ToUint8Array(pw))))
-	}
-
-	_generateAndStoreDeviceKey(): Promise<string> {
-		console.warn("device key not found, generating a new one")
-		// save key entry in keychain
-		return keytar.setPassword(SERVICE_NAME, ACCOUNT_NAME, DesktopCryptoFacade.generateDeviceKey())
-		             .then(() => keytar.findPassword(SERVICE_NAME))
-		             .then(pw => {
-			             if (!pw) {
-				             throw new CryptoError("alarmstorage key creation failed!")
-			             }
-			             return pw
-		             })
 	}
 
 	/**
@@ -63,72 +30,97 @@ export class DesktopAlarmStorage {
 	 * @param pushIdentifierSessionKeyB64 unencrypted B64 encoded key to store
 	 * @returns {*}
 	 */
-	storePushIdentifierSessionKey(pushIdentifierId: string, pushIdentifierSessionKeyB64: string): Promise<void> {
-		const keys = this._conf.getDesktopConfig('pushEncSessionKeys') || {}
+	async storePushIdentifierSessionKey(pushIdentifierId: string, pushIdentifierSessionKeyB64: string): Promise<void> {
+		const keys = await this._conf.getVar(DesktopConfigKey.pushEncSessionKeys) || {}
 		if (!keys[pushIdentifierId]) {
 			this._sessionKeysB64[pushIdentifierId] = pushIdentifierSessionKeyB64
-			return this._initialized.promise
+			return this._deviceKeyProvider.getDeviceKey()
 			           .then(pw => {
 				           keys[pushIdentifierId] = this._crypto.aes256EncryptKeyToB64(pw, pushIdentifierSessionKeyB64)
-				           return this._conf.setDesktopConfig('pushEncSessionKeys', keys)
+				           return this._conf.setVar(DesktopConfigKey.pushEncSessionKeys, keys)
 			           })
 		}
 		return Promise.resolve()
 	}
 
 	removePushIdentifierKeys(): Promise<void> {
-		return this._conf.setDesktopConfig(DesktopConfigKey.pushEncSessionKeys, null)
+		return this._conf.setVar(DesktopConfigKey.pushEncSessionKeys, null)
 	}
 
 	/**
 	 * get a B64 encoded sessionKey from memory or decrypt it from disk storage
 	 * @param sessionKeys array of notificationSessionKeys
 	 */
-	resolvePushIdentifierSessionKey(sessionKeys: Array<{pushIdentifierSessionEncSessionKey: string, pushIdentifier: IdTuple}>): Promise<{piSkEncSk: string, piSk: string}> {
-		return this._initialized.promise.then(pw => {
-			const keys = this._conf.getDesktopConfig('pushEncSessionKeys') || {}
-			let ret = null
-			// find a working sessionkey and delete all the others
-			for (let i = sessionKeys.length - 1; i >= 0; i--) {
-				const notificationSessionKey = sessionKeys[i]
-				const pushIdentifierId = elementIdPart(notificationSessionKey.pushIdentifier)
-				if (this._sessionKeysB64[pushIdentifierId]) {
-					ret = {
-						piSk: this._sessionKeysB64[pushIdentifierId],
-						piSkEncSk: notificationSessionKey.pushIdentifierSessionEncSessionKey
-					}
-				} else {
-					if (keys[pushIdentifierId] == null) {
-						sessionKeys.splice(i, 1)
-						continue
-					}
-					let decryptedKeyB64
-					try {
-						decryptedKeyB64 = this._crypto.aes256DecryptKeyToB64(pw, keys[pushIdentifierId])
-					} catch (e) {
-						console.warn("could not decrypt pushIdentifierSessionKey, trying next one...")
-						sessionKeys.splice(i, 1)
-						continue
-					}
-					this._sessionKeysB64[pushIdentifierId] = decryptedKeyB64
-					ret = {
-						piSk: decryptedKeyB64,
-						piSkEncSk: notificationSessionKey.pushIdentifierSessionEncSessionKey
-					}
+	async resolvePushIdentifierSessionKey(sessionKeys: Array<{pushIdentifierSessionEncSessionKey: string, pushIdentifier: IdTuple}>): Promise<{piSkEncSk: string, piSk: string}> {
+		const pw = await this._deviceKeyProvider.getDeviceKey()
+		const keys = await this._conf.getVar(DesktopConfigKey.pushEncSessionKeys) || {}
+		let ret = null
+		// find a working sessionkey and delete all the others
+		for (let i = sessionKeys.length - 1; i >= 0; i--) {
+			const notificationSessionKey = sessionKeys[i]
+			const pushIdentifierId = elementIdPart(notificationSessionKey.pushIdentifier)
+			if (this._sessionKeysB64[pushIdentifierId]) {
+				ret = {
+					piSk: this._sessionKeysB64[pushIdentifierId],
+					piSkEncSk: notificationSessionKey.pushIdentifierSessionEncSessionKey
+				}
+			} else {
+				if (keys[pushIdentifierId] == null) {
+					sessionKeys.splice(i, 1)
+					continue
+				}
+				let decryptedKeyB64
+				try {
+					decryptedKeyB64 = this._crypto.aes256DecryptKeyToB64(pw, keys[pushIdentifierId])
+				} catch (e) {
+					console.warn("could not decrypt pushIdentifierSessionKey, trying next one...")
+					sessionKeys.splice(i, 1)
+					continue
+				}
+				this._sessionKeysB64[pushIdentifierId] = decryptedKeyB64
+				ret = {
+					piSk: decryptedKeyB64,
+					piSkEncSk: notificationSessionKey.pushIdentifierSessionEncSessionKey
 				}
 			}
-			if (ret) {
-				return ret
-			}
-			throw new Error("could not resolve pushIdentifierSessionKey")
-		})
+		}
+		if (ret) {
+			return ret
+		}
+		throw new Error("could not resolve pushIdentifierSessionKey")
 	}
 
-	storeScheduledAlarms(scheduledNotifications: {[string]: {timeouts: Array<TimeoutData>, an: AlarmNotification}}): Promise<void> {
-		return this._conf.setDesktopConfig('scheduledAlarms', Object.values(scheduledNotifications).map(val => downcast(val).an))
+	async storeAlarm(alarm: EncryptedAlarmNotification): Promise<void> {
+		const allAlarms = await this.getScheduledAlarms()
+		findAllAndRemove(allAlarms, (an) => an.alarmInfo.alarmIdentifier === alarm.alarmInfo.alarmIdentifier)
+		allAlarms.push(alarm)
+		await this._saveAlarms(allAlarms)
 	}
 
-	getScheduledAlarms(): Array<AlarmNotification> {
-		return this._conf.getDesktopConfig('scheduledAlarms') || []
+	async deleteAlarm(identifier: string): Promise<void> {
+		const allAlarms = await this.getScheduledAlarms()
+		findAllAndRemove(allAlarms, (an) => an.alarmInfo.alarmIdentifier === identifier)
+		await this._saveAlarms(allAlarms)
+	}
+
+	/**
+	 * If userId is null then we delete alarms for all users
+	 */
+	async deleteAllAlarms(userId: ?Id): Promise<void> {
+		if (userId == null) {
+			return this._saveAlarms([])
+		} else {
+			const allScheduledAlarms = await this.getScheduledAlarms()
+			findAllAndRemove(allScheduledAlarms, alarm => alarm.user === userId)
+			return this._saveAlarms(allScheduledAlarms)
+		}
+	}
+
+	async getScheduledAlarms(): Promise<Array<EncryptedAlarmNotification>> {
+		return await this._conf.getVar(DesktopConfigKey.scheduledAlarms) || []
+	}
+
+	_saveAlarms(alarms: $ReadOnlyArray<EncryptedAlarmNotification>): Promise<void> {
+		return this._conf.setVar(DesktopConfigKey.scheduledAlarms, alarms)
 	}
 }

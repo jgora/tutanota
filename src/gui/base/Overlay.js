@@ -1,9 +1,16 @@
 //@flow
 import m from "mithril"
 import type {DomMutation} from "../animation/Animations"
-import {animations, hexToRgb} from "../animation/Animations"
-import {theme} from "../theme"
+import {animations} from "../animation/Animations"
 import {requiresStatusBarHack} from "../main-styles"
+import {ease} from "../animation/Easing"
+import {assertMainOrNodeBoot} from "../../api/common/Env"
+import type {LayerTypeEnum} from "../../RootView"
+import {LayerType} from "../../RootView"
+import {remove} from "../../api/common/utils/ArrayUtils"
+import type {lazy} from "../../api/common/utils/Utils"
+
+assertMainOrNodeBoot()
 
 export type PositionRect = {
 	top?: ?string,
@@ -12,66 +19,70 @@ export type PositionRect = {
 	width?: ?string,
 	bottom?: ?string,
 	height?: ?string,
+	zIndex?: LayerTypeEnum
 }
 
 type AnimationProvider = (dom: HTMLElement) => DomMutation
 
 type OverlayAttrs = {
-	component: Component;
-	position: PositionRect;
-	createAnimation?: AnimationProvider;
-	closeAnimation?: AnimationProvider;
+	component: MComponent<void>,
+	position: lazy<PositionRect>,
+	createAnimation?: AnimationProvider,
+	closeAnimation?: AnimationProvider,
+	shadowClass: string
 }
 
 const overlays: Array<[OverlayAttrs, ?HTMLElement, number]> = []
-const boxShadow = (() => {
-	const {r, g, b} = hexToRgb(theme.modal_bg)
-	return `0 2px 12px rgba(${r}, ${g}, ${b}, 0.4), 0 10px 40px rgba(${r}, ${g}, ${b}, 0.3)`
-})()
 let key = 0
 
-export function displayOverlay(position: PositionRect, component: Component, createAnimation?: AnimationProvider,
-                               closeAnimation?: AnimationProvider): () => void {
+export function displayOverlay(position: lazy<PositionRect>, component: MComponent<void>, createAnimation?: AnimationProvider,
+                               closeAnimation?: AnimationProvider, shadowClass: string = "dropdown-shadow"): () => Promise<void> {
 	const newAttrs = {
 		position,
 		component,
 		createAnimation,
-		closeAnimation
+		closeAnimation,
+		shadowClass
 	}
 	const pair = [newAttrs, null, key++]
 	overlays.push(pair)
-	return () => {
+	return async () => {
 		const dom = pair[1];
-		(newAttrs.closeAnimation && dom ? animations.add(dom, newAttrs.closeAnimation(dom)) : Promise.resolve())
-			.then(() => {
-				overlays.splice(overlays.indexOf(pair), 1)
-				m.redraw()
+		const animation = newAttrs.closeAnimation && dom
+			? animations.add(dom, newAttrs.closeAnimation(dom), {
+				duration: 100,
+				easing: ease.in
 			})
+			: Promise.resolve()
+		await animation
+		if (remove(overlays, pair)) {
+			m.redraw()
+		}
 	}
 }
 
-export const overlay = {
-	view: () => m("#overlay", {
+export const overlay: MComponent<void> = {
+	view: (): Children => m("#overlay", {
 		style: {
 			display: overlays.length > 0 ? "" : 'none' // display: null not working for IE11
 		},
 		"aria-hidden": overlays.length === 0
 	}, overlays.map((overlayAttrs) => {
 		const [attrs, dom, key] = overlayAttrs
-		return m(".abs.elevated-bg", {
+		const position = attrs.position()
+		return m(".abs.elevated-bg." + attrs.shadowClass, {
 			key,
 			style: {
-				width: attrs.position.width,
-				top: attrs.position.top,
-				bottom: attrs.position.bottom,
-				right: attrs.position.right,
-				left: attrs.position.left,
-				height: attrs.position.height,
-				'z-index': 200,
-				'box-shadow': boxShadow,
+				width: position.width,
+				top: position.top,
+				bottom: position.bottom,
+				right: position.right,
+				left: position.left,
+				height: position.height,
+				'z-index': position.zIndex ? position.zIndex : LayerType.Overlay,
 				'margin-top': (requiresStatusBarHack() ? "20px" : 'env(safe-area-inset-top)') // insets for iPhone X
 			},
-			oncreate: (vnode: Vnode<any>) => {
+			oncreate: (vnode: Vnode<OverlayAttrs>) => {
 				overlayAttrs[1] = vnode.dom
 				if (attrs.createAnimation) {
 					animations.add(vnode.dom, attrs.createAnimation(vnode.dom))

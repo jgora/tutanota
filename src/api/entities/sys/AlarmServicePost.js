@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {AlarmNotification} from "./AlarmNotification"
 
@@ -15,9 +17,7 @@ export const _TypeModel: TypeModel = {
 	"encrypted": true,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1577,
-			"since": 48,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -26,17 +26,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"alarmNotifications": {
-			"name": "alarmNotifications",
 			"id": 1578,
-			"since": 48,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "AlarmNotification",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createAlarmServicePost(values?: $Shape<$Exact<AlarmServicePost>>): AlarmServicePost {

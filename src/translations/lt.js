@@ -1,4 +1,4 @@
-module.exports = {
+export default {
 	"id": "c422d719f2cb6aff639b4e5c8d87e0a0",
 	"name": "lt",
 	"code": "lt",
@@ -12,7 +12,7 @@ module.exports = {
 		"other"
 	],
 	"created_at": "2015-03-13T10:17:47Z",
-	"updated_at": "2020-04-29T20:49:59Z",
+	"updated_at": "2021-07-15T13:28:07Z",
 	"source_locale": null,
 	"keys": {
 		"accountSwitchAdditionalPackagesActive_msg": "Prašome išjungti užsakytą talpą ar bet kokį kitą paketą ir išjungti visus kitus el. paštus prieš pakeičiant vartotojo tipą.",
@@ -149,7 +149,6 @@ module.exports = {
 		"creditCardNumberInvalid_msg": "Mokėjimo kortelės numeris yra neteisingas.",
 		"currentlyBooked_label": "Užsakymo apžvalga",
 		"customDomainDeletePreconditionFailed_msg": "Prašome deaktyvuoti visus vartotojus ir e-pašto slapyvardžius esančius domene: {domainName}",
-		"customDomainDomainAssigned_msg": "Šis domenas jau yra priskirtas jūsų pašto paskyrai.",
 		"customDomainErrorDnsLookupFailure_msg": "Nepavyko nuskaityti DNS.",
 		"customDomainErrorDomainNotAvailable_msg": "Domenas negalimas",
 		"customDomainNeutral_msg": "Prašome įvesti savo domeną.",
@@ -267,7 +266,6 @@ module.exports = {
 		"inboxRuleToRecipientEquals_action": "Gavėjui",
 		"inboxRuleValue_label": "Vertė",
 		"insufficientStorageAdmin_msg": "Jūs viršijote talpos limitą. Jūs daugiau negalite gauti ar siųsti laiškų. Prašome atlaisvinti atmintį ištrinant jūsų pašto dėžutės elementus arba įsigyti didesnės talpos paketą.",
-		"insufficientStorageUser_msg": "Jūs viršijote talpos limitą. Jūs daugiau negalite gauti ar siųsti laiškų. Prašome susisiekti su jūsų administratoriumi.",
 		"insufficientStorageWarning_msg": "Jūsų pašo dėžutė beveik pasiekė talpos limitą. Prašome atlaisvinti atminti trinant jūsų pašto dėžutės elementus arba įsigyjant didesnės talpos paketą.",
 		"invalidBirthday_msg": "Neteisinga gimimo dienos data. Prašome pakeisti vertes gimimo dienos laukelyje.",
 		"invalidCnameRecord_msg": "CNAME įrašas šiam domenui yra nustatytas neteisingai.",
@@ -288,7 +286,6 @@ module.exports = {
 		"invoiceData_msg": "Sąskaitos data",
 		"invoiceMailBodyAutomatic_msg": "jums yra  išrašyta nauja sąskaita numeriu {1}. Ją galite atsisiųsti {2}. Visa suma bus automatiškai nuskaityta.",
 		"invoiceMailSubject_msg": "Nauja sąskaita iš Tutanota",
-		"invoiceNotPaidUser_msg": "Atsiprašome, šiuo metu jūs negalite siųsti el.laiškų. Prašome susisiekti su administratoriumi.",
 		"invoicePaymentMethodInfo_msg": "Prašome pasirinkti mokėjimo būdą. Daugiau būdų bus pridėta ateityje.",
 		"invoicePay_action": "Mokėti",
 		"invoiceVatIdNo_label": "PVM mokėtojo kodas",
@@ -583,7 +580,6 @@ module.exports = {
 		"type_label": "Tipas",
 		"u2fAuthUnregisteredDevice_msg": "Šis saugos raktas nebuvo registruotas su jūsų paskyra. Prašome naudoti teisingą raktą.",
 		"u2fSecurityKey_label": "Saugos raktai (U2F)",
-		"u2fUnexpectedError_msg": "Įvyko netikėta klaida susyjusi su jūsų saugos raktu.",
 		"unknownError_msg": "Įvyko netikėta klaida. Vėliau pabandykite dar kartą.",
 		"unlimited_label": "Nelimituotas",
 		"unrecognizedU2fDevice_msg": "Jūsų saugos raktas buvo neatpažintas.",
@@ -592,7 +588,6 @@ module.exports = {
 		"unsubscribe_action": "Atsisakyti",
 		"unsupportedBrowser_msg": "Apgailestaujame, bet, deja, jūsų naršyklė nepalaikoma. Naudokite vienos iš sekančių naršyklių naujausią versiją:",
 		"upgradePremium_label": "PREMIUM",
-		"upgradePro_msg": "Jūsų abonementas bus atnaujintas iki Pro.",
 		"upgradeReminderCancel_action": "Vėliau",
 		"url_label": "URL",
 		"userEmailSignature_label": "Jūsų parašas laiške",

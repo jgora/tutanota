@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const MailFolderRefTypeRef: TypeRef<MailFolderRef> = new TypeRef("tutanota", "MailFolderRef")
@@ -14,9 +16,7 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 441,
-			"since": 7,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
@@ -25,18 +25,15 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"folders": {
-			"name": "folders",
 			"id": 442,
-			"since": 7,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "MailFolder",
 			"final": true,
-			"external": false
+			"refType": "MailFolder"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createMailFolderRef(values?: $Shape<$Exact<MailFolderRef>>): MailFolderRef {

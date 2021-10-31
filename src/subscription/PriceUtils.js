@@ -2,17 +2,13 @@
 import type {BookingItemFeatureTypeEnum, PaymentMethodTypeEnum} from "../api/common/TutanotaConstants"
 import {PaymentMethodType} from "../api/common/TutanotaConstants"
 import {lang} from "../misc/LanguageViewModel.js"
-import {formatPrice} from "../subscription/SubscriptionUtils"
-import {showNotAvailableForFreeDialog} from "../misc/ErrorHandlerImpl"
 import {neverNull} from "../api/common/utils/Utils"
-import {logins} from "../api/main/LoginController"
-import {load} from "../api/main/Entity"
-import {CustomerTypeRef} from "../api/entities/sys/Customer"
-import {Dialog} from "../gui/base/Dialog"
 import type {AccountingInfo} from "../api/entities/sys/AccountingInfo"
 import type {PriceData} from "../api/entities/sys/PriceData"
 import type {PriceItemData} from "../api/entities/sys/PriceItemData"
 import type {Booking} from "../api/entities/sys/Booking"
+import type {SubscriptionData, SubscriptionTypeEnum, UpgradePriceTypeEnum} from "./SubscriptionUtils"
+import {getPlanPrices, UpgradePriceType} from "./SubscriptionUtils"
 
 export function getPaymentMethodName(paymentMethod: ?PaymentMethodTypeEnum): string {
 	if (paymentMethod === PaymentMethodType.Invoice) {
@@ -23,6 +19,8 @@ export function getPaymentMethodName(paymentMethod: ?PaymentMethodTypeEnum): str
 		return "SEPA"
 	} else if (paymentMethod === PaymentMethodType.Paypal) {
 		return "PayPal"
+	} else if (paymentMethod === PaymentMethodType.AccountBalance) {
+		return lang.get("paymentMethodAccountBalance_label")
 	} else {
 		return "<" + lang.get("comboBoxSelectionNone_msg") + ">"
 	}
@@ -42,10 +40,77 @@ export function formatPriceDataWithInfo(priceData: PriceData): string {
 	return formatPriceWithInfo(Number(priceData.price), Number(priceData.paymentInterval), priceData.taxIncluded)
 }
 
+// Used on website, keep it in sync
+export function formatPrice(value: number, includeCurrency: boolean): string {
+	// round to two digits first because small deviations may exist at far away decimal places
+	value = Math.round(value * 100) / 100
+	if (includeCurrency) {
+		return (value % 1 !== 0) ?
+			lang.formats.priceWithCurrency.format(value)
+			: lang.formats.priceWithCurrencyWithoutFractionDigits.format(value)
+	} else {
+		return (value % 1 !== 0) ?
+			lang.formats.priceWithoutCurrency.format(value)
+			: lang.formats.priceWithoutCurrencyWithoutFractionDigits.format(value)
+	}
+}
+
+/**
+ * Return actual price for given subscription data. In case of yearly subscription, the yearly value is returned, and monthly otherwise.
+ */
+export function getSubscriptionPrice(data: SubscriptionData, subscription: SubscriptionTypeEnum, type: UpgradePriceTypeEnum): number {
+	const prices = getPlanPrices(data.planPrices, subscription)
+	if (prices) {
+		let monthlyPriceString
+		let monthsFactor = (data.options.paymentInterval() === 12) ? 10 : 1
+		let discount = 0
+		if (type === UpgradePriceType.PlanReferencePrice) {
+			monthlyPriceString = prices.monthlyReferencePrice
+			if (data.options.paymentInterval() === 12) {
+				monthsFactor = 12
+			}
+		} else if (type === UpgradePriceType.PlanActualPrice) {
+			monthlyPriceString = prices.monthlyPrice
+			if (data.options.paymentInterval() === 12) {
+				discount = Number(prices.firstYearDiscount)
+			}
+		} else if (type === UpgradePriceType.PlanNextYearsPrice) {
+			monthlyPriceString = prices.monthlyPrice
+		} else if (type === UpgradePriceType.AdditionalUserPrice) {
+			monthlyPriceString = prices.additionalUserPriceMonthly
+		} else if (type === UpgradePriceType.ContactFormPrice) {
+			monthlyPriceString = prices.contactFormPriceMonthly
+		}
+		return Number(monthlyPriceString) * monthsFactor - discount
+	} else { // Free plan
+		return 0
+	}
+}
+
+/**
+ * Formats the monthly price of the subscription (even for yearly subscriptions).
+ */
+export function formatMonthlyPrice(subscriptionPrice: number, paymentInterval: number): string {
+	const monthlyPrice = isYearlyPayment(paymentInterval) ? subscriptionPrice / 12 : subscriptionPrice
+	return formatPrice(monthlyPrice, true)
+}
+
+export function isYearlyPayment(periods: number): boolean {
+	return periods === 12
+}
+
 export function formatPriceWithInfo(price: number, paymentInterval: number, taxIncluded: boolean): string {
-	const netOrGross = taxIncluded ? lang.get("gross_label") : lang.get("net_label")
-	const yearlyOrMonthly = paymentInterval === 12 ? lang.get("pricing.perYear_label") : lang.get("pricing.perMonth_label")
-	return formatPrice(price, true) + " " + yearlyOrMonthly + " (" + netOrGross + ")"
+	const netOrGross = taxIncluded
+		? lang.get("gross_label")
+		: lang.get("net_label")
+
+	const yearlyOrMonthly = isYearlyPayment(paymentInterval)
+		? lang.get("pricing.perYear_label")
+		: lang.get("pricing.perMonth_label")
+
+	const formattedPrice = formatPrice(price, true)
+
+	return `${formattedPrice} ${yearlyOrMonthly} (${netOrGross})`
 }
 
 /**
@@ -89,28 +154,3 @@ export function getCurrentCount(featureType: BookingItemFeatureTypeEnum, booking
 	}
 }
 
-export function createNotAvailableForFreeClickHandler(includedInPremium: boolean,
-                                                      click: clickHandler,
-                                                      available: () => boolean): clickHandler {
-	return (e, dom) => {
-		if (!available()) {
-			showNotAvailableForFreeDialog(includedInPremium)
-		} else {
-			click(e, dom)
-		}
-	}
-}
-
-export function premiumSubscriptionActive(included: boolean): Promise<boolean> {
-	if (logins.getUserController().isFreeAccount()) {
-		showNotAvailableForFreeDialog(included)
-		return Promise.resolve(false)
-	}
-	return load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)).then((customer) => {
-		if (customer.canceledPremiumAccount) {
-			return Dialog.error("subscriptionCancelledMessage_msg").return(false)
-		} else {
-			return Promise.resolve(true)
-		}
-	})
-}

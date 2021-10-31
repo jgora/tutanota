@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {InternalGroupData} from "./InternalGroupData"
 
@@ -15,18 +17,14 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 704,
-			"since": 19,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"encryptedName": {
-			"name": "encryptedName",
 			"id": 705,
-			"since": 19,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": false,
@@ -35,17 +33,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"groupData": {
-			"name": "groupData",
 			"id": 706,
-			"since": 19,
 			"type": "AGGREGATION",
 			"cardinality": "One",
+			"final": false,
 			"refType": "InternalGroupData",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createCreateLocalAdminGroupData(values?: $Shape<$Exact<CreateLocalAdminGroupData>>): CreateLocalAdminGroupData {

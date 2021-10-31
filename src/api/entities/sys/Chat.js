@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const ChatTypeRef: TypeRef<Chat> = new TypeRef("sys", "Chat")
@@ -14,36 +16,28 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 458,
-			"since": 1,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"recipient": {
-			"name": "recipient",
 			"id": 460,
-			"since": 1,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"sender": {
-			"name": "sender",
 			"id": 459,
-			"since": 1,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"text": {
-			"name": "text",
 			"id": 461,
-			"since": 1,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
@@ -52,7 +46,7 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createChat(values?: $Shape<$Exact<Chat>>): Chat {

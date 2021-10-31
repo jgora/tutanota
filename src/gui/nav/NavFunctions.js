@@ -1,27 +1,23 @@
 //@flow
 
-import {asyncImport} from "../../api/common/utils/Utils"
-import type {SubscriptionTypeEnum} from "../../subscription/SubscriptionUtils"
+import {logins} from "../../api/main/LoginController";
+import {FeatureType} from "../../api/common/TutanotaConstants";
 
 export function showUpgradeDialog() {
-	asyncImport(typeof module !== "undefined" ?
-		module.id : __moduleName, `${env.rootPathPrefix}src/subscription/UpgradeSubscriptionWizard.js`)
-		.then(upgradeWizard => {
-				// To not import constant
-				let subscriptionType: SubscriptionTypeEnum = 'Free'
-				return upgradeWizard.showUpgradeWizard(subscriptionType)
-			}
-		)
+	import("../../subscription/UpgradeSubscriptionWizard.js")
+		.then(upgradeWizard => upgradeWizard.showUpgradeWizard())
 }
 
-export function writeSupportMail() {
-	asyncImport(typeof module !== "undefined" ?
-		module.id : __moduleName, `${env.rootPathPrefix}src/mail/MailEditor.js`)
-		.then(mailEditorModule => mailEditorModule.MailEditor.writeSupportMail())
+export function showSupportDialog() {
+	import("../../support/SupportDialog.js")
+		.then(supportModule => supportModule.showSupportDialog())
 }
 
 export function writeInviteMail() {
-	asyncImport(typeof module !== "undefined" ?
-		module.id : __moduleName, `${env.rootPathPrefix}src/mail/MailEditor.js`)
-		.then(mailEditorModule => mailEditorModule.MailEditor.writeInviteMail())
+	import("../../mail/editor/MailEditor.js")
+		.then(mailEditorModule => mailEditorModule.writeInviteMail())
+}
+
+export function isNewMailActionAvailable(): boolean {
+	return logins.isInternalUserLoggedIn() && !logins.isEnabled(FeatureType.ReplyOnly)
 }

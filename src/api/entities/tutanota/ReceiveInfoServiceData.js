@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const ReceiveInfoServiceDataTypeRef: TypeRef<ReceiveInfoServiceData> = new TypeRef("tutanota", "ReceiveInfoServiceData")
@@ -14,18 +16,23 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 571,
-			"since": 12,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
+			"encrypted": false
+		},
+		"language": {
+			"id": 1121,
+			"type": "String",
+			"cardinality": "One",
+			"final": true,
 			"encrypted": false
 		}
 	},
 	"associations": {},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createReceiveInfoServiceData(values?: $Shape<$Exact<ReceiveInfoServiceData>>): ReceiveInfoServiceData {
@@ -36,4 +43,5 @@ export type ReceiveInfoServiceData = {
 	_type: TypeRef<ReceiveInfoServiceData>;
 
 	_format: NumberString;
+	language: string;
 }

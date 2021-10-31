@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {UserAreaGroups} from "./UserAreaGroups"
 
@@ -15,36 +17,28 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 114,
-			"since": 1,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"_id": {
-			"name": "_id",
 			"id": 112,
-			"since": 1,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerGroup": {
-			"name": "_ownerGroup",
 			"id": 998,
-			"since": 17,
 			"type": "GeneratedId",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_permissions": {
-			"name": "_permissions",
 			"id": 113,
-			"since": 1,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
@@ -53,37 +47,30 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"externalUserAreaGroupInfos": {
-			"name": "externalUserAreaGroupInfos",
 			"id": 999,
-			"since": 17,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "UserAreaGroups",
-			"final": true
+			"dependency": null
 		},
 		"externalGroupInfos": {
-			"name": "externalGroupInfos",
 			"id": 116,
-			"since": 1,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "GroupInfo",
 			"final": true,
-			"external": false
+			"refType": "GroupInfo"
 		},
 		"externalUserReferences": {
-			"name": "externalUserReferences",
 			"id": 117,
-			"since": 1,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "ExternalUserReference",
 			"final": true,
-			"external": false
+			"refType": "ExternalUserReference"
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createGroupRoot(values?: $Shape<$Exact<GroupRoot>>): GroupRoot {

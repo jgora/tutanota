@@ -1,4 +1,4 @@
-import o from "ospec/ospec.js"
+import o from "ospec"
 import {hexToPrivateKey, hexToPublicKey, rsaDecryptSync, rsaEncryptSync, sign, verifySignature} from "../../../src/api/worker/crypto/Rsa"
 import {
 	base64ToUint8Array,
@@ -15,6 +15,7 @@ import {random} from "../../../src/api/worker/crypto/Randomizer"
 import compatibilityTestData from "./CompatibilityTestData"
 import {bitArrayToUint8Array, uint8ArrayToBitArray} from "../../../src/api/worker/crypto/CryptoUtils"
 import {aes256DecryptKey, aes256EncryptKey, decryptKey, encryptKey} from "../../../src/api/worker/crypto/CryptoFacade"
+import {uncompress} from "../../../src/api/worker/Compression"
 
 
 const originalRandom = random.generateRandomData
@@ -87,7 +88,7 @@ o.spec("crypto compatibility", function () {
 	})
 
 	/*
-	o("aes 256 webcrypto", browser((done, timeout) => {
+	o("aes 256 webcrypto", browser(function (done, timeout) {
 		timeout(2000)
 		Promise.all(
 			compatibilityTestData.aes256Tests.map(td => {
@@ -166,4 +167,24 @@ o.spec("crypto compatibility", function () {
 			o(uint8ArrayToHex(bitArrayToUint8Array(key))).deepEquals(td.keyHex)
 		})
 	})
+
+	o("compression", function () {
+		compatibilityTestData.compressionTests.forEach(td => {
+			o(utf8Uint8ArrayToString(uncompress(base64ToUint8Array(td.compressedBase64TextJava)))).equals(td.uncompressedText)
+			o(utf8Uint8ArrayToString(uncompress(base64ToUint8Array(td.compressedBase64TextJavaScript)))).equals(td.uncompressedText)
+		})
+	})
+
+	/**
+	 * Creates the Javascript compatibility test data for compression. See CompatibilityTest.writeCompressionTestData() in Java for
+	 * instructions how to update the test data.
+	 */
+	// o.only("createCompressionTestData", function () {
+	// 	console.log("List<String> javaScriptCompressed = List.of(")
+	// 	console.log(compatibilityTestData.compressionTests.map(td => {
+	// 		let compressed = uint8ArrayToBase64(compress(stringToUtf8Uint8Array(td.uncompressedText)))
+	// 		return "\t\t\"" + compressed + "\""
+	// 	}).join(",\n"))
+	// 	console.log(");")
+	// })
 })

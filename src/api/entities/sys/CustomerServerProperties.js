@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {EmailSenderListElement} from "./EmailSenderListElement"
 import type {StringWrapper} from "./StringWrapper"
@@ -17,72 +19,56 @@ export const _TypeModel: TypeModel = {
 	"encrypted": true,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 958,
-			"since": 13,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"_id": {
-			"name": "_id",
 			"id": 956,
-			"since": 13,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerEncSessionKey": {
-			"name": "_ownerEncSessionKey",
 			"id": 987,
-			"since": 17,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerGroup": {
-			"name": "_ownerGroup",
 			"id": 986,
-			"since": 17,
 			"type": "GeneratedId",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_permissions": {
-			"name": "_permissions",
 			"id": 957,
-			"since": 13,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"requirePasswordUpdateAfterReset": {
-			"name": "requirePasswordUpdateAfterReset",
 			"id": 1100,
-			"since": 22,
 			"type": "Boolean",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"saveEncryptedIpAddressInSession": {
-			"name": "saveEncryptedIpAddressInSession",
 			"id": 1406,
-			"since": 35,
 			"type": "Boolean",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"whitelabelCode": {
-			"name": "whitelabelCode",
 			"id": 1278,
-			"since": 26,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
@@ -91,35 +77,32 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"emailSenderList": {
-			"name": "emailSenderList",
 			"id": 959,
-			"since": 13,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "EmailSenderListElement",
-			"final": false
+			"dependency": null
 		},
 		"whitelabelRegistrationDomains": {
-			"name": "whitelabelRegistrationDomains",
 			"id": 1279,
-			"since": 26,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "StringWrapper",
-			"final": false
+			"dependency": null
 		},
 		"whitelistedDomains": {
-			"name": "whitelistedDomains",
 			"id": 1099,
-			"since": 21,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "DomainsRef",
-			"final": true
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createCustomerServerProperties(values?: $Shape<$Exact<CustomerServerProperties>>): CustomerServerProperties {

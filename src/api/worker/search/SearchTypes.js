@@ -2,6 +2,9 @@
 import type {DbFacade} from "./DbFacade"
 import type {GroupTypeEnum} from "../../common/TutanotaConstants"
 import type {TypeInfo} from "./IndexUtils"
+import {TypeRef} from "../../common/utils/TypeRef";
+import type {ModelAssociation, ModelValue} from "../../common/EntityTypes"
+import type {lazy} from "../../common/utils/Utils"
 
 
 // db types
@@ -26,7 +29,7 @@ export type ElementDataDbRow = [
 	Id,  // first list id
 	Uint8Array,  // second is enc meta row keys encoded in binary format
 	Id // third is owner group id
-	]
+]
 
 export type EncryptedSearchIndexEntryWithHash = {
 	encEntry: EncryptedSearchIndexEntry,
@@ -127,3 +130,30 @@ export type MoreResultsIndexEntry = {
 	encId: Uint8Array
 }
 
+export type SearchRestriction = {
+	type: TypeRef<any>;
+	start: ?number; // timestamp
+	end: ?number; // timestamp
+	field: ?string; // must be kept in sync with attributeIds
+	attributeIds: ?number[]; // must be kept in sync with field
+	listId: ?Id;
+}
+
+export type SearchResult = {
+	query: string,
+	restriction: SearchRestriction,
+	results: IdTuple[];
+	currentIndexTimestamp: number;
+	moreResults: Array<MoreResultsIndexEntry>,
+	lastReadSearchIndexRow: Array<[string, ?number]>; // array of pairs (token, lastReadSearchIndexRowOldestElementTimestamp) lastRowReadSearchIndexRow: null = no result read, 0 = no more search results????
+	matchWordOrder: boolean;
+}
+
+export type SearchIndexStateInfo = {
+	initializing: boolean;
+	mailIndexEnabled: boolean;
+	progress: number;
+	currentMailIndexTimestamp: number;
+	indexedMailCount: number;
+	failedIndexingUpTo: ?number;
+}

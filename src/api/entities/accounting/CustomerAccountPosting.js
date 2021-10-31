@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const CustomerAccountPostingTypeRef: TypeRef<CustomerAccountPosting> = new TypeRef("accounting", "CustomerAccountPosting")
@@ -14,54 +16,42 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 80,
-			"since": 3,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"amount": {
-			"name": "amount",
 			"id": 84,
-			"since": 3,
 			"type": "Number",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": true
 		},
 		"balance": {
-			"name": "balance",
 			"id": 85,
-			"since": 3,
 			"type": "Number",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": true
 		},
 		"invoiceNumber": {
-			"name": "invoiceNumber",
 			"id": 83,
-			"since": 3,
 			"type": "String",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": true
 		},
 		"type": {
-			"name": "type",
 			"id": 81,
-			"since": 3,
 			"type": "Number",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": true
 		},
 		"valueDate": {
-			"name": "valueDate",
 			"id": 82,
-			"since": 3,
 			"type": "Date",
 			"cardinality": "One",
 			"final": true,
@@ -70,7 +60,7 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {},
 	"app": "accounting",
-	"version": "3"
+	"version": "4"
 }
 
 export function createCustomerAccountPosting(values?: $Shape<$Exact<CustomerAccountPosting>>): CustomerAccountPosting {

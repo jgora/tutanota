@@ -1,9 +1,9 @@
 // @flow
 import {Cat, log, timer} from "../misc/Log"
 import {size} from "./size"
-import {assertMainOrNodeBoot, isAdminClient} from "../api/Env"
+import {assertMainOrNodeBoot, isAdminClient, isTest} from "../api/common/Env"
 import {windowFacade} from "../misc/WindowFacade"
-import {theme, themeId} from "./theme"
+import {theme, themeController} from "./theme"
 import {neverNull} from "../api/common/utils/Utils"
 import {client} from "../misc/ClientDetector"
 
@@ -27,7 +27,7 @@ class Styles {
 			this.bodyWidth = width
 			this.bodyHeight = height
 		})
-		themeId.map(() => {
+		themeController.themeIdChangedStream.map(() => {
 			this._updateDomStyles()
 		})
 	}
@@ -49,7 +49,20 @@ class Styles {
 		}
 	}
 
+	updateStyle(id: string) {
+		if (!this.initialized || !this.styles.has(id)) {
+			throw new Error("cannot update nonexistent style " + id)
+		}
+		const creator = neverNull(this.styles.get(id))
+		log(Cat.css, "update style", id, creator(theme))
+		this._updateDomStyle(id, creator)
+	}
+
 	_updateDomStyles() {
+		// This is hacking but we currently import gui stuff from a lot of tested things
+		if (isTest()) {
+			return
+		}
 		let time = timer(Cat.css)
 		Array.from(this.styles.entries()).map((entry) => {
 			this._updateDomStyle(entry[0], entry[1])
@@ -61,7 +74,7 @@ class Styles {
 		this._getDomStyleSheet(id).textContent = toCss(styleCreator())
 	}
 
-	_getDomStyleSheet(id: string) {
+	_getDomStyleSheet(id: string): HTMLElement {
 		let styleDomElement = document.getElementById('css-' + id)
 		if (!styleDomElement) {
 			styleDomElement = document.createElement('style');
@@ -76,7 +89,11 @@ class Styles {
 		return this.bodyWidth >= size.desktop_layout_width;
 	}
 
-	isUsingBottomNavigation() {
+	isSingleColumnLayout(): boolean {
+		return this.bodyWidth < size.two_column_layout_width;
+	}
+
+	isUsingBottomNavigation(): boolean {
 		return !isAdminClient() && (client.isMobileDevice() || !this.isDesktopLayout())
 	}
 }

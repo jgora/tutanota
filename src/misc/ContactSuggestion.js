@@ -28,8 +28,8 @@ export class ContactSuggestion implements Suggestion {
 				height: px(ContactSuggestionHeight),
 			}
 		}, [
-			m("small", this.name),
-			m(".name", this.mailAddress),
+			m(".small.full-width.text-ellipsis", this.name),
+			m(".name.full-width.text-ellipsis", this.mailAddress),
 		])
 	}
 

@@ -1,72 +1,103 @@
 // @flow
-import {assertMainOrNodeBoot} from "../api/Env"
-import {themeId} from "../gui/theme"
+import {assertMainOrNodeBoot} from "../api/common/Env"
 import {client} from "./ClientDetector"
-import type {CalendarViewTypeEnum} from "../calendar/CalendarView"
 import {uint8ArrayToBase64} from "../api/common/utils/Encoding"
+import type {LanguageCode} from "./LanguageViewModel"
+import type {ThemeId} from "../gui/theme"
+import type {CalendarViewTypeEnum} from "../calendar/view/CalendarViewModel"
+import type {CredentialsStorage, PersistentCredentials} from "./credentials/CredentialsProvider"
+import {typedEntries} from "../api/common/utils/Utils"
+import {ProgrammingError} from "../api/common/error/ProgrammingError"
 
 assertMainOrNodeBoot()
 
-const ConfigVersion = 2
+const ConfigVersion = 3
 const LocalStorageKey = 'tutanotaConfig'
+
+export const defaultThemeId: ThemeId = 'light'
 
 /**
  * Device config for internal user auto login. Only one config per device is stored.
  */
-class DeviceConfig {
+export class DeviceConfig implements CredentialsStorage {
 	_version: number;
-	_credentials: Credentials[];
+	_credentials: Map<Id, PersistentCredentials>;
 	_scheduledAlarmUsers: Id[];
-	_theme: ThemeId;
-	_language: ?string;
-	_defaultCalendarView: {[uderId: Id]: ?CalendarViewTypeEnum};
+	_themeId: ThemeId;
+	_language: ?LanguageCode;
+	_defaultCalendarView: {[userId: Id]: ?CalendarViewTypeEnum};
+	_hiddenCalendars: {[userId: Id]: Id[]}
 	_signupToken: string;
 
-	/**
-	 * @param config The config to copy from
-	 */
 	constructor() {
 		this._version = ConfigVersion
 		this._load()
 	}
 
+	store(persistentCredentials: PersistentCredentials): void {
+		this._credentials.set(persistentCredentials.credentialInfo.userId, persistentCredentials)
+		this._writeToStorage()
+	}
+
+	loadByUserId(userId: Id): PersistentCredentials | null {
+		return this._credentials.get(userId) ?? null
+	}
+
+	loadAll(): Array<PersistentCredentials> {
+		return Array.from(this._credentials.values())
+	}
+
+	deleteByUserId(userId: Id): void {
+		this._credentials.delete(userId)
+		this._writeToStorage()
+	}
+
 	_load(): void {
-		this._credentials = []
+		this._credentials = new Map()
 		let loadedConfigString = client.localStorage() ? localStorage.getItem(LocalStorageKey) : null
-		let loadedConfig = loadedConfigString != null ? JSON.parse(loadedConfigString) : null
-		this._theme = (loadedConfig && loadedConfig._theme) ? loadedConfig._theme : 'light'
-		if (loadedConfig && loadedConfig._version === ConfigVersion) {
-			this._credentials = loadedConfig._credentials
+		let loadedConfig = loadedConfigString != null ? this._parseConfig(loadedConfigString) : null
+		this._themeId = defaultThemeId
+		if (loadedConfig) {
+			if (loadedConfig._themeId) {
+				this._themeId = loadedConfig._themeId
+			} else if (loadedConfig._theme) {
+				this._themeId = loadedConfig._theme
+			}
+			if (loadedConfig._version !== ConfigVersion) {
+				this._credentials = migrateCredentials(loadedConfig)
+				this._writeToStorage()
+			} else {
+				this._credentials = new Map(typedEntries(loadedConfig._credentials))
+			}
 		}
 		this._scheduledAlarmUsers = loadedConfig && loadedConfig._scheduledAlarmUsers || []
 		this._language = loadedConfig && loadedConfig._language
 		this._defaultCalendarView = loadedConfig && loadedConfig._defaultCalendarView || {}
-
+		this._hiddenCalendars = loadedConfig && loadedConfig._hiddenCalendars || {}
 		let loadedSignupToken = loadedConfig && loadedConfig._signupToken
 		if (loadedSignupToken) {
 			this._signupToken = loadedSignupToken
 		} else {
 			let bytes = new Uint8Array(6);
+			let crypto = window.crypto || window.msCrypto;
 			crypto.getRandomValues(bytes)
 			this._signupToken = uint8ArrayToBase64(bytes)
-			this._store()
+			this._writeToStorage()
+		}
+
+	}
+
+	_parseConfig(loadedConfigString: string): ?any {
+		try {
+			return JSON.parse(loadedConfigString)
+		} catch (e) {
+			console.warn("Could not parse device config")
+			return null
 		}
 	}
 
 	getSignupToken(): string {
 		return this._signupToken
-	}
-
-	getStoredAddresses(): string[] {
-		return this._credentials.map(c => c.mailAddress)
-	}
-
-	get(mailAddress: string): ?Credentials {
-		return this._credentials.find(c => c.mailAddress === mailAddress)
-	}
-
-	getByUserId(id: Id): ?Credentials {
-		return this._credentials.find(c => c.userId === id)
 	}
 
 	hasScheduledAlarmsForUser(userId: Id): boolean {
@@ -81,71 +112,47 @@ class DeviceConfig {
 		} else if (!setScheduled && scheduledSaved) {
 			this._scheduledAlarmUsers.splice(scheduledIndex, 1)
 		}
-		this._store()
+		this._writeToStorage()
 	}
 
 	setNoAlarmsScheduled() {
 		this._scheduledAlarmUsers = []
-		this._store()
+		this._writeToStorage()
 	}
 
-	getLanguage(): ?string {
+	getLanguage(): ?LanguageCode {
 		return this._language
 	}
 
-	setLanguage(language: ?string) {
+	setLanguage(language: ?LanguageCode) {
 		this._language = language
-		this._store()
+		this._writeToStorage()
 	}
 
-	set(credentials: Credentials) {
-		let index = this._credentials.findIndex(c => c.mailAddress === credentials.mailAddress)
-		if (index !== -1) {
-			this._credentials[index] = credentials
-		} else {
-			this._credentials.push(credentials)
-		}
-		this._store()
-	}
-
-	delete(mailAddress: string) {
-		this._credentials.splice(this._credentials.findIndex(c => c.mailAddress === mailAddress), 1)
-		this._store()
-	}
-
-	deleteByAccessToken(accessToken: string) {
-		this._credentials.splice(this._credentials.findIndex(c => c.accessToken === accessToken), 1)
-		this._store()
-	}
-
-	_store() {
+	_writeToStorage() {
 		try {
-			localStorage.setItem(LocalStorageKey, JSON.stringify(this))
+			localStorage.setItem(LocalStorageKey, JSON.stringify(this, (key, value) => {
+				if (key === "_credentials") {
+					return Object.fromEntries(this._credentials.entries())
+				} else {
+					return value
+				}
+			}))
 		} catch (e) {
 			// may occur in Safari < 11 in incognito mode because it throws a QuotaExceededError
+			// DOMException will occurr if all cookies are disabled
 			console.log("could not store config", e)
 		}
 	}
 
-	getAll(): Credentials[] {
-		// make a copy to avoid changes from outside influencing the local array
-		return JSON.parse(JSON.stringify(this._credentials));
-	}
-
-	getAllInternal(): Credentials[] {
-		// make a copy to avoid changes from outside influencing the local array
-		return this.getAll().filter(credential => credential.mailAddress.indexOf("@") > 0)
-	}
-
 	getTheme(): ThemeId {
-		return this._theme
+		return this._themeId
 	}
 
 	setTheme(theme: ThemeId) {
-		if (this._theme !== theme) {
-			this._theme = theme
-			themeId(theme)
-			this._store()
+		if (this._themeId !== theme) {
+			this._themeId = theme
+			this._writeToStorage()
 		}
 	}
 
@@ -156,10 +163,62 @@ class DeviceConfig {
 	setDefaultCalendarView(userId: Id, defaultView: CalendarViewTypeEnum) {
 		if (this._defaultCalendarView[userId] !== defaultView) {
 			this._defaultCalendarView[userId] = defaultView
-			this._store()
+			this._writeToStorage()
+		}
+	}
+
+	getHiddenCalendars(user: Id): Id[] {
+		return this._hiddenCalendars.hasOwnProperty(user) ? this._hiddenCalendars[user] : []
+	}
+
+	setHiddenCalendars(user: Id, calendars: Id[]) {
+		if (this._hiddenCalendars[user] !== calendars) {
+			this._hiddenCalendars[user] = calendars
+			this._writeToStorage()
 		}
 	}
 }
 
+export function migrateCredentials(loadedConfig: any): Map<Id, PersistentCredentials> {
+	if (loadedConfig === ConfigVersion) {
+		throw new ProgrammingError("Should not migrate credentials, current version")
+	}
+	if (loadedConfig._version === 2) {
+		const oldCredentialsArray = loadedConfig._credentials
+		const newCredentials = new Map<Id, PersistentCredentials>()
+		for (const oldCredential of oldCredentialsArray) {
+			let newCredential: PersistentCredentials
+			// in version 2 external users had userId as their email address
+			// We use encryption stub in this version
+			if (oldCredential.mailAddress.includes("@")) {
+				newCredential = {
+					credentialInfo: {
+						login: oldCredential.mailAddress,
+						userId: oldCredential.userId,
+						type: "internal",
+					},
+					encryptedPassword: oldCredential.encryptedPassword,
+					accessToken: oldCredential.accessToken,
+				}
+			} else {
+				newCredential = {
+					credentialInfo: {
+						login: oldCredential.userId,
+						userId: oldCredential.userId,
+						type: "external",
+					},
+					encryptedPassword: oldCredential.encryptedPassword,
+					accessToken: oldCredential.accessToken,
+				}
+			}
+			newCredentials.set(newCredential.credentialInfo.userId, newCredential)
+		}
+		return newCredentials
+	} else {
+		// Don't migrate otherwise
+		return new Map()
+	}
+}
 
-export const deviceConfig = new DeviceConfig()
+
+export const deviceConfig: DeviceConfig = new DeviceConfig()

@@ -3,13 +3,15 @@ import m from "mithril"
 import type {TranslationKey} from "../../misc/LanguageViewModel"
 import {lang} from "../../misc/LanguageViewModel"
 import {addFlash, removeFlash} from "./Flash"
-import {assertMainOrNodeBoot} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import type {lazyIcon} from "./Icon"
 import {Icon} from "./Icon"
 import {getContentButtonIconBackground, getElevatedBackground, getNavButtonIconBackground, getNavigationMenuIcon, theme} from "../theme"
 import type {NavButtonAttrs} from "./NavButtonN"
+import type {lazy} from "../../api/common/utils/Utils"
+import type {clickHandler} from "./GuiUtils"
 
-assertMainOrNodeBoot()
+assertMainOrNode()
 
 export const ButtonType = Object.freeze({
 	Action: 'action',
@@ -22,7 +24,6 @@ export const ButtonType = Object.freeze({
 	Bubble: 'bubble',
 	TextBubble: 'textBubble',
 	Toggle: 'toggle',
-	Accent: 'accent',
 	PrimaryBorder: 'primaryBorder',
 })
 export type ButtonTypeEnum = $Values<typeof ButtonType>;
@@ -36,7 +37,14 @@ export const ButtonColors = Object.freeze({
 })
 export type ButtonColorEnum = $Values<typeof ButtonColors>;
 
-export function getColors(buttonColors: ?ButtonColorEnum) {
+export function getColors(buttonColors: ?ButtonColorEnum): {|
+	border: string,
+	button: string,
+	button_icon_bg: string,
+	button_selected: string,
+	icon: string,
+	icon_selected: string,
+|} {
 	switch (buttonColors) {
 		case ButtonColors.Nav:
 			return {
@@ -91,7 +99,7 @@ export type ButtonAttrs = {
 	label: TranslationKey | lazy<string>,
 	title?: TranslationKey | lazy<string>,
 	click: clickHandler,
-	icon?: lazyIcon,
+	icon?: ?lazyIcon,
 	type?: ButtonTypeEnum,
 	colors?: ButtonColorEnum,
 	isVisible?: lazy<boolean>,
@@ -103,10 +111,10 @@ export type ButtonAttrs = {
 /**
  * A button.
  */
-class _Button {
+export class ButtonN implements MComponent<ButtonAttrs> {
 	_domButton: HTMLElement;
 
-	view(vnode: Vnode<LifecycleAttrs<ButtonAttrs>>) {
+	view(vnode: Vnode<ButtonAttrs>): Children {
 		const a = vnode.attrs
 		const type = this.getType(a.type)
 		const title = a.title !== undefined ? this.getTitle(a.title) : lang.getMaybeLazy(a.label)
@@ -124,7 +132,6 @@ class _Button {
 					: title,
 				oncreate: (vnode) => {
 					this._domButton = vnode.dom
-					a.oncreate && a.oncreate(vnode)
 				},
 				onremove: (vnode) => removeFlash(vnode.dom),
 			}, m("", {// additional wrapper for flex box styling as safari does not support flex box on buttons.
@@ -146,7 +153,7 @@ class _Button {
 		)
 	}
 
-	_getStyle(a) {
+	_getStyle(a: ButtonAttrs): {} {
 		return a.type === ButtonType.Login
 			? {
 				'border-radius': '3px',
@@ -165,11 +172,11 @@ class _Button {
 		return lang.getMaybeLazy(title)
 	}
 
-	getType(type: ?ButtonTypeEnum) {
+	getType(type: ?ButtonTypeEnum): ButtonTypeEnum {
 		return type ? type : ButtonType.Action
 	}
 
-	getIcon(a: ButtonAttrs) {
+	getIcon(a: ButtonAttrs): Children {
 		return (a.icon instanceof Function && a.icon()) ? m(Icon, {
 			icon: a.icon(),
 			class: this.getIconClass(a),
@@ -180,7 +187,7 @@ class _Button {
 		}) : null
 	}
 
-	getIconColor(a: ButtonAttrs) {
+	getIconColor(a: ButtonAttrs): string {
 		const type = this.getType(a.type)
 
 		if (type === ButtonType.Bubble) {
@@ -194,7 +201,7 @@ class _Button {
 		}
 	}
 
-	getIconBackgroundColor(a: ButtonAttrs) {
+	getIconBackgroundColor(a: ButtonAttrs): string {
 		const type = this.getType(a.type)
 		if ([ButtonType.Toggle, ButtonType.Bubble, ButtonType.Login].includes(type)) {
 			return 'initial'
@@ -207,7 +214,7 @@ class _Button {
 		}
 	}
 
-	getIconClass(a: ButtonAttrs) {
+	getIconClass(a: ButtonAttrs): string {
 		const type = this.getType(a.type)
 		if (type === ButtonType.Login) {
 			return "flex-center items-center button-icon icon-xl pr-s"
@@ -218,6 +225,8 @@ class _Button {
 			return "flex-center items-center button-icon floating icon-large"
 		} else if (a.colors === ButtonColors.Header) {
 			return "flex-end items-center button-icon icon-xl"
+		} else if (a.colors === ButtonColors.DrawerNav) {
+			return "flex-end items-end button-icon"
 		} else if (type === ButtonType.Bubble) {
 			return "pr-s"
 		} else {
@@ -225,7 +234,7 @@ class _Button {
 		}
 	}
 
-	getButtonClasses(a: ButtonAttrs) {
+	getButtonClasses(a: ButtonAttrs): Array<string> {
 		const type = this.getType(a.type)
 		let buttonClasses = ["bg-transparent"]
 		if (type === ButtonType.Floating) {
@@ -245,7 +254,7 @@ class _Button {
 		return buttonClasses
 	}
 
-	getWrapperClasses(a: ButtonAttrs) {
+	getWrapperClasses(a: ButtonAttrs): Array<string> {
 		const type = this.getType(a.type)
 		let wrapperClasses = ["button-content", "flex", "items-center", type]
 		if (![ButtonType.Floating, ButtonType.TextBubble, ButtonType.Toggle].includes(type)) {
@@ -262,7 +271,7 @@ class _Button {
 		return wrapperClasses
 	}
 
-	_getLabelElement(a: ButtonAttrs) {
+	_getLabelElement(a: ButtonAttrs): Children {
 		const type = this.getType(a.type)
 		const label = lang.getMaybeLazy(a.label)
 		if (label.trim() === '' || [ButtonType.Action, ButtonType.Floating].includes(type)) {
@@ -274,6 +283,9 @@ class _Button {
 		}
 		if (type === ButtonType.Toggle) {
 			classes.push("pr-s pb-2")
+			if (!a.icon) {
+				classes.push("pl-s")
+			}
 		}
 
 		return m("", {
@@ -282,7 +294,7 @@ class _Button {
 		}, label)
 	}
 
-	_getLabelStyle(a: ButtonAttrs) {
+	_getLabelStyle(a: ButtonAttrs): {} {
 		const type = this.getType(a.type)
 		let color
 		switch (type) {
@@ -318,12 +330,10 @@ class _Button {
 	}
 }
 
-export const ButtonN: Class<MComponent<ButtonAttrs>> = _Button
-
-export function isVisible(a: NavButtonAttrs | ButtonAttrs) {
+export function isVisible(a: NavButtonAttrs | ButtonAttrs): boolean {
 	return (typeof a.isVisible !== "function") || a.isVisible()
 }
 
-export function isSelected(a: NavButtonAttrs | ButtonAttrs) {
+export function isSelected(a: NavButtonAttrs | ButtonAttrs): boolean {
 	return typeof a.isSelected === "function" ? a.isSelected() : false
 }

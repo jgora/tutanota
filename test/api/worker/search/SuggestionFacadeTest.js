@@ -2,18 +2,19 @@
  * Created by bdeterding on 13.12.17.
  */
 // @flow
-import o from "ospec/ospec.js"
+import o from "ospec"
 import {ContactTypeRef} from "../../../../src/api/entities/tutanota/Contact"
 import {aes256RandomKey} from "../../../../src/api/worker/crypto/Aes"
 import {SuggestionFacade} from "../../../../src/api/worker/search/SuggestionFacade"
-import {SearchTermSuggestionsOS} from "../../../../src/api/worker/search/DbFacade"
 import {fixedIv} from "../../../../src/api/worker/crypto/CryptoUtils"
+import {SearchTermSuggestionsOS} from "../../../../src/api/worker/search/Indexer";
+import {downcast} from "../../../../src/api/common/utils/Utils"
 
 
 o.spec("SuggestionFacade test", () => {
 
-	var db
-	var facade
+	let db
+	let facade
 
 	o.beforeEach(function () {
 		db = {
@@ -53,7 +54,7 @@ o.spec("SuggestionFacade test", () => {
 	o("load empty", () => {
 		let transactionMock = {}
 		transactionMock.get = o.spy(() => Promise.resolve(null))
-		db.dbFacade.createTransaction = o.spy(() => Promise.resolve(transactionMock))
+		downcast(db.dbFacade).createTransaction = o.spy(() => Promise.resolve(transactionMock))
 		facade.addSuggestions(["aaaaaaa"])
 		return facade.load().then(() => {
 			o(transactionMock.get.callCount).equals(1)
@@ -67,7 +68,7 @@ o.spec("SuggestionFacade test", () => {
 		let transactionMock = {}
 		transactionMock.put = o.spy(() => Promise.resolve())
 		transactionMock.wait = o.spy(() => Promise.resolve())
-		db.dbFacade.createTransaction = o.spy(() => Promise.resolve(transactionMock))
+		downcast(db.dbFacade).createTransaction = o.spy(() => Promise.resolve(transactionMock))
 
 		facade.addSuggestions(["aaaa"])
 		return facade.store().then(() => {
@@ -80,7 +81,7 @@ o.spec("SuggestionFacade test", () => {
 			o(facade.getSuggestions("b").join(" ")).equals("bbbb")
 
 			let transactionLoadMock = {}
-			db.dbFacade.createTransaction = o.spy(() => Promise.resolve(transactionLoadMock))
+			downcast(db.dbFacade).createTransaction = o.spy(() => Promise.resolve(transactionLoadMock))
 			transactionLoadMock.get = o.spy(() => Promise.resolve(encSuggestions))
 			return facade.load().then(() => {
 				// restored

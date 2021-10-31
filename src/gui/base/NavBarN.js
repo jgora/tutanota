@@ -1,15 +1,16 @@
 // @flow
 import m from "mithril"
+import type {windowSizeListener} from "../../misc/WindowFacade"
 import {windowFacade} from "../../misc/WindowFacade"
 import {ButtonColors, isVisible} from "./ButtonN"
 import {createDropdown} from "./DropdownN.js"
-import {assertMainOrNodeBoot} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import {size} from "../size"
 import type {NavButtonAttrs} from "./NavButtonN"
 import {NavButtonN} from "./NavButtonN"
 import {BootIcons} from "./icons/BootIcons"
 
-assertMainOrNodeBoot()
+assertMainOrNode()
 
 let buttonId = 0
 
@@ -26,7 +27,7 @@ export class ButtonWrapper {
 		this.width = width
 	}
 
-	setId(id: number) {
+	setId(id: number): this {
 		this.id = id
 		return this
 	}
@@ -47,7 +48,7 @@ export type NavBarAttrs = {
 /**
  * An advanced button bar that hides buttons behind a 'more' button if they do not fit
  */
-class _NavBar {
+export class NavBarN implements MComponent<NavBarAttrs> {
 	buttonId: number;
 	buttons: ButtonWrapper[];
 	moreButtons: ButtonWrapper[]; // this button should only be visible, when the more button dropdown is visible
@@ -56,9 +57,6 @@ class _NavBar {
 	resizeListener: windowSizeListener;
 	_domNavBar: ?HTMLElement;
 
-	/**
-	 * @param buttonType determines how the buttons are displayed and how the width of each button is calculated
-	 */
 	constructor(vnode: Vnode<NavBarAttrs>) {
 		this.buttonId = 0
 		this.buttons = vnode.attrs.buttons
@@ -84,7 +82,7 @@ class _NavBar {
 		let self = this
 	}
 
-	view(vnode: Vnode<NavBarAttrs>) {
+	view(vnode: Vnode<NavBarAttrs>): Children {
 		let buttons = this.getVisibleButtons()
 		return m("nav.nav-bar.flex-end", {
 			oncreate: (vnode) => this._setDomNavBar(vnode.dom)
@@ -97,7 +95,7 @@ class _NavBar {
 		}, this.createButton(wrapper))))
 	}
 
-	createButton(wrapper) {
+	createButton(wrapper: ButtonWrapper): Children {
 		return m(NavButtonN, ((wrapper.buttonAttrs: any): NavButtonAttrs))
 	}
 
@@ -157,6 +155,3 @@ class _NavBar {
 		window.requestAnimationFrame(m.redraw)
 	}
 }
-
-
-export const NavBarN: Class<MComponent<NavBarAttrs>> = _NavBar

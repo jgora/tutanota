@@ -1,6 +1,9 @@
-import {assertMainOrNodeBoot} from "../../api/Env"
+// @flow
+import {assertMainOrNodeBoot} from "../../api/common/Env"
 
 assertMainOrNodeBoot()
+
+export type EasingFunction = (percent: number) => number;
 
 const EasingType = {
 	linear: 1,

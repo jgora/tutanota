@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {File} from "./File"
 
@@ -15,27 +17,21 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 664,
-			"since": 6,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"accountType": {
-			"name": "accountType",
 			"id": 666,
-			"since": 6,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"message": {
-			"name": "message",
 			"id": 665,
-			"since": 6,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
@@ -44,26 +40,24 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"bigLogo": {
-			"name": "bigLogo",
 			"id": 925,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": false,
 			"refType": "File",
-			"final": false
+			"dependency": null
 		},
 		"smallLogo": {
-			"name": "smallLogo",
 			"id": 924,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": false,
 			"refType": "File",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createExternalPropertiesReturn(values?: $Shape<$Exact<ExternalPropertiesReturn>>): ExternalPropertiesReturn {

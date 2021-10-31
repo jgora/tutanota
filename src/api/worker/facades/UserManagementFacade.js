@@ -1,49 +1,46 @@
 // @flow
-import {assertWorkerOrNode} from "../../Env"
+import {assertWorkerOrNode} from "../../common/Env"
 import type {GroupTypeEnum} from "../../common/TutanotaConstants"
 import {AccountType, Const, GroupType} from "../../common/TutanotaConstants"
-import {load, serviceRequestVoid} from "../EntityWorker"
+import {load, serviceRequest, serviceRequestVoid} from "../EntityWorker"
 import {GroupTypeRef} from "../../entities/sys/Group"
 import {decryptKey, encryptBytes, encryptKey, encryptString} from "../crypto/CryptoFacade"
 import {generateKeyFromPassphrase, generateRandomSalt} from "../crypto/Bcrypt"
 import {KeyLength} from "../crypto/CryptoConstants"
-import {asyncFind, neverNull} from "../../common/utils/Utils"
+import {neverNull} from "../../common/utils/Utils"
 import {createAuthVerifier} from "../crypto/CryptoUtils"
 import {createResetPasswordData} from "../../entities/sys/ResetPasswordData"
 import {HttpMethod} from "../../common/EntityFunctions"
 import {createMembershipAddData} from "../../entities/sys/MembershipAddData"
-import {GroupInfoTypeRef} from "../../entities/sys/GroupInfo"
 import {createUserDataDelete} from "../../entities/sys/UserDataDelete"
 import {aes128RandomKey} from "../crypto/Aes"
+import type {UserAccountUserData} from "../../entities/tutanota/UserAccountUserData"
 import {createUserAccountUserData} from "../../entities/tutanota/UserAccountUserData"
 import {createUserAccountCreateData} from "../../entities/tutanota/UserAccountCreateData"
 import {TutanotaService} from "../../entities/tutanota/Services"
 import {random} from "../crypto/Randomizer"
-import type {GroupManagementFacade} from "./GroupManagementFacade"
+import type {GroupManagementFacadeImpl} from "./GroupManagementFacade"
+import type {ContactFormUserData} from "../../entities/tutanota/ContactFormUserData"
 import {createContactFormUserData} from "../../entities/tutanota/ContactFormUserData"
-import type {LoginFacade, RecoverData} from "./LoginFacade"
+import type {LoginFacadeImpl, RecoverData} from "./LoginFacade"
 import type {WorkerImpl} from "../WorkerImpl"
 import {CounterFacade} from "./CounterFacade"
 import {createUpdateAdminshipData} from "../../entities/sys/UpdateAdminshipData"
 import {SysService} from "../../entities/sys/Services"
 import {generateRsaKey} from "../crypto/Rsa"
-import {createCalendarGroupData} from "../../entities/tutanota/CalendarGroupData"
 import type {User} from "../../entities/sys/User"
-import type {GroupMembership} from "../../entities/sys/GroupMembership"
-import type {UserAccountUserData} from "../../entities/tutanota/UserAccountUserData"
-import type {CalendarGroupData} from "../../entities/tutanota/CalendarGroupData"
-import type {ContactFormUserData} from "../../entities/tutanota/ContactFormUserData"
+import {SystemKeysReturnTypeRef} from "../../entities/sys/SystemKeysReturn"
 
 assertWorkerOrNode()
 
 export class UserManagementFacade {
 
 	_worker: WorkerImpl;
-	_login: LoginFacade;
-	_groupManagement: GroupManagementFacade;
+	_login: LoginFacadeImpl;
+	_groupManagement: GroupManagementFacadeImpl;
 	_counters: CounterFacade
 
-	constructor(worker: WorkerImpl, login: LoginFacade, groupManagement: GroupManagementFacade, counters: CounterFacade) {
+	constructor(worker: WorkerImpl, login: LoginFacadeImpl, groupManagement: GroupManagementFacadeImpl, counters: CounterFacade) {
 		this._worker = worker
 		this._login = login
 		this._groupManagement = groupManagement
@@ -66,38 +63,48 @@ export class UserManagementFacade {
 		})
 	}
 
-	changeAdminFlag(user: User, admin: boolean): Promise<void> {
+	async changeAdminFlag(user: User, admin: boolean): Promise<void> {
 		let adminGroupId = this._login.getGroupId(GroupType.Admin)
 		let adminGroupKey = this._login.getGroupKey(adminGroupId)
-		return load(GroupTypeRef, user.userGroup.group).then(userGroup => {
-			let userGroupKey = decryptKey(adminGroupKey, neverNull(userGroup.adminGroupEncGKey))
-			return this._getAccountGroupMembership().then(accountGroupMembership => { // accountGroupMembership is the membership in a premium, starter or free group
-				if (admin) {
-					return this._groupManagement.addUserToGroup(user, adminGroupId).then(() => {
-						// we can not use addUserToGroup here because the admin is not admin of the account group
-						let addAccountGroup = createMembershipAddData()
-						addAccountGroup.user = user._id
-						addAccountGroup.group = accountGroupMembership.group
-						addAccountGroup.symEncGKey = encryptKey(userGroupKey, decryptKey(this._login.getUserGroupKey(), accountGroupMembership.symEncGKey))
-						return serviceRequestVoid(SysService.MembershipService, HttpMethod.POST, addAccountGroup)
-					})
-				} else {
-					return this._groupManagement.removeUserFromGroup(user._id, adminGroupId).then(() => {
-						return this._groupManagement.removeUserFromGroup(user._id, accountGroupMembership.group)
-					})
-				}
-			})
-		})
+		const userGroup = await load(GroupTypeRef, user.userGroup.group)
+		let userGroupKey = decryptKey(adminGroupKey, neverNull(userGroup.adminGroupEncGKey))
+		if (admin) {
+			await this._groupManagement.addUserToGroup(user, adminGroupId)
+			if (user.accountType !== AccountType.SYSTEM) {
+				const keyData = await this._getAccountKeyData()
+				// we can not use addUserToGroup here because the admin is not admin of the account group
+				let addAccountGroup = createMembershipAddData()
+				addAccountGroup.user = user._id
+				addAccountGroup.group = keyData.group
+				addAccountGroup.symEncGKey = encryptKey(userGroupKey, decryptKey(this._login.getUserGroupKey(), keyData.symEncGKey))
+				return serviceRequestVoid(SysService.MembershipService, HttpMethod.POST, addAccountGroup)
+			}
+		} else {
+			await this._groupManagement.removeUserFromGroup(user._id, adminGroupId)
+			if (user.accountType !== AccountType.SYSTEM) {
+				const keyData = await this._getAccountKeyData()
+				return this._groupManagement.removeUserFromGroup(user._id, keyData.group)
+			}
+		}
 	}
 
-	_getAccountGroupMembership(): Promise<GroupMembership> {
-		let mailAddress = (this._login.getLoggedInUser().accountType === AccountType.PREMIUM) ? "premium@tutanota.de" : "starter@tutanota.de"
-		return asyncFind(this._login.getLoggedInUser().memberships, membership => {
-			return load(GroupInfoTypeRef, membership.groupInfo).then(groupInfo => {
-				return (groupInfo.mailAddress === mailAddress)
-			})
-		}).then(membership => {
-			return neverNull(membership)
+	/**
+	 * Get key and id of premium or starter group.
+	 * @throws Error if account type is not premium or starter
+	 *
+	 * @private
+	 */
+	_getAccountKeyData(): Promise<{group: Id, symEncGKey: Uint8Array}> {
+		return serviceRequest(SysService.SystemKeysService, HttpMethod.GET, null, SystemKeysReturnTypeRef).then((keysReturn) => {
+			const user = this._login.getLoggedInUser()
+			if (user.accountType === AccountType.PREMIUM) {
+				return {group: neverNull(keysReturn.premiumGroup), symEncGKey: keysReturn.premiumGroupKey}
+			} else if (user.accountType === AccountType.STARTER) {
+				// We don't have starterGroup on SystemKeyReturn so we hardcode it for now.
+				return {group: "JDpWrwG----0", symEncGKey: keysReturn.starterGroupKey}
+			} else {
+				throw new Error(`Trying to get keyData for user with account type ${user.accountType}`)
+			}
 		})
 	}
 
@@ -241,26 +248,6 @@ export class UserManagementFacade {
 		return userData
 	}
 
-	/**
-	 *
-	 * @param adminGroup Is not set when generating new customer, then the admin group will be the admin of the customer
-	 * @param adminGroupKey Is not set when generating calendar as normal user
-	 */
-	generateCalendarGroupData(adminGroup: ?Id, adminGroupKey: ?Aes128Key, customerGroupKey: Aes128Key, userGroupKey: Aes128Key,
-	                          name: ?string): CalendarGroupData {
-		let calendarGroupRootSessionKey = aes128RandomKey()
-		let calendarGroupInfoSessionKey = aes128RandomKey()
-		let calendarGroupKey = aes128RandomKey()
-
-		const calendarData = createCalendarGroupData()
-		calendarData.calendarEncCalendarGroupRootSessionKey = encryptKey(calendarGroupKey, calendarGroupRootSessionKey)
-		calendarData.ownerEncGroupInfoSessionKey = encryptKey(customerGroupKey, calendarGroupInfoSessionKey)
-		calendarData.userEncGroupKey = encryptKey(userGroupKey, calendarGroupKey)
-		calendarData.groupInfoEncName = name && encryptString(calendarGroupInfoSessionKey, name) || new Uint8Array([])
-		calendarData.adminEncGroupKey = adminGroupKey ? encryptKey(adminGroupKey, calendarGroupKey) : null
-		calendarData.adminGroup = adminGroup
-		return calendarData
-	}
 
 	generateContactFormUserAccountData(userGroupKey: Aes128Key, password: string): ContactFormUserData {
 		let salt = generateRandomSalt()

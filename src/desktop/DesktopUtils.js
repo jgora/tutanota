@@ -1,87 +1,32 @@
 // @flow
-import * as url from 'url'
 import path from 'path'
 import {exec, spawn} from 'child_process'
 import {promisify} from 'util'
-import fs from "fs-extra"
+import type {Rectangle} from "electron"
 import {app} from 'electron'
 import {defer} from '../api/common/utils/Utils.js'
+import {noOp} from "../api/common/utils/Utils"
+import {log} from "./DesktopLog"
+import {uint8ArrayToHex} from "../api/common/utils/Encoding"
+import {delay} from "../api/common/utils/PromiseUtils"
 import {DesktopCryptoFacade} from "./DesktopCryptoFacade"
+import {swapFilename} from "./PathUtils"
+import url from "url"
 
-export default class DesktopUtils {
+export class DesktopUtils {
 
-	/**
-	 * @param pathToConvert absolute Path to a file
-	 * @returns {string} file:// URL that can be extended with query parameters and loaded with BrowserWindow.loadURL()
-	 */
-	static pathToFileURL(pathToConvert: string): string {
-		pathToConvert = pathToConvert
-			.trim()
-			.split(path.sep)
-			.map((fragment) => encodeURIComponent(fragment))
-			.join("/")
-		const extraSlashForWindows = process.platform === "win32" && pathToConvert !== ''
-			? "/"
-			: ""
-		let urlFromPath = url.format({
-			pathname: extraSlashForWindows + pathToConvert.trim(),
-			protocol: 'file:'
-		})
+	+_fs: $Exports<"fs">
+	+_electron: $Exports<"electron">
+	+_desktopCrypto: DesktopCryptoFacade
+	+_topLevelDownloadDir: string = "tutanota"
 
-		return urlFromPath.trim()
+	constructor(fs: $Exports<"fs">, electron: $Exports<"electron">, desktopCrypto: DesktopCryptoFacade) {
+		this._fs = fs
+		this._electron = electron
+		this._desktopCrypto = desktopCrypto
 	}
 
-	/**
-	 * find the first filename not already contained in directory
-	 * ATTENTION: doesn't take concurrent access into account
-	 * there are tests for this function.
-	 * @returns {string} the basename appended with '-<first non-clashing positive number>.<ext>
-	 */
-	static nonClobberingFilename(files: Array<string>, fileName: string): string {
-		const clashingFile = files.find(f => f === fileName)
-		if (typeof clashingFile !== "string") { // all is well
-			return fileName
-		} else { // there are clashing file names
-			const ext = path.extname(fileName)
-			const basename = path.basename(fileName, ext)
-			const clashNumbers = files
-				.filter(f => f.startsWith(`${basename}-`))
-				.map(f => f.slice(0, f.length - ext.length))
-				.map(f => f.slice(basename.length + 1, f.length))
-				.map(f => !f.startsWith('0') ? parseInt(f, 10) : 0)
-				.filter(n => !isNaN(n) && n > 0)
-			const clashNumbersSet = new Set(clashNumbers)
-			clashNumbersSet.add(0)
-
-			// if a number is bigger than its index, there is room somewhere before that number
-			const firstGap = [...clashNumbersSet]
-				.sort((a, b) => a - b)
-				.find((n, i, a) => a[i + 1] > i + 1) + 1
-
-			return !isNaN(firstGap)
-				? `${basename}-${firstGap}${ext}`
-				: `${basename}-${clashNumbersSet.size}${ext}`
-		}
-	}
-
-	static looksExecutable(file: string): boolean {
-		// only windows will happily execute a just downloaded program
-		if (process.platform === 'win32') {
-			// taken from https://www.lifewire.com/list-of-executable-file-extensions-2626061
-			const ext = path.extname(file).toLowerCase().slice(1)
-			return [
-				'exe', 'bat', 'bin', 'cmd', 'com', 'cpl', 'gadget',
-				'inf', 'inx', 'ins', 'isu', 'job', 'jse', 'lnk', 'msc',
-				'msi', 'msp', 'mst', 'paf', 'pif', 'ps1', 'reg', 'rgs',
-				'scr', 'sct', 'shb', 'sct', 'shs', 'u3p', 'vb', 'vbe',
-				'vbs', 'vbscript', 'ws', 'wsf', 'wsh'
-			].includes(ext)
-		}
-
-		return false
-	}
-
-	static checkIsMailtoHandler(): Promise<boolean> {
+	checkIsMailtoHandler(): Promise<boolean> {
 		return Promise.resolve(app.isDefaultProtocolClient("mailto"))
 	}
 
@@ -89,20 +34,50 @@ export default class DesktopUtils {
 	 * open and close a file to make sure it exists
 	 * @param path: the file to touch
 	 */
-	static touch(path: string): void {
-		fs.closeSync(fs.openSync(path, 'a'))
+	touch(path: string): void {
+		this._fs.closeSync(this._fs.openSync(path, 'a'))
 	}
 
-	static registerAsMailtoHandler(tryToElevate: boolean): Promise<void> {
-		console.log("trying to register...")
+	/**
+	 * try to read a file into a DataFile. return null if it fails.
+	 * @param uriOrPath a file path or a file URI to read the data from
+	 * @returns {Promise<null|DataFile>}
+	 */
+	async readDataFile(uriOrPath: string): Promise<?DataFile> {
+		try {
+			uriOrPath = url.fileURLToPath(uriOrPath)
+		} catch (e) {
+			// the thing already was a path, or at least not an URI
+		}
+		try {
+			const data = await this._fs.promises.readFile(uriOrPath)
+			const name = path.basename(uriOrPath)
+			return {
+				_type: "DataFile",
+				data,
+				name,
+				mimeType: "application/octet-stream",
+				size: data.length,
+				id: null
+			}
+		} catch (e) {
+			return null
+		}
+
+	}
+
+	registerAsMailtoHandler(tryToElevate: boolean): Promise<void> {
+		log.debug("trying to register...")
 		switch (process.platform) {
 			case "win32":
 				return checkForAdminStatus()
 					.then((isAdmin) => {
 						if (!isAdmin && tryToElevate) {
+							// We require admin rights in windows, so we will recursively run the tutanota client with admin privileges
+							// and then call this method again at startup of the elevated app
 							return _elevateWin(process.execPath, ["-r"])
 						} else if (isAdmin) {
-							return _registerOnWin()
+							return this._registerOnWin()
 						}
 					})
 			case "darwin":
@@ -118,8 +93,8 @@ export default class DesktopUtils {
 		}
 	}
 
-	static unregisterAsMailtoHandler(tryToElevate: boolean): Promise<void> {
-		console.log("trying to unregister...")
+	unregisterAsMailtoHandler(tryToElevate: boolean): Promise<void> {
+		log.debug("trying to unregister...")
 		switch (process.platform) {
 			case "win32":
 				return checkForAdminStatus()
@@ -127,7 +102,7 @@ export default class DesktopUtils {
 						if (!isAdmin && tryToElevate) {
 							return _elevateWin(process.execPath, ["-u"])
 						} else if (isAdmin) {
-							return _unregisterOnWin()
+							return this._unregisterOnWin()
 						}
 					})
 			case "darwin":
@@ -141,6 +116,143 @@ export default class DesktopUtils {
 			default:
 				return Promise.reject(new Error(`invalid platform: ${process.platform}`))
 		}
+	}
+
+	/**
+	 * reads the lockfile and then writes the own version into the lockfile
+	 * @returns {Promise<boolean>} whether the lock was overridden by another version
+	 */
+	singleInstanceLockOverridden(): Promise<boolean> {
+		const lockfilePath = getLockFilePath()
+		return this._fs.promises.readFile(lockfilePath, 'utf8')
+		           .then(version => {
+			           return this._fs.promises.writeFile(lockfilePath, app.getVersion(), 'utf8')
+			                      .then(() => version !== app.getVersion())
+		           })
+		           .catch(() => false)
+	}
+
+	/**
+	 * checks that there's only one instance running while
+	 * allowing different versions to steal the single instance lock
+	 * from each other.
+	 *
+	 * should the lock file be unwritable/unreadable, behaves as if all
+	 * running instances have the same version, effectively restoring the
+	 * default single instance lock behaviour.
+	 *
+	 * @returns {Promise<boolean>} whether the app was successful in getting the lock
+	 */
+	makeSingleInstance(): Promise<boolean> {
+		const lockfilePath = getLockFilePath()
+		// first, put down a file in temp that contains our version.
+		// will overwrite if it already exists.
+		// errors are ignored and we fall back to a version agnostic single instance lock.
+		return this._fs.promises.writeFile(lockfilePath, app.getVersion(), 'utf8').catch(noOp)
+		           .then(() => {
+			           // try to get the lock, if there's already an instance running,
+			           // give the other instance time to see if it wants to release the lock.
+			           // if it changes the version back, it was a different version and
+			           // will terminate itself.
+			           return app.requestSingleInstanceLock()
+				           ? Promise.resolve(true)
+				           : delay(1500)
+					           .then(() => this.singleInstanceLockOverridden())
+					           .then(canStay => {
+						           if (canStay) {
+							           app.requestSingleInstanceLock()
+						           } else {
+							           app.quit()
+						           }
+						           return canStay
+					           })
+		           })
+	}
+
+	/**
+	 * calls the callback if the ready event was already fired,
+	 * registers it as an event listener otherwise
+	 * @param callback listener to call
+	 */
+	callWhenReady(callback: () => mixed): void {
+		if (app.isReady()) {
+			callback()
+		} else {
+			app.once('ready', callback)
+		}
+
+
+	}
+
+	/**
+	 * this will silently fail if we're not admin.
+	 * @param script: source of the registry script
+	 * @private
+	 */
+	_executeRegistryScript(script: string): Promise<void> {
+		const deferred = defer()
+		const file = this._writeToDisk(script)
+		spawn('reg.exe', ['import', file], {
+			stdio: ['ignore', 'inherit', 'inherit'],
+			detached: false
+		}).on('exit', (code, signal) => {
+			this._fs.unlinkSync(file)
+			if (code === 0) {
+				deferred.resolve()
+			} else {
+				deferred.reject(new Error("couldn't execute registry script"))
+			}
+		})
+		return deferred.promise
+	}
+
+	/**
+	 * Writes contents with a random file name into the directory of the executable
+	 * @param contents
+	 * @returns {string} path  to the written file
+	 * @private
+	 */
+	_writeToDisk(contents: string): string {
+		const filename = uint8ArrayToHex(this._desktopCrypto.randomBytes(12))
+		const filePath = swapFilename(process.execPath, filename)
+		this._fs.writeFileSync(filePath, contents, {encoding: 'utf-8', mode: 0o400})
+		return filePath
+	}
+
+	readJSONSync(absolutePath: string): {[string]: mixed} {
+		return JSON.parse(this._fs.readFileSync(absolutePath, {encoding: "utf8"}))
+	}
+
+	async _registerOnWin(): Promise<void> {
+		const execPath = process.execPath
+		const dllPath = swapFilename(execPath, "mapirs.dll")
+		const logPath = path.join(app.getPath('userData'), 'logs')
+		const tmpPath = this.getTutanotaTempPath('attach')
+		const tmpRegScript = (await import('./reg-templater.js')).registerKeys(
+			execPath,
+			dllPath,
+			logPath,
+			tmpPath
+		)
+		return this._executeRegistryScript(tmpRegScript)
+		           .then(() => {
+			           app.setAsDefaultProtocolClient('mailto')
+		           })
+	}
+
+	async _unregisterOnWin(): Promise<void> {
+		app.removeAsDefaultProtocolClient('mailto')
+		const tmpRegScript = (await import('./reg-templater.js')).unregisterKeys()
+		return this._executeRegistryScript(tmpRegScript)
+	}
+
+	/**
+	 * Get a path to a directory under tutanota's temporary directory. Will not create if it doesn't exist
+	 * @param subdirs
+	 * @returns {string}
+	 */
+	getTutanotaTempPath(...subdirs: string[]): string {
+		return path.join(this._electron.app.getPath("temp"), this._topLevelDownloadDir, ...subdirs)
 	}
 }
 
@@ -158,18 +270,10 @@ function checkForAdminStatus(): Promise<boolean> {
 	}
 }
 
-/**
- * Writes contents with a random file name into the directory of the executable
- * @param contents
- * @returns {*} path  to the written file
- * @private
- */
-function _writeToDisk(contents: string): string {
-	const filename = DesktopCryptoFacade.randomHexString(12)
-	console.log("Wrote file to ", filename)
-	const filePath = path.join(path.dirname(process.execPath), filename)
-	fs.writeFileSync(filePath, contents, {encoding: 'utf-8', mode: 0o400})
-	return filePath
+function getLockFilePath() {
+	// don't get temp dir path from DesktopDownloadManager because the path returned from there may be deleted at some point,
+	// we want to put the lockfile in root tmp so it persists
+	return path.join(app.getPath('temp'), 'tutanota_desktop_lockfile')
 }
 
 /**
@@ -196,39 +300,9 @@ function _elevateWin(command: string, args: Array<string>) {
 	return deferred.promise
 }
 
-/**
- * this will silently fail if we're not admin.
- * @param script: path to registry script
- * @private
- */
-function _executeRegistryScript(script: string): Promise<void> {
-	const deferred = defer()
-	const file = _writeToDisk(script)
-	spawn('reg.exe', ['import', file], {
-		stdio: ['ignore', 'inherit', 'inherit'],
-		detached: false
-	}).on('exit', (code, signal) => {
-		fs.unlinkSync(file)
-		if (code === 0) {
-			deferred.resolve()
-		} else {
-			deferred.reject(new Error("couldn't execute registry script"))
-		}
-	})
-	return deferred.promise
-}
-
-
-function _registerOnWin(): Promise<void> {
-	const tmpRegScript = require('./reg-templater.js').registerKeys(process.execPath)
-	return _executeRegistryScript(tmpRegScript)
-		.then(() => {
-			app.setAsDefaultProtocolClient('mailto')
-		})
-}
-
-function _unregisterOnWin(): Promise<void> {
-	app.removeAsDefaultProtocolClient('mailto')
-	const tmpRegScript = require('./reg-templater.js').unregisterKeys()
-	return _executeRegistryScript(tmpRegScript)
+export function isRectContainedInRect(closestRect: Rectangle, lastBounds: Rectangle): boolean {
+	return lastBounds.x >= closestRect.x - 10
+		&& lastBounds.y >= closestRect.y - 10
+		&& lastBounds.width + lastBounds.x <= closestRect.width + 10
+		&& lastBounds.height + lastBounds.y <= closestRect.height + 10
 }

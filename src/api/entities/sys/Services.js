@@ -1,6 +1,6 @@
 // @flow
 
-export const SysService = {
+export const SysService = Object.freeze({
 	SystemKeysService: "systemkeysservice",
 	MailAddressAvailabilityService: "mailaddressavailabilityservice",
 	RegistrationService: "registrationservice",
@@ -41,5 +41,8 @@ export const SysService = {
 	UpgradePriceService: "upgradepriceservice",
 	AlarmService: "alarmservice",
 	CustomDomainCheckService: "customdomaincheckservice",
-	CloseSessionService: "closesessionservice"
-}
+	CloseSessionService: "closesessionservice",
+	TakeOverDeletedAddressService: "takeoverdeletedaddressservice",
+	GiftCardService: "giftcardservice",
+	GiftCardRedeemService: "giftcardredeemservice"
+})

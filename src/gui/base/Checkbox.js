@@ -4,12 +4,12 @@ import stream from "mithril/stream/stream.js"
 import type {TranslationKey} from "../../misc/LanguageViewModel"
 import {lang} from "../../misc/LanguageViewModel"
 import {addFlash, removeFlash} from "./Flash"
-import {assertMainOrNodeBoot} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import {Icon} from "./Icon"
 import {BootIcons} from "./icons/BootIcons"
+import type {lazy} from "../../api/common/utils/Utils"
 
-assertMainOrNodeBoot()
-
+assertMainOrNode()
 
 export class Checkbox {
 	getChildren: lazy<Children>;
@@ -31,7 +31,7 @@ export class Checkbox {
 		this._disabledTextId = "emptyString_msg"
 
 
-		this.view = (): VirtualElement => {
+		this.view = (): Children => {
 			return m(".checkbox.pt" + (this.enabled ? ".click" : ".click-disabled"), {
 				onclick: (e: MouseEvent) => {
 					if (e.target !== this._domInput) {
@@ -80,6 +80,7 @@ export class Checkbox {
 	toggle(event: MouseEvent) {
 		if (this.enabled) {
 			this.checked(!this.checked())
+			m.redraw()
 			if (this._domInput) {
 				this._domInput.focus()
 			}

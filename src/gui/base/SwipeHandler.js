@@ -13,6 +13,7 @@ export class SwipeHandler {
 	startPos: {x: number, y: number};
 	touchArea: HTMLElement;
 	animating: Promise<any>;
+	isAnimating: boolean = false;
 	directionLock: ?DirectionLockEnum;
 
 	constructor(touchArea: HTMLElement) {
@@ -34,21 +35,22 @@ export class SwipeHandler {
 	move(e: TouchEvent) {
 		let {x, y} = this.getDelta(e)
 		// If we're either locked horizontally OR if we're not locked vertically but would like to lock horizontally, then lock horizontally
-		if (this.directionLock === DirectionLock.Horizontal || this.directionLock !== DirectionLock.Vertical && Math.abs(x) > Math.abs(y) && Math.abs(x) > 14) {
+		if (this.directionLock === DirectionLock.Horizontal || this.directionLock !== DirectionLock.Vertical && Math.abs(x) > Math.abs(y)
+			&& Math.abs(x) > 14) {
 			this.directionLock = DirectionLock.Horizontal
 			// Do not scroll the list
 			e.preventDefault()
-			if (this.animating.isFulfilled()) {
+			if (!this.isAnimating) {
 				this.onHorizontalDrag(x, y)
 
 			}
 			// If we don't have a vertical lock yet but we would like to have it, lock vertically
 		} else if (this.directionLock !== DirectionLock.Vertical && Math.abs(y) > Math.abs(x) && Math.abs(y) > size.list_row_height) {
 			this.directionLock = DirectionLock.Vertical
-			if (this.animating.isFulfilled()) {
+			if (!this.isAnimating) {
 				// Reset the row
 				window.requestAnimationFrame(() => {
-					if (this.animating.isFulfilled()) {
+					if (!this.isAnimating) {
 						this.reset({x, y})
 					}
 				})
@@ -62,13 +64,16 @@ export class SwipeHandler {
 
 	gestureEnd(e: TouchEvent) {
 		const delta = this.getDelta(e)
-		if (this.animating.isFulfilled() && this.directionLock === DirectionLock.Horizontal) {
+		if (!this.isAnimating && this.directionLock === DirectionLock.Horizontal) {
 			// Gesture is completed
 			this.animating = this.onHorizontalGestureCompleted(delta)
-		} else if (this.animating.isFulfilled()) {
+			this.isAnimating = true
+		} else if (!this.isAnimating) {
 			// Gesture is not completed, reset row
 			this.animating = this.reset(delta)
+			this.isAnimating = true
 		}
+		this.animating.then(() => this.isAnimating = false)
 		this.directionLock = null
 	}
 
@@ -85,7 +90,7 @@ export class SwipeHandler {
 		return Promise.resolve()
 	}
 
-	getDelta(e: any) {
+	getDelta(e: any): {|x: number, y: number|} {
 		return {
 			x: e.changedTouches[0].clientX - this.startPos.x,
 			y: e.changedTouches[0].clientY - this.startPos.y

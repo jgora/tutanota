@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {InternalRecipientKeyData} from "./InternalRecipientKeyData"
 import type {SharedGroupData} from "./SharedGroupData"
@@ -16,9 +18,7 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1003,
-			"since": 38,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -27,26 +27,24 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"internalKeyData": {
-			"name": "internalKeyData",
 			"id": 1005,
-			"since": 38,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "InternalRecipientKeyData",
-			"final": false
+			"dependency": null
 		},
 		"sharedGroupData": {
-			"name": "sharedGroupData",
 			"id": 1004,
-			"since": 38,
 			"type": "AGGREGATION",
 			"cardinality": "One",
+			"final": false,
 			"refType": "SharedGroupData",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createGroupInvitationPostData(values?: $Shape<$Exact<GroupInvitationPostData>>): GroupInvitationPostData {

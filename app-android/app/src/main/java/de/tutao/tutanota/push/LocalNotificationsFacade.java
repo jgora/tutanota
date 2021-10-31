@@ -1,6 +1,7 @@
 package de.tutao.tutanota.push;
 
 import android.annotation.TargetApi;
+import android.app.DownloadManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -16,13 +17,16 @@ import android.os.Build;
 import android.text.TextUtils;
 import android.util.Log;
 
+import androidx.annotation.ColorInt;
 import androidx.annotation.NonNull;
 import androidx.annotation.StringRes;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 
 import de.tutao.tutanota.BuildConfig;
@@ -41,7 +45,7 @@ public class LocalNotificationsFacade {
 	private static final int SUMMARY_NOTIFICATION_ID = 45;
 	private static final String PERSISTENT_NOTIFICATION_CHANNEL_ID = "service_intent";
 
-	private Context context;
+	private final Context context;
 
 	public LocalNotificationsFacade(Context context) {
 		this.context = context;
@@ -100,11 +104,12 @@ public class LocalNotificationsFacade {
 		}
 	}
 
-	public void sendEmailNotifications(String title, List<PushMessage.NotificationInfo> notificationInfos) {
+	public void sendEmailNotifications(List<PushMessage.NotificationInfo> notificationInfos) {
 		if (notificationInfos.isEmpty()) {
 			return;
 		}
 
+		String title = this.context.getString(R.string.pushNewMail_msg);
 		for (int i = 0; i < notificationInfos.size(); i++) {
 			PushMessage.NotificationInfo notificationInfo = notificationInfos.get(i);
 
@@ -121,14 +126,15 @@ public class LocalNotificationsFacade {
 
 			int notificationId = makeNotificationId(notificationInfo.getAddress());
 
-
+			@ColorInt
+			int redColor = context.getResources().getColor(R.color.red, context.getTheme());
 			NotificationCompat.Builder notificationBuilder =
 					new NotificationCompat.Builder(context, EMAIL_NOTIFICATION_CHANNEL_ID)
-							.setLights(context.getResources().getColor(R.color.red), 1000, 1000);
+							.setLights(redColor, 1000, 1000);
 			ArrayList<String> addresses = new ArrayList<>();
 			addresses.add(notificationInfo.getAddress());
 			notificationBuilder.setContentTitle(title)
-					.setColor(context.getResources().getColor(R.color.red))
+					.setColor(redColor)
 					.setContentText(notificationContent(notificationInfo.getAddress()))
 					.setNumber(counterPerAlias.counter)
 					.setSmallIcon(R.drawable.ic_status)
@@ -144,6 +150,32 @@ public class LocalNotificationsFacade {
 
 		sendSummaryNotification(getNotificationManager(), title,
 				notificationInfos.get(0), true);
+	}
+
+	@TargetApi(Build.VERSION_CODES.Q)
+	public void sendDownloadFinishedNotification(String fileName) {
+		NotificationManagerCompat notificationManager = NotificationManagerCompat.from(this.context);
+		NotificationChannel channel = new NotificationChannel(
+				"downloads",
+				"Downloads",
+				NotificationManager.IMPORTANCE_DEFAULT
+		);
+		notificationManager.createNotificationChannel(channel);
+
+		PendingIntent pendingIntent = PendingIntent.getActivity(
+				this.context,
+				/*requestCode*/1,
+				new Intent(DownloadManager.ACTION_VIEW_DOWNLOADS),
+				/*flags*/PendingIntent.FLAG_IMMUTABLE
+		);
+		Notification notification = new Notification.Builder(this.context, channel.getId())
+				.setContentIntent(pendingIntent)
+				.setContentTitle(fileName)
+				.setContentText(context.getText(R.string.downloadCompleted_msg))
+				.setSmallIcon(R.drawable.ic_download)
+				.setAutoCancel(true)
+				.build();
+		notificationManager.notify(makeNotificationId("downloads"), notification);
 	}
 
 	private void sendSummaryNotification(NotificationManager notificationManager,
@@ -166,12 +198,14 @@ public class LocalNotificationsFacade {
 		NotificationCompat.Builder builder = new NotificationCompat.Builder(context, EMAIL_NOTIFICATION_CHANNEL_ID)
 				.setBadgeIconType(NotificationCompat.BADGE_ICON_SMALL);
 
+		@ColorInt
+		int red = context.getResources().getColor(R.color.red, context.getTheme());
 		Notification notification = builder.setContentTitle(title)
 				.setContentText(notificationContent(notificationInfo.getAddress()))
 				.setSmallIcon(R.drawable.ic_status)
 				.setGroup(NOTIFICATION_EMAIL_GROUP)
 				.setGroupSummary(true)
-				.setColor(context.getResources().getColor(R.color.red))
+				.setColor(red)
 				.setNumber(summaryCounter)
 				.setStyle(inboxStyle)
 				.setContentIntent(intentOpenMailbox(notificationInfo, true))
@@ -213,25 +247,25 @@ public class LocalNotificationsFacade {
 
 	@TargetApi(Build.VERSION_CODES.O)
 	public void createNotificationChannels() {
-		NotificationChannel notificationsChannel = new NotificationChannel(
+		NotificationChannel mailNotificationChannel = new NotificationChannel(
 				EMAIL_NOTIFICATION_CHANNEL_ID,
-				context.getString(R.string.notificationSync_msg),
+				context.getString(R.string.pushNewMail_msg),
 				NotificationManager.IMPORTANCE_DEFAULT);
-		notificationsChannel.setShowBadge(true);
+		mailNotificationChannel.setShowBadge(true);
 		Uri ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
 		AudioAttributes att = new AudioAttributes.Builder()
 				.setUsage(AudioAttributes.USAGE_NOTIFICATION)
 				.setContentType(AudioAttributes.CONTENT_TYPE_UNKNOWN)
 				.build();
-		notificationsChannel.setSound(ringtoneUri, att);
-		notificationsChannel.setVibrationPattern(VIBRATION_PATTERN);
-		notificationsChannel.enableLights(true);
-		notificationsChannel.setLightColor(Color.RED);
-		notificationsChannel.setShowBadge(true);
-		getNotificationManager().createNotificationChannel(notificationsChannel);
+		mailNotificationChannel.setSound(ringtoneUri, att);
+		mailNotificationChannel.setVibrationPattern(VIBRATION_PATTERN);
+		mailNotificationChannel.enableLights(true);
+		mailNotificationChannel.setLightColor(Color.RED);
+		mailNotificationChannel.setShowBadge(true);
+		getNotificationManager().createNotificationChannel(mailNotificationChannel);
 
 		NotificationChannel serviceNotificationChannel = new NotificationChannel(
-				PERSISTENT_NOTIFICATION_CHANNEL_ID, "Notification service",
+				PERSISTENT_NOTIFICATION_CHANNEL_ID, context.getString(R.string.notificationSync_msg),
 				NotificationManager.IMPORTANCE_LOW);
 		getNotificationManager().createNotificationChannel(serviceNotificationChannel);
 
@@ -251,7 +285,7 @@ public class LocalNotificationsFacade {
 
 	@NonNull
 	private String notificationContent(String address) {
-		return aliasNotification.get(address).counter + " " + address;
+		return Objects.requireNonNull(aliasNotification.get(address)).counter + " " + address;
 	}
 
 	private int makeNotificationId(String address) {
@@ -299,13 +333,15 @@ public class LocalNotificationsFacade {
 	public static void showAlarmNotification(Context context, long when, String summary, Intent intent) {
 		String contentText = String.format("%tR %s", when, summary);
 		NotificationManager notificationManager = (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
+		@ColorInt
+		int red = context.getResources().getColor(R.color.red, context.getTheme());
 		notificationManager.notify((int) System.currentTimeMillis(),
 				new NotificationCompat.Builder(context, ALARM_NOTIFICATION_CHANNEL_ID)
 						.setSmallIcon(R.drawable.ic_status)
 						.setContentTitle(context.getString(R.string.reminder_label))
 						.setContentText(contentText)
 						.setDefaults(NotificationCompat.DEFAULT_ALL)
-						.setColor(context.getResources().getColor(R.color.red))
+						.setColor(red)
 						.setContentIntent(openCalendarIntent(context, intent))
 						.setAutoCancel(true)
 						.build());

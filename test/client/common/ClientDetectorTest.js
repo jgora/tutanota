@@ -1,7 +1,7 @@
 //@flow
-import o from "ospec/ospec.js"
+import o from "ospec"
 import {client} from "../../../src/misc/ClientDetector"
-import {Mode} from "../../../src/api/Env"
+import {Mode} from "../../../src/api/common/Env"
 import {BrowserType, DeviceType} from "../../../src/misc/ClientConstants"
 
 o.spec("ClientDetector test", function () {
@@ -31,38 +31,6 @@ o.spec("ClientDetector test", function () {
 		client.init("Mozilla/5.0 (X11 Ubuntu Linux x86_64 rv:17.0) Gecko/17.0 Firefox/17.0", "Linux")
 		o(client.browser).equals(BrowserType.FIREFOX)
 		o(client.browserVersion).equals(17)
-		o(client.device).equals(DeviceType.DESKTOP)
-		o(client.isMobileDevice()).equals(false)
-	})
-
-	o("ClientDetector detect palemoon firefox compat mode", () => {
-		client.init("Mozilla/5.0 (X11; Linux x86_64; rv:60.9) Gecko/20100101 Goanna/4.1 Firefox/60.9 PaleMoon/28.2.2", "Linux")
-		o(client.browser).equals(BrowserType.PALEMOON)
-		o(client.browserVersion).equals(28.2)
-		o(client.device).equals(DeviceType.DESKTOP)
-		o(client.isMobileDevice()).equals(false)
-	})
-
-	o("ClientDetector detect palemoon native mode", () => {
-		client.init("Mozilla/5.0 (X11; Linux x86_64; rv:60.9) Goanna/4.1 PaleMoon/28.2.2", "Linux")
-		o(client.browser).equals(BrowserType.PALEMOON)
-		o(client.browserVersion).equals(28.2)
-		o(client.device).equals(DeviceType.DESKTOP)
-		o(client.isMobileDevice()).equals(false)
-	})
-
-	o("ClientDetector detect palemoon gecko compat mode", () => {
-		client.init("Mozilla/5.0 (X11; Linux x86_64; rv:60.9) Gecko/20100101 Goanna/4.1 PaleMoon/28.2.2", "Linux")
-		o(client.browser).equals(BrowserType.PALEMOON)
-		o(client.browserVersion).equals(28.2)
-		o(client.device).equals(DeviceType.DESKTOP)
-		o(client.isMobileDevice()).equals(false)
-	})
-
-	o("ClientDetector detects Waterfox", () => {
-		client.init("Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:65.0) Gecko/20100101 Firefox/65.0 Waterfox/56.2.7", "Windows")
-		o(client.browser).equals(BrowserType.WATERFOX)
-		o(client.browserVersion).equals(56.2)
 		o(client.device).equals(DeviceType.DESKTOP)
 		o(client.isMobileDevice()).equals(false)
 	})
@@ -277,22 +245,6 @@ o.spec("ClientDetector test", function () {
 		o(client.isMobileDevice()).equals(true)
 	})
 
-	o("ClientDetector detect windows phone 8.0", () => {
-		client.init("Mozilla/5.0 (compatible MSIE 10.0 Windows Phone 8.0 Trident/6.0 IEMobile/10.0 ARM Touch Microsoft Virtual)", "Linux")
-		o(client.browser).equals(BrowserType.IE)
-		o(client.browserVersion).equals(10)
-		o(client.device).equals(DeviceType.WINDOWS_PHONE)
-		o(client.isMobileDevice()).equals(true)
-	})
-
-	o("ClientDetector detect windows phone 7.5", () => {
-		client.init("Mozilla/5.0 (compatible MSIE 9.0 Windows Phone OS 7.5 Trident/5.0 IEMobile/9.0)", "Linux")
-		o(client.browser).equals(BrowserType.IE)
-		o(client.browserVersion).equals(9)
-		o(client.device).equals(DeviceType.WINDOWS_PHONE)
-		o(client.isMobileDevice()).equals(true)
-	})
-
 	o("ClientDetector detect chrome 34 on iphone", () => {
 		client.init("Mozilla/5.0 (iPhone CPU iPhone OS 7_0_2 like Mac OS X) AppleWebKit/537.51.1 (KHTML, like Gecko) CriOS/34.0.1847.18 Mobile/11A501 Safari/9537.53", "Linux")
 		o(client.browser).equals(BrowserType.CHROME)
@@ -301,105 +253,67 @@ o.spec("ClientDetector test", function () {
 		o(client.isMobileDevice()).equals(true)
 	})
 
-	o("ClientDetector the android 4 in app mode supported", () => {
-		env.mode = Mode.App
-		client.init("Mozilla/5.0 (Linux U Android 4.0, de-de HTC_Desire_X Build/JRO03C) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30", "Linux")
-		o(client.browser).equals(BrowserType.ANDROID)
-		o(client.browserVersion).equals(4)
-		o(client.device).equals(DeviceType.ANDROID)
-		o(client.isMobileDevice()).equals(true)
-		env.mode = Mode.Browser
-	})
+	o.spec("app", function() {
+		let prevMode
+		o.before(function() {
+			prevMode = env.mode
+			env.mode = Mode.App
+		})
+		o.after(function() {
+			env.mode = prevMode
+		})
 
-	o("ClientDetector the android 3 in app mode not supported", () => {
-		env.mode = Mode.App
-		client.init("Mozilla/5.0 (Linux U Android 4.0, de-de HTC_Desire_X Build/JRO03C) AppleWebKit/534.30 (KHTML, like Gecko) Version/3.9 Mobile Safari/534.30", "Linux")
-		o(client.browser).equals(BrowserType.ANDROID)
-		o(client.browserVersion).equals(4)
-		o(client.device).equals(DeviceType.ANDROID)
-		o(client.isMobileDevice()).equals(true)
-		env.mode = Mode.Browser
-	})
+		o("ClientDetector the android 4 in app mode supported", () => {
+			client.init("Mozilla/5.0 (Linux U Android 4.0, de-de HTC_Desire_X Build/JRO03C) AppleWebKit/534.30 (KHTML, like Gecko) Version/4.0 Mobile Safari/534.30", "Linux")
+			o(client.browser).equals(BrowserType.ANDROID)
+			o(client.browserVersion).equals(4)
+			o(client.device).equals(DeviceType.ANDROID)
+			o(client.isMobileDevice()).equals(true)
+		})
 
-	o("ClientDetector apps on ios are supported", () => {
-		env.mode = Mode.App
-		client.init("Mozilla/5.0 (iPhone CPU iPhone OS 7_0_2 like Mac OS X) AppleWebKit", "Linux")
-		o(client.browser).equals(BrowserType.SAFARI)
-		o(client.browserVersion).equals(7)
-		o(client.device).equals(DeviceType.IPHONE)
-		o(client.isMobileDevice()).equals(true)
-		env.mode = Mode.Browser
-	})
+		o("ClientDetector the android 3 in app mode not supported", () => {
+			client.init("Mozilla/5.0 (Linux U Android 4.0, de-de HTC_Desire_X Build/JRO03C) AppleWebKit/534.30 (KHTML, like Gecko) Version/3.9 Mobile Safari/534.30", "Linux")
+			o(client.browser).equals(BrowserType.ANDROID)
+			o(client.browserVersion).equals(4)
+			o(client.device).equals(DeviceType.ANDROID)
+			o(client.isMobileDevice()).equals(true)
+		})
 
-	o("ClientDetector blackberry browser are supported", () => {
-		env.mode = Mode.App
-		client.init("Mozilla/5.0 (BB10 Touch) AppleWebKit/537.35+ (KHTML, like Gecko) Version/10.2.1.3247 Mobile Safari/537.35+", "Linux")
-		o(client.browser).equals(BrowserType.BB)
-		o(client.browserVersion).equals(10)
-		o(client.device).equals(DeviceType.BB)
-		o(client.isMobileDevice()).equals(true)
-		env.mode = Mode.Browser
-	})
+		o("ClientDetector apps on ios are supported", () => {
+			client.init("Mozilla/5.0 (iPhone CPU iPhone OS 7_0_2 like Mac OS X) AppleWebKit", "Linux")
+			o(client.browser).equals(BrowserType.SAFARI)
+			o(client.browserVersion).equals(7)
+			o(client.device).equals(DeviceType.IPHONE)
+			o(client.isMobileDevice()).equals(true)
+		})
 
-	o("ClientDetector iceweasel browser are supported", () => {
-		env.mode = Mode.App
-		client.init("Mozilla/5.0 (X11 Linux x86_64 rv:37.0)  Gecko/20100101 Iceweasel/37.0.1", "Linux")
-		o(client.browser).equals(BrowserType.FIREFOX)
-		o(client.browserVersion).equals(37)
-		o(client.device).equals(DeviceType.DESKTOP)
-		o(client.isMobileDevice()).equals(false)
-		env.mode = Mode.Browser
-	})
+		o("ClientDetector iceweasel browser are supported", () => {
+			client.init("Mozilla/5.0 (X11 Linux x86_64 rv:37.0)  Gecko/20100101 Iceweasel/37.0.1", "Linux")
+			o(client.browser).equals(BrowserType.FIREFOX)
+			o(client.browserVersion).equals(37)
+			o(client.device).equals(DeviceType.DESKTOP)
+			o(client.isMobileDevice()).equals(false)
+		})
 
-	o("ClientDetector ubuntu phone is supported", () => {
-		env.mode = Mode.App
-		client.init("Mozilla/5.0 (Ubuntu Mobile) WebKit/537.21", "Linux")
-		o(client.browser).equals(BrowserType.UBUNTU)
-		o(client.browserVersion).equals(1)
-		o(client.device).equals(DeviceType.OTHER_MOBILE)
-		o(client.isMobileDevice()).equals(true)
-		env.mode = Mode.Browser
-	})
+		o("ClientDetector firefox os is supported", () => {
+			env.mode = Mode.App
+			client.init("Mozilla/5.0 (Mobile rv:26.0) Gecko/26.0 Firefox/26.0", "Linux")
+			o(client.browser).equals(BrowserType.FIREFOX)
+			o(client.browserVersion).equals(26)
+			o(client.device).equals(DeviceType.OTHER_MOBILE)
+			o(client.isMobileDevice()).equals(true)
+			env.mode = Mode.Browser
+		})
 
-	o("ClientDetector ubuntu tablet is supported", () => {
-		env.mode = Mode.App
-		client.init("Mozilla/5.0 (Ubuntu Tablet) WebKit/537.21", "Linux")
-		o(client.browser).equals(BrowserType.UBUNTU)
-		o(client.browserVersion).equals(1)
-		o(client.device).equals(DeviceType.OTHER_MOBILE)
-		o(client.isMobileDevice()).equals(true)
-		env.mode = Mode.Browser
-	})
-
-	o("ClientDetector ubuntu phone (like Android) is supported", () => {
-		env.mode = Mode.App
-		client.init("Mozilla/5.0 (Linux Ubuntu 14.04 like Android 4.4) AppleWebKit/537.36 Chromium/35.0.1870.2 Mobile Safari/537.36", "Linux")
-		o(client.browser).equals(BrowserType.UBUNTU)
-		o(client.browserVersion).equals(14)
-		o(client.device).equals(DeviceType.OTHER_MOBILE)
-		o(client.isMobileDevice()).equals(true)
-		env.mode = Mode.Browser
-	})
-
-
-	o("ClientDetector firefox os is supported", () => {
-		env.mode = Mode.App
-		client.init("Mozilla/5.0 (Mobile rv:26.0) Gecko/26.0 Firefox/26.0", "Linux")
-		o(client.browser).equals(BrowserType.FIREFOX)
-		o(client.browserVersion).equals(26)
-		o(client.device).equals(DeviceType.OTHER_MOBILE)
-		o(client.isMobileDevice()).equals(true)
-		env.mode = Mode.Browser
-	})
-
-	o("ClientDetector firefox os tablet is supported", () => {
-		env.mode = Mode.App
-		client.init("Mozilla/5.0 (Tablet rv:26.0) Gecko/26.0 Firefox/26.0", "Linux")
-		o(client.browser).equals(BrowserType.FIREFOX)
-		o(client.browserVersion).equals(26)
-		o(client.device).equals(DeviceType.OTHER_MOBILE)
-		o(client.isMobileDevice()).equals(true)
-		env.mode = Mode.Browser
+		o("ClientDetector firefox os tablet is supported", () => {
+			env.mode = Mode.App
+			client.init("Mozilla/5.0 (Tablet rv:26.0) Gecko/26.0 Firefox/26.0", "Linux")
+			o(client.browser).equals(BrowserType.FIREFOX)
+			o(client.browserVersion).equals(26)
+			o(client.device).equals(DeviceType.OTHER_MOBILE)
+			o(client.isMobileDevice()).equals(true)
+			env.mode = Mode.Browser
+		})
 	})
 
 	o("old Chrome is not supported", function () {
@@ -407,8 +321,14 @@ o.spec("ClientDetector test", function () {
 		o(client.isSupportedBrowserVersion()).equals(false)
 	})
 
+	o("Chrome 55 is not supported", function () {
+		client.init("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/55.0.2062.120 Safari/537.36", "Linux")
+		o(client.isSupportedBrowserVersion()).equals(false)
+	})
+
+
 	o("newer Chrome is supported", function () {
-		client.init("Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/38.0.2125.104 Safari/537.36", "Linux")
+		client.init("Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2125.104 Safari/537.36", "Linux")
 		o(client.isSupportedBrowserVersion()).equals(true)
 	})
 

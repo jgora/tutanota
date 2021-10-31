@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {CustomerAccountPosting} from "./CustomerAccountPosting"
 
@@ -15,46 +17,46 @@ export const _TypeModel: TypeModel = {
 	"encrypted": true,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 87,
-			"since": 3,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"_ownerGroup": {
-			"name": "_ownerGroup",
 			"id": 88,
-			"since": 3,
 			"type": "GeneratedId",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerPublicEncSessionKey": {
-			"name": "_ownerPublicEncSessionKey",
 			"id": 89,
-			"since": 3,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": true,
+			"encrypted": false
+		},
+		"outstandingBookingsPrice": {
+			"id": 92,
+			"type": "Number",
+			"cardinality": "One",
+			"final": false,
 			"encrypted": false
 		}
 	},
 	"associations": {
 		"postings": {
-			"name": "postings",
 			"id": 90,
-			"since": 3,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "CustomerAccountPosting",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "accounting",
-	"version": "3"
+	"version": "4"
 }
 
 export function createCustomerAccountReturn(values?: $Shape<$Exact<CustomerAccountReturn>>): CustomerAccountReturn {
@@ -68,6 +70,7 @@ export type CustomerAccountReturn = {
 	_format: NumberString;
 	_ownerGroup: ?Id;
 	_ownerPublicEncSessionKey: ?Uint8Array;
+	outstandingBookingsPrice: NumberString;
 
 	postings: CustomerAccountPosting[];
 }

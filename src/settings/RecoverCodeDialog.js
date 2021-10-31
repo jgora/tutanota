@@ -2,16 +2,17 @@
 
 import {lang} from "../misc/LanguageViewModel"
 import stream from "mithril/stream/stream.js"
-import {showProgressDialog} from "../gui/base/ProgressDialog"
+import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
 import {Dialog, DialogType} from "../gui/base/Dialog"
 import {neverNull} from "../api/common/utils/Utils"
 import m from "mithril"
 import {worker} from "../api/main/WorkerClient"
-import {assertMainOrNode, isApp} from "../api/Env"
+import {assertMainOrNode, isApp} from "../api/common/Env"
 import {Icons} from "../gui/base/icons/Icons"
 import {copyToClipboard} from "../misc/ClipboardUtils"
 import {ButtonN} from "../gui/base/ButtonN"
 import {AccessBlockedError, NotAuthenticatedError} from "../api/common/error/RestError"
+import {ofClass} from "../api/common/utils/PromiseUtils"
 
 type Action = 'get' | 'create'
 
@@ -21,14 +22,14 @@ export function showRecoverCodeDialogAfterPasswordVerification(action: Action, s
 	const errorMessage: Stream<string> = stream(lang.get("emptyString_msg"))
 	Dialog.showRequestPasswordDialog(errorMessage)
 	      .map(pw => showProgressDialog("loading_msg", action === 'get'
-		      ? worker.getRecoveryCode(pw)
-		      : worker.createRecoveryCode(pw))
+		      ? worker.loginFacade.getRecoverCode(pw)
+		      : worker.loginFacade.createRecoveryCode(pw))
 		      .then(recoverCode => {
 			      errorMessage("")
 			      showRecoverCodeDialog(recoverCode, showMessage)
 		      })
-		      .catch(NotAuthenticatedError, () => errorMessage(lang.get("invalidPassword_msg")))
-		      .catch(AccessBlockedError, () => errorMessage(lang.get("tooManyAttempts_msg")))
+		      .catch(ofClass(NotAuthenticatedError, () => errorMessage(lang.get("invalidPassword_msg"))))
+		      .catch(ofClass(AccessBlockedError, () => errorMessage(lang.get("tooManyAttempts_msg"))))
 	      )
 }
 
@@ -58,7 +59,7 @@ export type RecoverCodeFieldAttrs = {
 }
 
 export class RecoverCodeField {
-	view(vnode: Vnode<RecoverCodeFieldAttrs>) {
+	view(vnode: Vnode<RecoverCodeFieldAttrs>): Children {
 		const lnk = lang.getInfoLink("recoverCode_link")
 		return [
 			vnode.attrs.showMessage
@@ -75,7 +76,7 @@ export class RecoverCodeField {
 			m(".flex.flex-end.mt-m", [
 				m(ButtonN, {
 					label: "copy_action",
-					icon: () => Icons.Copy,
+					icon: () => Icons.Clipboard,
 					click: () => copyToClipboard(vnode.attrs.recoverCode)
 				}),
 				isApp() || typeof window.print !== 'function' ? null : m(ButtonN, {

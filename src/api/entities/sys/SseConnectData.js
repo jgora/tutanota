@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {GeneratedIdWrapper} from "./GeneratedIdWrapper"
 
@@ -15,18 +17,14 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1353,
-			"since": 32,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"identifier": {
-			"name": "identifier",
 			"id": 1354,
-			"since": 32,
 			"type": "String",
 			"cardinality": "One",
 			"final": true,
@@ -35,17 +33,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"userIds": {
-			"name": "userIds",
 			"id": 1355,
-			"since": 32,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "GeneratedIdWrapper",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createSseConnectData(values?: $Shape<$Exact<SseConnectData>>): SseConnectData {

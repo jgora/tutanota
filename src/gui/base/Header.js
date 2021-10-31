@@ -3,7 +3,7 @@ import m from "mithril"
 import {NavBar} from "./NavBar"
 import {NavButtonColors, NavButtonN} from "./NavButtonN"
 import {styles} from "../styles"
-import {asyncImport, neverNull} from "../../api/common/utils/Utils"
+import {neverNull} from "../../api/common/utils/Utils"
 import type {Shortcut} from "../../misc/KeyManager"
 import {keyManager} from "../../misc/KeyManager"
 import {lang} from "../../misc/LanguageViewModel"
@@ -11,33 +11,36 @@ import {logins} from "../../api/main/LoginController"
 import {theme} from "../theme"
 import {FeatureType, Keys} from "../../api/common/TutanotaConstants"
 import {px, size as sizes} from "../size"
-import {assertMainOrNodeBoot, isDesktop} from "../../api/Env"
+import {assertMainOrNode, isDesktop} from "../../api/common/Env"
 import {BootIcons} from "./icons/BootIcons"
 import type {SearchBar} from "../../search/SearchBar"
 import type {MainLocatorType} from "../../api/main/MainLocator"
-import type {WorkerClient} from "../../api/main/WorkerClient";
 import {client} from "../../misc/ClientDetector"
 import {CALENDAR_PREFIX, CONTACTS_PREFIX, MAIL_PREFIX, navButtonRoutes, SEARCH_PREFIX} from "../../misc/RouteChange"
-import {AriaLandmarks, landmarkAttrs} from "../../api/common/utils/AriaUtils"
+import {AriaLandmarks, landmarkAttrs} from "../AriaUtils"
+import type {ProgressTracker} from "../../api/main/ProgressTracker"
+import type {ViewSlider} from "./ViewSlider"
 
 const LogoutPath = '/login?noAutoLogin=true'
-export const LogoutUrl = location.hash.startsWith("#mail")
+export const LogoutUrl: string = location.hash.startsWith("#mail")
 	? "/ext?noAutoLogin=true" + location.hash
-	: isDesktop()
-		? '?r=' + encodeURIComponent(LogoutPath)
-		: LogoutPath
+	: LogoutPath
 
-assertMainOrNodeBoot()
+assertMainOrNode()
 
-export interface CurrentView extends Component {
+export interface CurrentView extends MComponent<void> {
 	+headerView?: () => Children;
 	+headerRightView?: () => Children;
-	+getViewSlider?: () => ?IViewSlider;
+	+getViewSlider?: () => ?ViewSlider;
 	/** @return true if view handled press itself */
 	+handleBackButton?: () => boolean;
 	/** @return true if "back/up" icon should be shown, false if menu icon */
 	+overrideBackIcon?: () => boolean;
 }
+
+const PROGRESS_HIDDEN = -1
+const PROGRESS_DONE = 1
+
 
 class Header {
 	view: Function;
@@ -47,47 +50,74 @@ class Header {
 	_shortcuts: Shortcut[];
 	searchBar: ?SearchBar
 	_wsState: WsConnectionState = "terminated"
+	_loadingProgress: number = PROGRESS_HIDDEN
 
 	constructor() {
 		this._currentView = null
 		this._setupShortcuts()
 
-		this.view = (): VirtualElement => {
+		this.view = (): Children => {
 			// Do not return undefined if headerView is not present
 			const injectedView = this._currentView && this._currentView.headerView ?
 				this._currentView.headerView() : null
-			return m(".header-nav.overflow-hidden", [this._connectionIndicator()].concat(injectedView || [
-				m(".header-left.pl-l.ml-negative-s.flex-start.items-center.overflow-hidden", {
-					style: styles.isUsingBottomNavigation() ? {'margin-left': px(-15)} : null  // manual margin to align the hamburger icon on mobile devices
-				}, this._getLeftElements()),
-				(styles.isUsingBottomNavigation() ? this._getCenterContent() : null),
-				styles.isUsingBottomNavigation()
-					? m(".header-right.pr-s.flex-end.items-center",
-					this._currentView && this._currentView.headerRightView ? this._currentView.headerRightView() : null)
-					: m(".header-right.pr-l.mr-negative-m.flex-end.items-center", [
-						this._renderDesktopSearchBar(),
-						m(NavBar, this._renderButtons(isNotSignup()))
-					])
-			]))
+			return m(".header-nav.overflow-hidden.flex.items-end.flex-center", [
+				m(".abs.full-width",
+					this._connectionIndicator() || this._entityEventProgress())
+			].concat(injectedView
+				? m(".flex-grow", injectedView)
+				: [
+					m(".header-left.pl-l.ml-negative-s.flex-start.items-center.overflow-hidden", {
+						style: styles.isUsingBottomNavigation() ? {'margin-left': px(-15)} : null  // manual margin to align the hamburger icon on mobile devices
+					}, this._getLeftElements()),
+					(styles.isUsingBottomNavigation() ? this._getCenterContent() : null),
+					styles.isUsingBottomNavigation()
+						? m(".header-right.pr-s.flex-end.items-center",
+						this._currentView && this._currentView.headerRightView ? this._currentView.headerRightView() : null)
+						: m(".header-right.pr-l.mr-negative-m.flex-end.items-center", [
+							this._renderDesktopSearchBar(),
+							m(NavBar, this._renderButtons())
+						])
+				]))
 		}
 
-		asyncImport(typeof module !== "undefined" ?
-			module.id : __moduleName, `${env.rootPathPrefix}src/search/SearchBar.js`)
-			.then((searchBarModule) => {
-				this.searchBar = new searchBarModule.SearchBar()
-			})
 
-		asyncImport(typeof module !== "undefined" ?
-			module.id : __moduleName, `${env.rootPathPrefix}src/api/main/WorkerClient.js`)
-			.then(workerClientModule => {
-				(workerClientModule.worker: WorkerClient).wsConnection().map(state => {
-					this._wsState = state
-					m.redraw()
+		// load worker and search bar one after another because search bar uses worker.
+		import("../../api/main/MainLocator")
+			.then((locatorModule) => {
+				return locatorModule.locator.initializedWorker.then((worker) => {
+					worker.wsConnection().map(state => {
+						this._wsState = state
+						m.redraw()
+					})
+					worker.initialized.then(() => {
+						import('../../search/SearchBar.js')
+							.then((searchBarModule) => {
+								this.searchBar = new searchBarModule.SearchBar()
+							})
+
+						const progressTracker: ProgressTracker = locatorModule.locator.progressTracker
+						if (progressTracker.totalWork() !== 0) {
+							this._loadingProgress = progressTracker.completedAmount()
+						}
+						progressTracker.onProgressUpdate.map(amount => {
+							if (this._loadingProgress !== amount) {
+								this._loadingProgress = amount
+								m.redraw()
+								if (this._loadingProgress >= PROGRESS_DONE) {
+									// progress is done but we still want to finish the complete animation and then dismiss the progress bar.
+									setTimeout(() => {
+										this._loadingProgress = PROGRESS_HIDDEN
+										m.redraw()
+									}, 500)
+								}
+							}
+						})
+					})
 				})
 			})
 	}
 
-	_renderDesktopSearchBar() {
+	_renderDesktopSearchBar(): Children {
 		return this.searchBar && this._desktopSearchBarVisible()
 			? m(this.searchBar, {
 				spacer: true,
@@ -101,39 +131,38 @@ class Header {
 		viewSlider && viewSlider.getMainColumn().focus()
 	}
 
-	_renderButtons(isNotSignup: boolean): Children {
+	_renderButtons(): Children {
 		// We assign click listeners to buttons to move focus correctly if the view is already open
-		return [
-			isNotSignup && logins.isInternalUserLoggedIn()
-				? m(NavButtonN, {
+		return logins.isInternalUserLoggedIn() && isNotSignup()
+			? [
+				m(NavButtonN, {
 					label: 'emails_label',
 					icon: () => BootIcons.Mail,
 					href: navButtonRoutes.mailUrl,
 					isSelectedPrefix: MAIL_PREFIX,
 					colors: NavButtonColors.Header,
 					click: () => m.route.get() === navButtonRoutes.mailUrl && this._focusMain()
-				})
-				: null,
-			isNotSignup && logins.isInternalUserLoggedIn() && !logins.isEnabled(FeatureType.DisableContacts)
-				? m(NavButtonN, {
-					label: 'contacts_label',
-					icon: () => BootIcons.Contacts,
-					href: navButtonRoutes.contactsUrl,
-					isSelectedPrefix: CONTACTS_PREFIX,
-					colors: NavButtonColors.Header,
-					click: () => m.route.get() === navButtonRoutes.contactsUrl && this._focusMain()
-				})
-				: null,
-			isNotSignup && logins.isInternalUserLoggedIn() && !logins.isEnabled(FeatureType.DisableCalendar) && client.calendarSupported()
-				? m(NavButtonN, {
-					label: "calendar_label",
-					icon: () => BootIcons.Calendar,
-					href: CALENDAR_PREFIX,
-					colors: NavButtonColors.Header,
-					click: () => m.route.get().startsWith(CALENDAR_PREFIX) && this._focusMain()
-				})
-				: null
-		]
+				}),
+				!logins.isEnabled(FeatureType.DisableContacts)
+					? m(NavButtonN, {
+						label: 'contacts_label',
+						icon: () => BootIcons.Contacts,
+						href: navButtonRoutes.contactsUrl,
+						isSelectedPrefix: CONTACTS_PREFIX,
+						colors: NavButtonColors.Header,
+						click: () => m.route.get() === navButtonRoutes.contactsUrl && this._focusMain()
+					})
+					: null,
+				!logins.isEnabled(FeatureType.DisableCalendar) && client.calendarSupported()
+					? m(NavButtonN, {
+						label: "calendar_label",
+						icon: () => BootIcons.Calendar,
+						href: CALENDAR_PREFIX,
+						colors: NavButtonColors.Header,
+						click: () => m.route.get().startsWith(CALENDAR_PREFIX) && this._focusMain()
+					})
+					: null
+			] : null
 	}
 
 	_mobileSearchBarVisible(): boolean {
@@ -190,13 +219,24 @@ class Header {
 
 	_getCenterContent(): Children {
 		const viewSlider = this._getViewSlider()
-		const header = (title: string) => m(".flex-center.header-middle.items-center.text-ellipsis.b", title)
+
+		const header = (title, left, right) => {
+			return m(".flex-center.header-middle.items-center.text-ellipsis.b", [left || null, title, right || null])
+		}
+
 		if (this._mobileSearchBarVisible()) {
 			return this._renderMobileSearchBar()
 		} else if (viewSlider) {
-			const fistVisibleBgColumn = viewSlider.getBackgroundColumns().find(c => c.visible)
-			const title = fistVisibleBgColumn ? fistVisibleBgColumn.getTitle() : ""
-			return header(title)
+			const firstVisibleBgColumn = viewSlider.getBackgroundColumns().find(c => c.visible)
+			if (firstVisibleBgColumn) {
+				const title = firstVisibleBgColumn.getTitle()
+				const buttonLeft = firstVisibleBgColumn.getTitleButtonLeft()
+				const buttonRight = firstVisibleBgColumn.getTitleButtonRight()
+				return header(title, buttonLeft, buttonRight)
+			} else {
+				return header("")
+			}
+
 		} else if (m.route.get().startsWith('/login')) {
 			return header(lang.get("login_label"))
 		} else if (m.route.get().startsWith('/signup')) {
@@ -266,7 +306,7 @@ class Header {
 		this._currentView = currentView
 	}
 
-	_getViewSlider(): ?IViewSlider {
+	_getViewSlider(): ?ViewSlider {
 		if (this._currentView && this._currentView.getViewSlider) {
 			return this._currentView.getViewSlider()
 		} else {
@@ -278,7 +318,24 @@ class Header {
 		if (this._wsState === "connected" || this._wsState === "terminated") {
 			return null
 		} else {
-			return m(".indefinite-progress")
+			// Use key so that mithril does not reuse dom element and transition works correctly
+			return m(".indefinite-progress", {key: "connection-indicator"})
+		}
+	}
+
+	_entityEventProgress(): Children {
+		if (this._loadingProgress !== PROGRESS_HIDDEN) {
+			// Use key so that mithril does not reuse dom element and transition works correctly
+			return m(".accent-bg", {
+				key: "loading-indicator",
+				style: {
+					transition: 'width 500ms',
+					width: (this._loadingProgress * 100) + '%',
+					height: '3px',
+				},
+			})
+		} else {
+			return null
 		}
 	}
 
@@ -313,7 +370,7 @@ class Header {
 }
 
 function isNotSignup(): boolean {
-	return !m.route.get().startsWith("/signup")
+	return !m.route.get().startsWith("/signup") && !m.route.get().startsWith("/giftcard")
 }
 
 export const header: Header = new Header()

@@ -2,20 +2,20 @@
 import m from "mithril"
 import {loadAll} from "../api/main/Entity"
 import {logins} from "../api/main/LoginController"
+import type {GroupInfo} from "../api/entities/sys/GroupInfo"
 import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
 import {GroupType} from "../api/common/TutanotaConstants"
 import {locator} from "../api/main/MainLocator"
-import {module as replaced} from "@hot"
 import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
-import type {GroupInfo} from "../api/entities/sys/GroupInfo"
+import {noOp} from "../api/common/utils/Utils"
+import {promiseMap} from "../api/common/utils/PromiseUtils"
 
 class LocalAdminGroupInfoModel {
 	_initialization: ?Promise<GroupInfo[]>;
 	groupInfos: GroupInfo[];
 
 	constructor() {
-
 		this._initialization = null
 		this.groupInfos = []
 	}
@@ -25,35 +25,32 @@ class LocalAdminGroupInfoModel {
 			return this._initialization
 		}
 		locator.eventController.addEntityListener(updates => {
-			for (let update of updates) {
-				this.entityEventReceived(update)
-			}
+			return promiseMap(updates, update => {
+				return this.entityEventReceived(update)
+			}).then(noOp)
 		})
 		return this._init()
 	}
 
 	_init(): Promise<GroupInfo[]> {
-		this._initialization = logins.getUserController().loadCustomer().then(customer => {
-			return loadAll(GroupInfoTypeRef, customer.teamGroups)
-				.filter(gi => gi.groupType === GroupType.LocalAdmin)
-				.then(groupInfos => {
-					this.groupInfos = groupInfos
-					return groupInfos
-				})
-		})
+		this._initialization = logins
+			.getUserController()
+			.loadCustomer()
+			.then(async customer => {
+				const groupInfos: Array<GroupInfo> = await loadAll(GroupInfoTypeRef, customer.teamGroups)
+				this.groupInfos = groupInfos.filter(gi => gi.groupType === GroupType.LocalAdmin)
+				return this.groupInfos
+			})
 		return this._initialization
 	}
 
-	entityEventReceived<T>(update: EntityUpdateData): void {
+	entityEventReceived<T>(update: EntityUpdateData): Promise<void> {
 		if (isUpdateForTypeRef(GroupInfoTypeRef, update)) {
-			this._init().then(() => m.redraw())
+			return this._init().then(() => m.redraw())
+		} else {
+			return Promise.resolve()
 		}
 	}
 }
 
-export const localAdminGroupInfoModel = new LocalAdminGroupInfoModel()
-
-if (replaced) {
-	Object.assign(localAdminGroupInfoModel, replaced.localAdminGroupInfoModel)
-}
-
+export const localAdminGroupInfoModel: LocalAdminGroupInfoModel = new LocalAdminGroupInfoModel()

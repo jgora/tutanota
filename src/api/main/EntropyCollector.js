@@ -2,7 +2,7 @@
 import type {EntropySrcEnum} from "../common/TutanotaConstants"
 import {EntropySrc} from "../common/TutanotaConstants"
 import type {WorkerClient} from "./WorkerClient"
-import {assertMainOrNode} from "../Env"
+import {assertMainOrNode} from "../common/Env"
 
 assertMainOrNode()
 
@@ -114,6 +114,7 @@ export class EntropyCollector {
 		let c = typeof crypto !== 'undefined' ? crypto : msCrypto
 		c.getRandomValues(valueList)
 		for (let i = 0; i < valueList.length; i++) {
+			// 32 because we have 32-bit values Uint32Array
 			this._addEntropy(valueList[i], 32, EntropySrc.random)
 		}
 	}

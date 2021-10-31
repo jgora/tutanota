@@ -36,6 +36,12 @@ NSString *const TUTOperationDelete = @"2";
 static const int EVENTS_SCHEDULED_AHEAD = 24;
 static const long MISSED_NOTIFICATION_TTL_SEC = 30L * 24 * 60 * 60; // 30 days
 
+static const int OK_HTTP_CODE = 200;
+static const int NOT_AUTHENTICATED_HTTP_CODE = 401;
+static const int NOT_FOUND_HTTP_CODE = 404;
+static const int TOO_MANY_REQUESTS_HTTP_CODE = 429;
+static const int SERVICE_UNAVAILABLE_HTTP_CODE = 503;
+
 @interface TUTAlarmManager ()
 @property (nonnull, readonly) TUTKeychainManager *keychainManager;
 @property (nonnull, readonly) TUTUserPreferenceFacade *userPreference;
@@ -81,7 +87,16 @@ static const long MISSED_NOTIFICATION_TTL_SEC = 30L * 24 * 60 * 60; // 30 days
         }
         
         NSMutableDictionary<NSString *, NSString *> *additionalHeaders = [NSMutableDictionary new];
-        additionalHeaders[@"userIds"] = [sseInfo.userIds componentsJoinedByString:@","];
+        [TUTUtils addSystemModelHeadersTo:additionalHeaders];
+        if (sseInfo.userIds.count == 0) {
+            TUTLog(@"No users to download missed notification with");
+            [strongSelf unscheduleAllAlarmsForUserId:nil];
+            queueCompletionHandler();
+            complete(nil);
+            return;
+        }
+        NSString *userId = sseInfo.userIds[0];
+        additionalHeaders[@"userIds"] = userId;
         if (strongSelf.userPreference.lastProcessedNotificationId) {
             additionalHeaders[@"lastProcessedNotificationId"] = strongSelf.userPreference.lastProcessedNotificationId;
         }
@@ -90,15 +105,33 @@ static const long MISSED_NOTIFICATION_TTL_SEC = 30L * 24 * 60 * 60; // 30 days
         
         let urlSession = [NSURLSession sessionWithConfiguration:configuration];
         let urlString = [strongSelf missedNotificationUrl:sseInfo.sseOrigin pushIdentifier:sseInfo.pushIdentifier];
-        
+
+        TUTLog(@"Downloading missed notification with userId %@", userId);
+
         [[urlSession dataTaskWithURL:[NSURL URLWithString:urlString] completionHandler:^(NSData * _Nullable data, NSURLResponse * _Nullable response, NSError * _Nullable error) {
             let httpResponse = (NSHTTPURLResponse *) response;
             TUTLog(@"Fetched missed notifications with status code %zd, error: %@", httpResponse.statusCode, error);
             if (error) {
                 complete(error);
-            } else if (httpResponse.statusCode == 404) {
+            } else if (httpResponse.statusCode == NOT_AUTHENTICATED_HTTP_CODE) {
+                TUTLog(@"Not authenticated to download missed notification w/ user %@", userId);
+                // Not authenticated, remove user id and try again with the next one
+                [strongSelf unscheduleAllAlarmsForUserId:userId];
+                [strongSelf.userPreference removeUser:userId];
+                queueCompletionHandler();
+                [strongSelf fetchMissedNotifications:completionHandler];
+            } else if (httpResponse.statusCode == SERVICE_UNAVAILABLE_HTTP_CODE ||
+                       httpResponse.statusCode == TOO_MANY_REQUESTS_HTTP_CODE) {
+              int suspensionTime = [strongSelf extractSuspensionTimeFrom:httpResponse];
+              TUTLog(@"ServiceUnavailible when downloading missed notifications, waiting for %d s", suspensionTime);
+              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, suspensionTime * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                TUTLog(@"Timer fired");
+                [weakSelf fetchMissedNotifications:completionHandler];
+              });
+              queueCompletionHandler();
+            } else if (httpResponse.statusCode == NOT_FOUND_HTTP_CODE) {
                 complete(nil);
-            } else if (httpResponse.statusCode != 200) {
+            } else if (httpResponse.statusCode != OK_HTTP_CODE) {
                 let error = [NSError errorWithDomain:TUT_NETWORK_ERROR
                                                 code:httpResponse.statusCode
                                             userInfo:@{@"message": @"Failed to fetch missed notification"}
@@ -117,13 +150,27 @@ static const long MISSED_NOTIFICATION_TTL_SEC = 30L * 24 * 60 * 60; // 30 days
                 strongSelf.userPreference.lastProcessedNotificationId =
                 missedNotification.lastProcessedNotificationId;
                 
-                [strongSelf handleAlarmNotifications:missedNotification];
-                complete(nil);
+              [strongSelf processNewAlarms:missedNotification.alarmNotifications completion:complete];
+
             }
         }] resume];
     }];
     
     
+}
+
+- (int)extractSuspensionTimeFrom:(NSHTTPURLResponse *)httpResponse {
+  NSString *_Nullable retryAfterHeader = httpResponse.allHeaderFields[@"Retry-After"];
+  if (retryAfterHeader == nil) {
+    retryAfterHeader = httpResponse.allHeaderFields[@"Suspension-Time"];
+  }
+  int suspensionTime;
+  if (retryAfterHeader != nil) {
+    suspensionTime = retryAfterHeader.intValue;
+  } else {
+    suspensionTime = 0;
+  }
+  return suspensionTime;
 }
 
 - (BOOL)hasNotificationTTLExpired {
@@ -138,7 +185,7 @@ static const long MISSED_NOTIFICATION_TTL_SEC = 30L * 24 * 60 * 60; // 30 days
 
 -(void)resetStoredState {
     TUTLog(@"Resetting current state");
-    [self unscheduleAllAlarms];
+    [self unscheduleAllAlarmsForUserId:nil];
     [_userPreference clear];
     NSError *error;
     [_keychainManager removePushIdentifierKeys:&error];
@@ -147,14 +194,16 @@ static const long MISSED_NOTIFICATION_TTL_SEC = 30L * 24 * 60 * 60; // 30 days
     }
 }
 
--(void)unscheduleAllAlarms {
+-(void)unscheduleAllAlarmsForUserId:(NSString *_Nullable)userId {
     let alarms = [_userPreference alarms];
     foreach(alarm, alarms) {
-        NSError *error;
-        [self unscheduleAlarm:alarm error:&error];
-        if (error) {
-            TUTLog(@"Error duruing unscheduling of all alarms %@", error);
-            error = nil;
+        if (userId == nil || [alarm.user isEqualToString:userId]) {
+            NSError *error;
+            [self unscheduleAlarm:alarm error:&error];
+            if (error) {
+                TUTLog(@"Error duruing unscheduling of all alarms %@", error);
+                error = nil;
+            }
         }
     }
 }
@@ -172,47 +221,53 @@ static const long MISSED_NOTIFICATION_TTL_SEC = 30L * 24 * 60 * 60; // 30 days
     return [NSString stringWithFormat:@"%@/rest/sys/missednotification/%@", origin, base64urlId];
 }
 
-- (void)handleAlarmNotifications:(TUTMissedNotification*) notification {
-    foreach(alarmNotification, notification.alarmNotifications) {
-        NSError *error;
-        [self handleAlarmNotification:alarmNotification error:&error];
+- (void)processNewAlarms:(NSArray<TUTAlarmNotification *> *)notifications completion:(void (^)(NSError * _Nullable))completion {
+  dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+    NSError* error;
+    let savedNotifications = [self.userPreference alarms];
+    
+    foreach(alarmNotification, notifications) {
+      // We ue autorelease pool in case we have a lot of alarms so that we can release objects more often and not get OOM
+      @autoreleasepool {
+        [self handleAlarmNotification:alarmNotification existingAlarms:savedNotifications error:&error];
         if (error) {
-            TUTLog(@"schedule error %@", error);
+          TUTLog(@"error when handling alarm %@", error);
         }
+      }
     }
-}
+    
+    NSLog(@"finished processing %lu alarms", (unsigned long)[notifications count]);
+    // Store alarms in one go at the end, because JSON Serialization leaks memory
+    [self.userPreference storeAlarms:savedNotifications];
 
-- (void) handleAlarmNotification:(TUTAlarmNotification*)alarmNotification error:(NSError **)error {
-    if ([TUTOperationCreate isEqualToString:alarmNotification.operation] ) {
-        [self scheduleAlarm:alarmNotification error:error];
+    completion(error);
+   });
+  }
+
+- (void) handleAlarmNotification:(TUTAlarmNotification*)alarm existingAlarms:(NSMutableArray<TUTAlarmNotification*> *)existingAlarms error:(NSError **)error {
+    if ([TUTOperationCreate isEqualToString:alarm.operation] ) {
+        [self scheduleAlarm:alarm error:error];
         if (!(*error)) {
-            [self saveNewAlarm:alarmNotification];
+          // Avoid duplicates. Alarms are immutable so we can just keep the old version.
+          if ([existingAlarms indexOfObject:alarm] == NSNotFound) {
+            [existingAlarms addObject:alarm];
+          }
         }
-    } else if ([TUTOperationDelete isEqualToString:alarmNotification.operation]) {
-        let savedNotifications = [_userPreference alarms];
-        
+    } else if ([TUTOperationDelete isEqualToString:alarm.operation]) {
         TUTAlarmNotification *alarmToUnschedule;
-        let index = [savedNotifications indexOfObject:alarmNotification];
+        let index = [existingAlarms indexOfObject:alarm];
         if (index != NSNotFound) {
-            alarmToUnschedule = savedNotifications[index];
+            alarmToUnschedule = existingAlarms[index];
         } else {
-            alarmToUnschedule = alarmNotification;
+            alarmToUnschedule = alarm;
         }
         [self unscheduleAlarm:alarmToUnschedule error:error];
         if (*error) {
             // don't cancel in case of error as we want to delete saved notifications
-            TUTLog(@"Failed to cancel alarm %@ %@", alarmNotification, *error);
+            TUTLog(@"Failed to cancel alarm %@ %@", alarm, *error);
         }
-
-        [savedNotifications removeObject:alarmNotification];
-        [_userPreference storeAlarms:savedNotifications];
+        [existingAlarms removeObject:alarm];
     }
-}
-
-- (void)saveNewAlarm:(TUTAlarmNotification *)alarm {
-    let savedNotifications = [_userPreference alarms];
-    [savedNotifications addObject:alarm];
-    [_userPreference storeAlarms:savedNotifications];
 }
 
 - (void)scheduleAlarm:(TUTAlarmNotification *)alarmNotification error:(NSError **)error {
@@ -411,18 +466,31 @@ static const long MISSED_NOTIFICATION_TTL_SEC = 30L * 24 * 60 * 60; // 30 days
     return [NSString stringWithFormat:@"%@#%d", alarmIdentifier, occurrence];
 }
 
--(void)rescheduleEvents {
+-(void)rescheduleAlarms {
     TUTLog(@"Re-scheduling alarms");
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        let savedNotifications = [self->_userPreference alarms];
-        foreach(notification, savedNotifications) {
+    // This is not some work we wait for so we can push it to the lower priority queue.
+    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
+        foreach(notification, self.savedAlarms) {
+          // Avoid OOM by releasing memory more often
+          @autoreleasepool {
             NSError *error;
             [self scheduleAlarm:notification error:&error];
             if (error) {
                 TUTLog(@"Error when re-scheduling alarm %@ %@", notification, error);
             }
+          }
         }
     });
+}
+
+-(NSSet<TUTAlarmNotification *> *)savedAlarms {
+  let savedNotifications = [self->_userPreference alarms];
+  let set = [NSSet setWithArray:savedNotifications];
+  if (set.count != savedNotifications.count) {
+    TUTLog(@"Duplicated alarms detected, re-saving...");
+    [self.userPreference storeAlarms:set.allObjects];
+  }
+  return set;
 }
 
 @end

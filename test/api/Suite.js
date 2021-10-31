@@ -1,13 +1,15 @@
-import o from "ospec/ospec.js"
+import o from "ospec"
 
 import "./common/LoggerTest.js"
 import "./crypto/RandomizerTest.js"
 import "./common/EncodingTest"
 import "./common/ArrayUtilsTest"
+import "./common/SortedArrayTest"
 import "./common/MapUtilsTest"
 import "./common/UtilsTest"
 import "./common/BirthdayUtilsTest"
 import "./common/EntityFunctionsTest"
+import "./common/StringUtilsTest"
 import "./crypto/AesTest"
 import "./crypto/BcryptTest"
 import "./crypto/CryptoFacadeTest.js"
@@ -34,15 +36,37 @@ import "./worker/search/SearchIndexEncodingTest"
 import "./common/SwTest"
 import "./worker/search/EventQueueTest"
 import "./common/PromiseUtilTest"
-import {random} from "../../src/api/worker/crypto/Randomizer"
-import {EntropySrc} from "../../src/api/common/TutanotaConstants"
+import "./common/IndexerDebugLoggerTest"
 import "./crypto/RsaTest.js"
 import "./worker/facades/MailFacadeTest"
+import "./worker/facades/CalendarFacadeTest"
+import "./worker/SuspensionHandlerTest"
+import "./worker/ConfigurationDbTest"
+import "./worker/CompressionTest"
+import "../api/common/PlainTextSearchTest"
+import {random} from "../../src/api/worker/crypto/Randomizer"
+import {EntropySrc} from "../../src/api/common/TutanotaConstants"
+import {preTest, reportTest} from "./TestUtils"
 
-const disabledTests = ["./common/IntegrationTest", "./common/WorkerTest"]
-console.log("!!! Some tests are disabled because they need a server instance, see Suite.js", disabledTests)
+(async function () {
 
-// setup the Entropy for all testcases
-random.addEntropy([{data: 36, entropy: 256, source: EntropySrc.key}])
+	const {WorkerImpl} = await import("../../src/api/worker/WorkerImpl")
+	// const workerImpl = new WorkerImpl(this, true, browserDataStub)
+	globalThis.testWorker = WorkerImpl
 
-o.run()
+	if (typeof process != "undefined") {
+		if (process.argv.includes("-i")) {
+			console.log("\nRunning with integration tests because was run with -i\n")
+			await import("./common/WorkerTest")
+			await import("./common/IntegrationTest")
+		} else {
+			console.log("\nRunning without integration tests because run without -i\n")
+		}
+	}
+
+	// setup the Entropy for all testcases
+	random.addEntropy([{data: 36, entropy: 256, source: EntropySrc.key}])
+	preTest()
+
+	await o.run(reportTest)
+})()

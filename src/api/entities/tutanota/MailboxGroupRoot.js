@@ -1,7 +1,11 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
+import type {CalendarEventUpdateList} from "./CalendarEventUpdateList"
+import type {OutOfOfficeNotificationRecipientList} from "./OutOfOfficeNotificationRecipientList"
 
 export const MailboxGroupRootTypeRef: TypeRef<MailboxGroupRoot> = new TypeRef("tutanota", "MailboxGroupRoot")
 export const _TypeModel: TypeModel = {
@@ -14,36 +18,28 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 697,
-			"since": 18,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"_id": {
-			"name": "_id",
 			"id": 695,
-			"since": 18,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerGroup": {
-			"name": "_ownerGroup",
 			"id": 698,
-			"since": 18,
 			"type": "GeneratedId",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_permissions": {
-			"name": "_permissions",
 			"id": 696,
-			"since": 18,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
@@ -51,69 +47,81 @@ export const _TypeModel: TypeModel = {
 		}
 	},
 	"associations": {
+		"calendarEventUpdates": {
+			"id": 1119,
+			"type": "AGGREGATION",
+			"cardinality": "ZeroOrOne",
+			"final": true,
+			"refType": "CalendarEventUpdateList",
+			"dependency": null
+		},
+		"outOfOfficeNotificationRecipientList": {
+			"id": 1151,
+			"type": "AGGREGATION",
+			"cardinality": "ZeroOrOne",
+			"final": true,
+			"refType": "OutOfOfficeNotificationRecipientList",
+			"dependency": null
+		},
 		"contactFormUserContactForm": {
-			"name": "contactFormUserContactForm",
 			"id": 748,
-			"since": 19,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "ZeroOrOne",
-			"refType": "ContactForm",
 			"final": true,
-			"external": false
+			"refType": "ContactForm"
 		},
 		"mailbox": {
-			"name": "mailbox",
 			"id": 699,
-			"since": 18,
 			"type": "ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "MailBox",
 			"final": true,
-			"external": false
+			"refType": "MailBox"
+		},
+		"mailboxProperties": {
+			"id": 1203,
+			"type": "ELEMENT_ASSOCIATION",
+			"cardinality": "ZeroOrOne",
+			"final": true,
+			"refType": "MailboxProperties"
+		},
+		"outOfOfficeNotification": {
+			"id": 1150,
+			"type": "ELEMENT_ASSOCIATION",
+			"cardinality": "ZeroOrOne",
+			"final": true,
+			"refType": "OutOfOfficeNotification"
 		},
 		"participatingContactForms": {
-			"name": "participatingContactForms",
 			"id": 842,
-			"since": 22,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "Any",
-			"refType": "ContactForm",
 			"final": false,
-			"external": false
+			"refType": "ContactForm"
 		},
 		"serverProperties": {
-			"name": "serverProperties",
 			"id": 700,
-			"since": 18,
 			"type": "ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "MailboxServerProperties",
 			"final": true,
-			"external": false
+			"refType": "MailboxServerProperties"
 		},
 		"targetMailGroupContactForm": {
-			"name": "targetMailGroupContactForm",
 			"id": 749,
-			"since": 19,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "ZeroOrOne",
-			"refType": "ContactForm",
 			"final": true,
-			"external": false
+			"refType": "ContactForm"
 		},
 		"whitelistRequests": {
-			"name": "whitelistRequests",
 			"id": 701,
-			"since": 18,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "WhitelistRequest",
 			"final": true,
-			"external": false
+			"refType": "WhitelistRequest"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createMailboxGroupRoot(values?: $Shape<$Exact<MailboxGroupRoot>>): MailboxGroupRoot {
@@ -128,8 +136,12 @@ export type MailboxGroupRoot = {
 	_ownerGroup: ?Id;
 	_permissions: Id;
 
+	calendarEventUpdates: ?CalendarEventUpdateList;
+	outOfOfficeNotificationRecipientList: ?OutOfOfficeNotificationRecipientList;
 	contactFormUserContactForm: ?IdTuple;
 	mailbox: Id;
+	mailboxProperties: ?Id;
+	outOfOfficeNotification: ?Id;
 	participatingContactForms: IdTuple[];
 	serverProperties: Id;
 	targetMailGroupContactForm: ?IdTuple;

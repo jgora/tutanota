@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const UpdatePermissionKeyDataTypeRef: TypeRef<UpdatePermissionKeyData> = new TypeRef("sys", "UpdatePermissionKeyData")
@@ -14,27 +16,21 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 446,
-			"since": 1,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"ownerEncSessionKey": {
-			"name": "ownerEncSessionKey",
 			"id": 1031,
-			"since": 17,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": false,
 			"encrypted": false
 		},
 		"symEncSessionKey": {
-			"name": "symEncSessionKey",
 			"id": 447,
-			"since": 1,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": false,
@@ -43,28 +39,22 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"bucketPermission": {
-			"name": "bucketPermission",
 			"id": 451,
-			"since": 1,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "BucketPermission",
 			"final": false,
-			"external": false
+			"refType": "BucketPermission"
 		},
 		"permission": {
-			"name": "permission",
 			"id": 450,
-			"since": 1,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "Permission",
 			"final": false,
-			"external": false
+			"refType": "Permission"
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createUpdatePermissionKeyData(values?: $Shape<$Exact<UpdatePermissionKeyData>>): UpdatePermissionKeyData {

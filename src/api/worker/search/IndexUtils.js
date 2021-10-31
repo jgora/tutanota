@@ -13,15 +13,22 @@ import type {
 	SearchIndexMetaDataRow
 } from "./SearchTypes"
 import {GroupType} from "../../common/TutanotaConstants"
-import {calculateNeededSpaceForNumber, calculateNeededSpaceForNumbers, decodeNumberBlock, decodeNumbers, encodeNumbers} from "./SearchIndexEncoding"
+import {
+	calculateNeededSpaceForNumber,
+	calculateNeededSpaceForNumbers,
+	decodeNumberBlock,
+	decodeNumbers,
+	encodeNumbers
+} from "./SearchIndexEncoding"
 import {_TypeModel as MailModel} from "../../entities/tutanota/Mail"
 import {_TypeModel as ContactModel} from "../../entities/tutanota/Contact"
 import {_TypeModel as GroupInfoModel} from "../../entities/sys/GroupInfo"
 import {_TypeModel as WhitelabelChildModel} from "../../entities/sys/WhitelabelChild"
-import {TypeRef} from "../../common/EntityFunctions"
-import {isTest} from "../../Env"
+import {isTest} from "../../common/Env"
 import type {User} from "../../entities/sys/User"
 import type {GroupMembership} from "../../entities/sys/GroupMembership"
+import {TypeRef} from "../../common/utils/TypeRef";
+import type {TypeModel} from "../../common/EntityTypes"
 
 export function encryptIndexKeyBase64(key: Aes256Key, indexKey: string, dbIv: Uint8Array): Base64 {
 	return uint8ArrayToBase64(encryptIndexKeyUint8Array(key, indexKey, dbIv))
@@ -92,7 +99,13 @@ export function decryptMetaData(key: Aes256Key, encryptedMeta: SearchIndexMetaDa
 	const numbers = decodeNumbers(numbersBlock)
 	const rows = []
 	for (let i = 0; i < numbers.length; i += metaEntryFieldsNumber) {
-		rows.push({app: numbers[i], type: numbers[i + 1], key: numbers[i + 2], size: numbers[i + 3], oldestElementTimestamp: numbers[i + 4]})
+		rows.push({
+			app: numbers[i],
+			type: numbers[i + 1],
+			key: numbers[i + 2],
+			size: numbers[i + 3],
+			oldestElementTimestamp: numbers[i + 4]
+		})
 	}
 	return {id: encryptedMeta.id, word: encryptedMeta.word, rows}
 }
@@ -165,20 +178,6 @@ export function filterIndexMemberships(user: User): GroupMembership[] {
 
 export function filterMailMemberships(user: User): GroupMembership[] {
 	return user.memberships.filter(m => m.groupType === GroupType.Mail)
-}
-
-export function byteLength(str: ?string) {
-	if (str == null) return 0
-	// returns the byte length of an utf8 string
-	var s = str.length;
-	for (var i = str.length - 1; i >= 0; i--) {
-		var code = str.charCodeAt(i);
-		if (code > 0x7f && code <= 0x7ff) {
-			s++;
-		} else if (code > 0x7ff && code <= 0xffff) s += 2;
-		if (code >= 0xDC00 && code <= 0xDFFF) i--; //trail surrogate
-	}
-	return s;
 }
 
 export function _createNewIndexUpdate(typeInfo: TypeInfo): IndexUpdate {
@@ -358,9 +357,6 @@ export function printMeasure(prefix: string, names: string[]) {
 		} catch (e) {
 		}
 	}
-
-
-	console.log(prefix, JSON.stringify(measures))
 }
 
 export function markStart(name: string) {
@@ -376,6 +372,6 @@ export function markEnd(name: string) {
 	}
 }
 
-export function shouldMeasure() {
+export function shouldMeasure(): boolean {
 	return !env.dist && !isTest()
 }

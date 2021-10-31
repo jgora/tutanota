@@ -10,7 +10,7 @@ public enum AlarmTrigger {
     THREE_DAYS("3D"),
     ONE_WEEK("1W");
 
-    private String value;
+    private final String value;
 
     AlarmTrigger(String value) {
         this.value = value;
@@ -22,6 +22,7 @@ public enum AlarmTrigger {
                 return alarmTrigger;
             }
         }
-        throw new IllegalArgumentException("No AlarmTrigger for value" + value);
+        // Fallback to five minutes in the case of an invalid trigger value
+        return FIVE_MINUTES;
     }
 }

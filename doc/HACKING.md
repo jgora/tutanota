@@ -3,32 +3,30 @@
 ![Overview](Overview.svg)
 
 ## Basic structure
- * `src`: Common part and the desktop client code
- * `app-android`: Android specific parts
- * `app-ios`: iOS specific parts
- * `flow: contains `*implicitly* imported [Flow](https://flow.org/) typing definitions. Avoid putting something there,
+ * [`src/`](../src): Common part and the desktop client code
+ * [`app-android/`](../app-android): Android specific parts
+ * [`app-ios/`](../app-ios): iOS specific parts
+ * [`flow/`](../flow): contains *implicitly* imported [Flow](https://flow.org/) typing definitions. Avoid putting something there,
  it is buggy.
- * `libs`: "vendor" directory containing our dependencies in non-minified and minified form. May be improved. We take
+ * [`libs/`](../libs): "vendor" directory containing our dependencies in non-minified and minified form. May be improved. We take
  security seriously so we review diff between each version.
- * `resources`: some resources (mostly images) which are used in the project. Most of the are embedded to the code.
- * `test`: test code
- * `android.js`: script for building Android app
- * `make.js`: script for building dev version
- * `dist.js`: script for building release versions of the web & desktop clients
- * `fdroid-fix-deps`: script for removing some binary dependencies (iOS, Flow & Electron) so that we pass F-Droid checks
- * `fdroid-metadata-workaround`: is a link inside app-android so that F-Droid can find our metadata because our Android
+ * [`resources/`](../resources): some resources (mostly images) which are used in the project. Most of the are embedded to the code.
+ * [`test/`](../test): test code
+ * [`android.js`](../android.js): script for building Android app
+ * [`make.js`](../make.js): script for building dev version
+ * [`dist.js`](../dist.js): script for building release versions of the web & desktop clients
+ * [`fdroid-metadata-workaround`](../fdroid-metadata-workaround): is a link inside app-android so that F-Droid can find our metadata because our Android
  project is not in the root. Can be removed once it's fixed in F-Droid.
- * `server`: dev server to serve code (you still need to connect to real backend)
- * `tutao-pub.pem`: public key which is used to verify desktop clients
+ * [`tutao-pub.pem`](../tutao-pub.pem): public key which is used to verify desktop clients
  
 ## Code structure
 Web part of the app is split in three parts: client, worker and common.
-All code in the `src` except for the `api` directory is intended for GUI and system interaction. Code in the `api`
+All code in the `src/` except for the `api/` directory is intended for GUI and system interaction. Code in the `api`
 contains most of the logic for server communication, encryption, indexing etc.
 
 ### Glossary
  * `SomethingView`: Big part of the app, corresponds to the URL, e.g. `mail`, `contact`, `settings`, `search`
- * `SomehingListView`: Component which displays things in the list, usually in the second column
+ * `SomethingListView`: Component which displays things in the list, usually in the second column
  * `SomethingViewer`: Component which usually displays one element (e.g. selected email or contact)
  * `SomethingModel`: Logic for some part of the app, lives in the main part
  * `SomethingController`: Something that does some bookkeeping or general action but is not tied to the specific part
@@ -45,7 +43,7 @@ Worker, main thread & apps communicate through the messages. Protocol is describ
 [WorkerProtocol](../src/api/common/WorkerProtocol.js). See [WorkerClient](../src/api/main/WorkerClient.js) and
 [WorkerImpl](../src/api/worker/WorkerImpl.js) for the client and server part.
 
-Native code communicates through the [NativeWrapper](../src/native/NativeWrapper.js).
+Native code communicates through the [NativeWrapper](../src/native/common/NativeWrapper.js).
 
 ### UI code
 UI code uses [Mithril](http://mithril.js.org/). It is a tiny framework which does routing & implement virtual DOM.
@@ -98,18 +96,40 @@ operation which happened to the entity. Updates are grouped into `EntityEventBat
 client tries tp stay up-to-date with the server (for caching and indexing).
 
 ## Workflow
-`node make -w prod`
+```bash
+node make -w prod
+```
 
-and in parallel
+This will start the dev server in hot reloading mode.
 
-`node server`
-
-Point browser of your choice to the `localhost:9000` and you should be good to go.
+Point browser of your choice to the `localhost:9001` and you should be good to go.
 
 To run tests:
 
-`cd test`
+```bash
+cd test
+```
  
 and
 
  `node test api` or `node test client`
+
+
+## Chunking rules
+ - Don't import things statically which you don't want to be bundled together (e.g. importing settings from login will
+  load whole settings at startup)
+ - `common-min` is api/common which is used by main and worker threads and is needed on startup (marked by `@bundleInto`).
+  rest of api/common is just `common`.
+ - `main` is the rest of the main thread code that is not gui related and does not depend on sanitizer/luxon
+ - `date` is luxon and everything that depends on it statically
+ - rest is obvious: `login`, `mail-view`, `mail-editor`, `calendar-view`, `search`, `settings`, `worker`
+ - anything can depend on `common-min`
+ - anything can depend on `common` except for `common-min` and `app.js`
+ - anything can depend on `app.js` except worker, common-min, common
+ - gui-related things (like `login` or `mail-view`) can depend on `gui-base`. Currently main also depends on `gui-base`
+  but it's not good
+ - don't depend on `settings`/`subscription`/`login`/`mail-view`/`mail-editor`/`calendar-view`/`contacts` things
+  statically
+ - anything that depends on luxon goes into `date` and is being imported dynamically
+ - native code is only imported from common code dynamically. Worker is exception for technical reasons.
+ - `contacts` and `mail-editor` depend on sanitizer statically, rest of the app doesn't

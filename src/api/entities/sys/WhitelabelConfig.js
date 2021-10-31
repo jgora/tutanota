@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {BootstrapFeature} from "./BootstrapFeature"
 import type {CertificateInfo} from "./CertificateInfo"
@@ -17,90 +19,70 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1131,
-			"since": 22,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"_id": {
-			"name": "_id",
 			"id": 1129,
-			"since": 22,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerGroup": {
-			"name": "_ownerGroup",
 			"id": 1132,
-			"since": 22,
 			"type": "GeneratedId",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_permissions": {
-			"name": "_permissions",
 			"id": 1130,
-			"since": 22,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"germanLanguageCode": {
-			"name": "germanLanguageCode",
 			"id": 1308,
-			"since": 28,
 			"type": "String",
 			"cardinality": "ZeroOrOne",
 			"final": false,
 			"encrypted": false
 		},
 		"imprintUrl": {
-			"name": "imprintUrl",
 			"id": 1425,
-			"since": 37,
 			"type": "String",
 			"cardinality": "ZeroOrOne",
 			"final": false,
 			"encrypted": false
 		},
 		"jsonTheme": {
-			"name": "jsonTheme",
 			"id": 1133,
-			"since": 22,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"metaTags": {
-			"name": "metaTags",
 			"id": 1281,
-			"since": 26,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"privacyStatementUrl": {
-			"name": "privacyStatementUrl",
 			"id": 1496,
-			"since": 42,
 			"type": "String",
 			"cardinality": "ZeroOrOne",
 			"final": false,
 			"encrypted": false
 		},
 		"whitelabelCode": {
-			"name": "whitelabelCode",
 			"id": 1727,
-			"since": 56,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
@@ -109,35 +91,32 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"bootstrapCustomizations": {
-			"name": "bootstrapCustomizations",
 			"id": 1252,
-			"since": 24,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "BootstrapFeature",
-			"final": false
+			"dependency": null
 		},
 		"certificateInfo": {
-			"name": "certificateInfo",
 			"id": 1506,
-			"since": 44,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": false,
 			"refType": "CertificateInfo",
-			"final": false
+			"dependency": null
 		},
 		"whitelabelRegistrationDomains": {
-			"name": "whitelabelRegistrationDomains",
 			"id": 1728,
-			"since": 56,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "StringWrapper",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createWhitelabelConfig(values?: $Shape<$Exact<WhitelabelConfig>>): WhitelabelConfig {

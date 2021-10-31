@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {PlanPrices} from "./PlanPrices"
 
@@ -15,27 +17,21 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1470,
-			"since": 39,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"business": {
-			"name": "business",
 			"id": 1472,
-			"since": 39,
 			"type": "Boolean",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"messageTextId": {
-			"name": "messageTextId",
 			"id": 1471,
-			"since": 39,
 			"type": "String",
 			"cardinality": "ZeroOrOne",
 			"final": false,
@@ -43,36 +39,49 @@ export const _TypeModel: TypeModel = {
 		}
 	},
 	"associations": {
-		"premiumPrices": {
-			"name": "premiumPrices",
-			"id": 1473,
-			"since": 39,
+		"premiumBusinessPrices": {
+			"id": 1866,
 			"type": "AGGREGATION",
 			"cardinality": "One",
+			"final": false,
 			"refType": "PlanPrices",
-			"final": false
+			"dependency": null
+		},
+		"premiumPrices": {
+			"id": 1473,
+			"type": "AGGREGATION",
+			"cardinality": "One",
+			"final": false,
+			"refType": "PlanPrices",
+			"dependency": null
 		},
 		"proPrices": {
-			"name": "proPrices",
 			"id": 1474,
-			"since": 39,
 			"type": "AGGREGATION",
 			"cardinality": "One",
+			"final": false,
 			"refType": "PlanPrices",
-			"final": false
+			"dependency": null
+		},
+		"teamsBusinessPrices": {
+			"id": 1867,
+			"type": "AGGREGATION",
+			"cardinality": "One",
+			"final": false,
+			"refType": "PlanPrices",
+			"dependency": null
 		},
 		"teamsPrices": {
-			"name": "teamsPrices",
 			"id": 1729,
-			"since": 57,
 			"type": "AGGREGATION",
 			"cardinality": "One",
+			"final": false,
 			"refType": "PlanPrices",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createUpgradePriceServiceReturn(values?: $Shape<$Exact<UpgradePriceServiceReturn>>): UpgradePriceServiceReturn {
@@ -86,7 +95,9 @@ export type UpgradePriceServiceReturn = {
 	business: boolean;
 	messageTextId: ?string;
 
+	premiumBusinessPrices: PlanPrices;
 	premiumPrices: PlanPrices;
 	proPrices: PlanPrices;
+	teamsBusinessPrices: PlanPrices;
 	teamsPrices: PlanPrices;
 }

@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {ContactFormStatisticField} from "./ContactFormStatisticField"
 
@@ -15,36 +17,28 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 826,
-			"since": 22,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"bucketEncSessionKey": {
-			"name": "bucketEncSessionKey",
 			"id": 827,
-			"since": 22,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"customerPubEncBucketKey": {
-			"name": "customerPubEncBucketKey",
 			"id": 828,
-			"since": 22,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"customerPubKeyVersion": {
-			"name": "customerPubKeyVersion",
 			"id": 829,
-			"since": 22,
 			"type": "Number",
 			"cardinality": "One",
 			"final": true,
@@ -53,17 +47,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"statisticFields": {
-			"name": "statisticFields",
 			"id": 830,
-			"since": 22,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "ContactFormStatisticField",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createContactFormStatisticEntry(values?: $Shape<$Exact<ContactFormStatisticEntry>>): ContactFormStatisticEntry {

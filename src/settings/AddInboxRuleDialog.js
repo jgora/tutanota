@@ -1,23 +1,25 @@
 // @flow
 import m from "mithril"
-import {assertMainOrNode} from "../api/Env"
+import {assertMainOrNode} from "../api/common/Env"
 import {Dialog} from "../gui/base/Dialog"
 import {lang} from "../misc/LanguageViewModel"
 import {InboxRuleType} from "../api/common/TutanotaConstants"
 import {isDomainName, isMailAddress, isRegularExpression} from "../misc/FormatValidator"
-import {getInboxRuleTypeNameMapping} from "../mail/InboxRuleHandler"
+import {getInboxRuleTypeNameMapping} from "../mail/model/InboxRuleHandler"
+import type {InboxRule} from "../api/entities/tutanota/InboxRule"
 import {createInboxRule} from "../api/entities/tutanota/InboxRule"
 import {update} from "../api/main/Entity"
-import {showNotAvailableForFreeDialog} from "../misc/ErrorHandlerImpl"
 import {logins} from "../api/main/LoginController"
-import {getArchiveFolder, getFolderName, getInboxFolder} from "../mail/MailUtils"
-import type {MailboxDetail} from "../mail/MailModel"
+import {getArchiveFolder, getExistingRuleForType, getFolderName} from "../mail/model/MailUtils"
+import type {MailboxDetail} from "../mail/model/MailModel"
 import stream from "mithril/stream/stream.js"
 import {DropDownSelectorN} from "../gui/base/DropDownSelectorN"
 import {TextFieldN} from "../gui/base/TextFieldN"
-import {neverNull} from "../api/common/utils/Utils"
-import {isSameId} from "../api/common/EntityFunctions"
-import type {InboxRule} from "../api/entities/tutanota/InboxRule"
+import {neverNull, noOp} from "../api/common/utils/Utils"
+import {LockedError} from "../api/common/error/RestError"
+import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
+import {isSameId} from "../api/common/utils/EntityUtils";
+import {ofClass} from "../api/common/utils/PromiseUtils"
 
 assertMainOrNode()
 
@@ -25,7 +27,7 @@ export function show(mailBoxDetails: MailboxDetail, ruleOrTemplate: InboxRule) {
 	if (logins.getUserController().isFreeAccount()) {
 		showNotAvailableForFreeDialog(true)
 	} else if (mailBoxDetails) {
-		let targetFolders = mailBoxDetails.folders.filter(folder => folder !== getInboxFolder(mailBoxDetails.folders))
+		let targetFolders = mailBoxDetails.folders
 		                                  .map(folder => {
 			                                  return {name: getFolderName(folder), value: folder}
 		                                  })
@@ -63,12 +65,14 @@ export function show(mailBoxDetails: MailboxDetail, ruleOrTemplate: InboxRule) {
 			rule.value = _getCleanedValue(inboxRuleType(), inboxRuleValue())
 			rule.targetFolder = inboxRuleTarget()._id
 			const props = logins.getUserController().props
-			if (isNewRule) {
-				props.inboxRules.push(rule)
-			} else {
-				props.inboxRules = props.inboxRules.map(inboxRule => isSameId(inboxRule._id, ruleOrTemplate._id) ? rule : inboxRule)
-			}
+			const inboxRules = props.inboxRules
+			props.inboxRules = isNewRule ? [...inboxRules, rule] : inboxRules.map(inboxRule => isSameId(inboxRule._id, ruleOrTemplate._id) ? rule : inboxRule)
 			update(props)
+				.catch(error => {
+					props.inboxRules = inboxRules
+					throw error
+				})
+				.catch(ofClass(LockedError, noOp))
 			dialog.close()
 		}
 
@@ -89,20 +93,18 @@ export function createInboxRuleTemplate(ruleType: ?string, value: ?string): Inbo
 	return template
 }
 
-export function getExistingRuleForType(cleanValue: string, type: string) {
-	return logins.getUserController().props.inboxRules.find(rule => (type === rule.type && cleanValue === rule.value))
-}
-
 function _validateInboxRuleInput(type: string, value: string, ruleId: Id) {
 	let currentCleanedValue = _getCleanedValue(type, value)
 	if (currentCleanedValue === "") {
 		return "inboxRuleEnterValue_msg"
+	} else if (_isInvalidRegex(currentCleanedValue)) {
+		return "invalidRegexSyntax_msg"
 	} else if (type !== InboxRuleType.SUBJECT_CONTAINS && type !== InboxRuleType.MAIL_HEADER_CONTAINS
 		&& !isRegularExpression(currentCleanedValue) && !isDomainName(currentCleanedValue)
 		&& !isMailAddress(currentCleanedValue, false)) {
 		return "inboxRuleInvalidEmailAddress_msg"
 	} else {
-		let existingRule = getExistingRuleForType(currentCleanedValue, type)
+		let existingRule = getExistingRuleForType(logins.getUserController().props, currentCleanedValue, type)
 		if (existingRule && (!ruleId || (ruleId && !isSameId(existingRule._id, ruleId)))) {
 			return "inboxRuleAlreadyExists_msg"
 		}
@@ -116,4 +118,21 @@ function _getCleanedValue(type: string, value: string) {
 	} else {
 		return value.trim().toLowerCase()
 	}
+}
+
+/**
+ * @param value
+ * @returns true if provided string is a regex and it's unparseable by RegExp, else false
+ * @private
+ */
+function _isInvalidRegex(value: string) {
+	if (!isRegularExpression(value)) return false // not a regular expression is not an invalid regular expression
+
+	try {
+		// RegExp ctor throws a ParseError if invalid regex
+		let regExp = new RegExp(value.substring(1, value.length - 1));
+	} catch (e) {
+		return true
+	}
+	return false
 }

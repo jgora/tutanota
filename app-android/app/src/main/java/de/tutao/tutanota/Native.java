@@ -1,6 +1,8 @@
 package de.tutao.tutanota;
 
 import android.app.NotificationManager;
+import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -9,6 +11,7 @@ import android.util.Log;
 import android.webkit.JavascriptInterface;
 
 import androidx.annotation.Nullable;
+import androidx.core.content.FileProvider;
 
 import org.jdeferred.Deferred;
 import org.jdeferred.Promise;
@@ -18,13 +21,19 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import de.tutao.tutanota.alarms.AlarmNotification;
+import de.tutao.tutanota.alarms.AlarmNotificationsManager;
 import de.tutao.tutanota.push.LocalNotificationsFacade;
 import de.tutao.tutanota.push.SseStorage;
 
@@ -36,21 +45,25 @@ public final class Native {
 	private final static String TAG = "Native";
 
 	private static int requestId = 0;
-	private Crypto crypto;
-	private FileUtil files;
-	private Contact contact;
-	private SseStorage sseStorage;
-	private Map<String, DeferredObject<Object, Exception, Void>> queue = new HashMap<>();
+	private final Crypto crypto;
+	private final FileUtil files;
+	private final Contact contact;
+	private final SseStorage sseStorage;
+	private final Map<String, DeferredObject<Object, Exception, Void>> queue = new HashMap<>();
 	private final MainActivity activity;
+	private final AlarmNotificationsManager alarmNotificationsManager;
+	public final ThemeManager themeManager;
 	private volatile DeferredObject<Void, Throwable, Void> webAppInitialized = new DeferredObject<>();
 
 
-	Native(MainActivity activity, SseStorage sseStorage) {
+	Native(MainActivity activity, SseStorage sseStorage, AlarmNotificationsManager alarmNotificationsManager) {
 		this.activity = activity;
 		crypto = new Crypto(activity);
 		contact = new Contact(activity);
-		files = new FileUtil(activity);
+		files = new FileUtil(activity, new LocalNotificationsFacade(activity));
+		this.alarmNotificationsManager = alarmNotificationsManager;
 		this.sseStorage = sseStorage;
+		this.themeManager = new ThemeManager(activity);
 	}
 
 	public void setup() {
@@ -83,7 +96,7 @@ public final class Native {
 							.fail(e -> sendErrorResponse(request, e));
 				}
 			} catch (JSONException e) {
-				Log.e("Native", "could not parse msg:" + msg, e);
+				Log.e("Native", "could not parse msg:", e);
 			}
 		}).start();
 	}
@@ -160,7 +173,8 @@ public final class Native {
 					break;
 				case "reload":
 					webAppInitialized = new DeferredObject<>();
-					activity.loadMainPage(args.getString(0));
+					activity.reload(Utils.jsonObjectToMap(args.getJSONObject(0)));
+					promise.resolve(null);
 					break;
 				case "initPushNotifications":
 					return initPushNotifications();
@@ -217,6 +231,9 @@ public final class Native {
 				case "openLink":
 					promise.resolve(openLink(args.getString(0)));
 					break;
+				case "shareText":
+					promise.resolve(shareText(args.getString(0), args.getString(1)));
+					break;
 				case "getPushIdentifier":
 					promise.resolve(sseStorage.getPushIdentifier());
 					break;
@@ -225,7 +242,7 @@ public final class Native {
 					String deviceIdentififer = args.getString(0);
 					String userId = args.getString(1);
 					String sseOrigin = args.getString(2);
-					Log.d(TAG, "storePushIdentifierLocally: " + deviceIdentififer + " " + userId + " " + sseOrigin);
+					Log.d(TAG, "storePushIdentifierLocally");
 					sseStorage.storePushIdentifier(deviceIdentififer, sseOrigin);
 
 					String pushIdentifierId = args.getString(3);
@@ -250,9 +267,29 @@ public final class Native {
 					promise.resolve(true);
 					break;
 				}
-				case "changeTheme":
-					activity.changeTheme(args.getString(0));
+				case "getSelectedTheme": {
+					promise.resolve(this.themeManager.getSelectedThemeId());
 					break;
+				}
+				case "setSelectedTheme": {
+					String themeId = args.getString(0);
+					this.themeManager.setSelectedThemeId(themeId);
+					activity.applyTheme();
+					promise.resolve(null);
+					break;
+				}
+				case "getThemes": {
+					List<Map<String, String>> themesList = this.themeManager.getThemes();
+					promise.resolve(new JSONArray(themesList));
+					break;
+				}
+				case "setThemes": {
+					JSONArray jsonThemes = args.getJSONArray(0);
+					this.themeManager.setThemes(jsonThemes);
+					activity.applyTheme();    // reapply theme in case the current selected theme definition has changed
+					promise.resolve(null);
+					break;
+				}
 				case "saveBlob":
 					return files.saveBlob(args.getString(0), args.getString(1));
 				case "putFileIntoDownloads":
@@ -260,12 +297,13 @@ public final class Native {
 					return files.putToDownloadFolder(path);
 				case "getDeviceLog":
 					return Utils.resolvedDeferred(LogReader.getLogFile(activity).toString());
-//				case "unscheduleAlarms":
-//					Log.d(TAG, "unschedule alarms");
-				// TODO: sse alarm storage may not work because SharedPreferences are not synced between processes	
-//					new AlarmNotificationsManager(new AndroidKeyStoreFacade(activity), sseStorage, new Crypto(activity), new SystemAlarmFacade(activity))
-//							.unscheduleAlarms(args.getString(0));
-//					return Utils.resolvedDeferred(null);
+				case "changeLanguage":
+					promise.resolve(null);
+					break;
+				case "scheduleAlarms":
+					scheduleAlarms(args.getJSONArray(0));
+					promise.resolve(null);
+					break;
 				default:
 					throw new Exception("unsupported method: " + method);
 			}
@@ -275,7 +313,6 @@ public final class Native {
 		}
 		return promise.promise();
 	}
-
 
 	private void cancelNotifications(JSONArray addressesArray) throws JSONException {
 		NotificationManager notificationManager =
@@ -294,11 +331,47 @@ public final class Native {
 	private boolean openLink(@Nullable String uri) {
 		Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(uri));
 		PackageManager pm = activity.getPackageManager();
-		boolean resolved = intent.resolveActivity(pm) != null;
-		if (resolved) {
+		try {
 			activity.startActivity(intent);
+		} catch (ActivityNotFoundException e) {
+			Log.i(TAG, "Activity for intent " + uri + " not found.", e);
+			return false;
 		}
-		return resolved;
+		return true;
+	}
+
+	private boolean shareText(String string, @Nullable String title) {
+		Intent sendIntent = new Intent(Intent.ACTION_SEND);
+		sendIntent.setType("text/plain");
+		sendIntent.putExtra(Intent.EXTRA_TEXT, string);
+
+		// Shows a text title in the app chooser
+		if (title != null) {
+			sendIntent.putExtra(Intent.EXTRA_TITLE, title);
+		}
+
+		// In order to show a logo thumbnail with the app chooser we need to pass a URI of a file in the filesystem
+		// we just save one of our resources to the temp directory and then pass that as ClipData
+		// because you can't share non 'content' URIs with other apps
+		String imageName = "logo-solo-red.png";
+		try {
+			InputStream logoInputStream = activity.getAssets().open("tutanota/images/" + imageName);
+			File logoFile = this.files.writeFileToUnencryptedDir(imageName, logoInputStream);
+			Uri logoUri = FileProvider.getUriForFile(activity, BuildConfig.FILE_PROVIDER_AUTHORITY, logoFile);
+			ClipData thumbnail = ClipData.newUri(
+					activity.getContentResolver(),
+					"tutanota_logo",
+					logoUri
+			);
+			sendIntent.setClipData(thumbnail);
+		} catch (IOException e) {
+			Log.e(TAG, "Error attaching thumbnail to share intent:\n" + e.getMessage());
+		}
+		sendIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+		Intent intent = Intent.createChooser(sendIntent, null);
+		activity.startActivity(intent);
+		return true;
 	}
 
 	private Promise<Object, Exception, Void> initPushNotifications() {
@@ -307,6 +380,16 @@ public final class Native {
 			activity.setupPushNotifications();
 		});
 		return Utils.resolvedDeferred(null);
+	}
+
+	private void scheduleAlarms(JSONArray jsonAlarmsArray) throws JSONException {
+		List<AlarmNotification> alarms = new ArrayList<>();
+		for (int i = 0; i < jsonAlarmsArray.length(); i++) {
+			JSONObject json = jsonAlarmsArray.getJSONObject(i);
+			AlarmNotification alarmNotification = AlarmNotification.fromJson(json, Collections.emptyList());
+			alarms.add(alarmNotification);
+		}
+		this.alarmNotificationsManager.scheduleNewAlarms(alarms);
 	}
 
 	private static JSONObject errorToObject(Exception e) throws JSONException {

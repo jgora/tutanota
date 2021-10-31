@@ -1,25 +1,20 @@
 //@flow
-import m from "mithril"
-import {assertMainOrNodeBoot} from "../api/Env"
-import {ButtonType} from "../gui/base/ButtonN"
-import {asyncImport, neverNull} from "../api/common/utils/Utils"
-import {addAll, removeAll} from "../api/common/utils/ArrayUtils"
-import {TextField} from "../gui/base/TextField"
+import {assertMainOrNodeBoot} from "../api/common/Env"
 import {client} from "./ClientDetector"
 import type {TranslationKey} from "./LanguageViewModel"
-import {lang} from "./LanguageViewModel"
 import {BrowserType} from "./ClientConstants"
 import {mod} from "./MathUtils"
 import type {KeysEnum} from "../api/common/TutanotaConstants"
 import {Keys} from "../api/common/TutanotaConstants"
+import type {lazy} from "../api/common/utils/Utils"
 
 assertMainOrNodeBoot()
 
 
 export const TABBABLE = "button, input, textarea, div[contenteditable='true']"
 
-export type KeyPress = {keyCode: number, ctrl: boolean, shift: boolean};
-type Key = {code: number, name: string};
+export type KeyPress = {keyCode: number, key: string, ctrl: boolean, shift: boolean};
+export type Key = {code: number, name: string};
 
 /**
  * @return false, if the default action should be aborted
@@ -38,12 +33,12 @@ export interface Shortcut {
 	help: TranslationKey;
 }
 
-export function focusPrevious(dom: HTMLElement) {
-	let tabbable = Array.from(dom.querySelectorAll(TABBABLE)).filter(e => e.style.display !== 'none')
+export function focusPrevious(dom: HTMLElement): boolean {
+	let tabbable = Array.from(dom.querySelectorAll(TABBABLE)).filter(e => e.style.display !== 'none' && e.tabIndex !== -1) // also filter for tabIndex here to restrict tabbing to invisible inputs
 	let selected = tabbable.find(e => document.activeElement === e)
 	if (selected) {
 		//work around for squire so tabulator actions are executed properly
-		//squiere makes a list which can be indented and manages this with tab and shift tab
+		//squire makes a list which can be indented and manages this with tab and shift tab
 		const selection = window.getSelection()
 		if (selection && selection.focusNode
 			&& (selection.focusNode.nodeName === "LI"
@@ -58,14 +53,15 @@ export function focusPrevious(dom: HTMLElement) {
 		tabbable[tabbable.length - 1].focus()
 		return false
 	}
+	return true
 }
 
-export function focusNext(dom: HTMLElement) {
-	let tabbable = Array.from(dom.querySelectorAll(TABBABLE)).filter(e => e.style.display !== 'none')
+export function focusNext(dom: HTMLElement): boolean {
+	let tabbable = Array.from(dom.querySelectorAll(TABBABLE)).filter(e => e.style.display !== 'none' && e.tabIndex !== -1) // also filter for tabIndex here to restrict tabbing to invisible inputs
 	let selected = tabbable.find(e => document.activeElement === e)
 	if (selected) {
 		//work around for squire so tabulator actions are executed properly
-		//squiere makes a list which can be indented and manages this with tab and shift tab
+		//squire makes a list which can be indented and manages this with tab and shift tab
 		const selection = window.getSelection()
 		if (selection && selection.focusNode
 			&& (selection.focusNode.nodeName === "LI"
@@ -80,131 +76,122 @@ export function focusNext(dom: HTMLElement) {
 		tabbable[0].focus()
 		return false
 	}
+	return true
 }
 
+function createKeyIdentifier(keycode: number, ctrl: ?boolean, alt: ?boolean, shift: ?boolean, meta: ?boolean): string {
+	return keycode + (ctrl ? "C" : "") + (alt ? "A" : "") + (shift ? "S" : "") + (meta ? "M" : "")
+}
+
+/**
+ * KeyManager offers the API for (un)registration of all keyboard shortcuts and routes
+ * key presses to the correct handler.
+ *
+ * Shortcuts that are registered by a modal always take precedence.
+ */
 class KeyManager {
-	_shortcuts: Shortcut[];
-	_keyToShortcut: {[id: string]: Shortcut};
-	_modalShortcuts: Shortcut[]; // override for _shortcuts: If a modal is visible, only modal-shortcuts should be active
-	_keyToModalShortcut: {[id: string]: Shortcut};
-	_desktopShortcuts: Shortcut[]
-	_helpDialog: ?any;
+	_keyToShortcut: Map<string, Shortcut>;
+	// override for _shortcuts: If a modal is visible, only modal-shortcuts should be active
+	_keyToModalShortcut: Map<string, Shortcut>;
+	_desktopShortcuts: Shortcut[];
+	_isHelpOpen: boolean = false;
 
 	constructor() {
-		let helpShortcut = {
+		const helpShortcut = {
 			key: Keys.F1,
-			exec: () => {
-				asyncImport(typeof module
-				!== "undefined" ? module.id : __moduleName, `${env.rootPathPrefix}src/gui/base/Dialog.js`)
-					.then(module => {
-						if (this._helpDialog && this._helpDialog.visible) {
-							return
-						}
-						let shortcuts = ((this._modalShortcuts.length
-							> 1) ? this._modalShortcuts : this._shortcuts).concat(this._desktopShortcuts) // we do not want to show a dialog with the shortcuts of the help dialog
-						let textFields = shortcuts.filter(shortcut => shortcut.enabled == null || shortcut.enabled())
-						                          .map(shortcut => {
-							                          return new TextField(() => this._getShortcutName(shortcut))
-								                          .setValue(lang.get(shortcut.help))
-								                          .setDisabled()
-						                          })
-						this._helpDialog = module.Dialog.largeDialog({
-							right: [{label: 'close_alt', click: () => neverNull(this._helpDialog).close(), type: ButtonType.Secondary}],
-							middle: () => lang.get("keyboardShortcuts_title")
-						}, {
-							view: () => {
-								return m("div.pb", textFields.map(t => m(t)))
-							}
-						}).addShortcut({
-							key: Keys.ESC,
-							exec: () => neverNull(this._helpDialog).close(),
-							help: "close_alt"
-						}).show()
-					})
-			},
+			exec: () => this.openF1Help(),
 			help: "showHelp_action"
 		}
-		let helpId = this._createKeyIdentifier(helpShortcut.key.code)
-		this._shortcuts = [helpShortcut]
-		this._modalShortcuts = [helpShortcut]
-		this._keyToShortcut = {}
-		this._keyToModalShortcut = {}
+		const helpId = createKeyIdentifier(helpShortcut.key.code)
+		this._keyToShortcut = new Map([[helpId, helpShortcut]])
+		// override for _shortcuts: If a modal is visible, only modal-shortcuts should be active
+		this._keyToModalShortcut = new Map([[helpId, helpShortcut]])
 		this._desktopShortcuts = []
-		this._keyToShortcut[helpId] = helpShortcut
-		this._keyToModalShortcut[helpId] = helpShortcut // override for _shortcuts: If a modal is visible, only modal-shortcuts should be active
 
-		if (!window.document.addEventListener) {
-			return
-		}
+		if (!window.document.addEventListener) return
+		window.document.addEventListener("keydown", e => this._handleKeydown(e), false);
+	}
 
-		window.document.addEventListener("keydown", e => {
-			let keyCode = e.which
-			let keysToShortcuts = (this._modalShortcuts.length > 1) ? this._keyToModalShortcut : this._keyToShortcut
-			let shortcut = keysToShortcuts[this._createKeyIdentifier(keyCode, e.ctrlKey, e.altKey, e.shiftKey, e.metaKey)]
-			if (shortcut != null && (shortcut.enabled == null || shortcut.enabled())) {
-				if (shortcut.exec({
-					keyCode,
-					ctrl: e.ctrlKey,
-					alt: e.altKey,
-					shift: e.shiftKey,
-					meta: e.metaKey
-				}) !== true) {
-					e.preventDefault()
-				}
+	_handleKeydown(e: KeyboardEvent): void {
+		let keyCode = e.which
+		let keysToShortcuts = (this._keyToModalShortcut.size > 1)
+			? this._keyToModalShortcut
+			: this._keyToShortcut
+		let shortcut = keysToShortcuts.get(createKeyIdentifier(keyCode, e.ctrlKey, e.altKey, e.shiftKey, e.metaKey))
+		if (shortcut != null && (shortcut.enabled == null || shortcut.enabled())) {
+			if (shortcut.exec({
+				keyCode,
+				key: e.key,
+				ctrl: e.ctrlKey,
+				alt: e.altKey,
+				shift: e.shiftKey,
+				meta: e.metaKey
+			}) !== true) {
+				e.preventDefault()
 			}
-		}, false);
-
+		}
 	}
 
-	_getShortcutName(shortcut: Shortcut): string {
-		return ((shortcut.meta) ? Keys.META.name + " + " : "")
-			+ ((shortcut.ctrl) ? Keys.CTRL.name + " + " : "")
-			+ ((shortcut.shift) ? Keys.SHIFT.name + " + " : "")
-			+ ((shortcut.alt) ? Keys.ALT.name + " + " : "")
-			+ shortcut.key.name
+	/**
+	 * open a dialog listing all currently active shortcuts
+	 * @param forceBaseShortcuts set to true for the special case where the dialog is opened
+	 * from the support dropdown (which registers its own shortcuts as modal shortcuts)
+	 */
+	openF1Help(forceBaseShortcuts: boolean = false): void {
+		if (this._isHelpOpen) return
+		this._isHelpOpen = true
+
+		// we decide which shortcuts to show right now.
+		//
+		// the help dialog will register its own shortcuts which would override the
+		// standard shortcuts if we did this later
+		//
+		// we can't do this in the register/unregister method because the modal
+		// unregisters the old dialog shortcuts and then registers the new ones
+		// when the top dialog changes, leading to a situation where
+		// modalshortcuts is empty.
+		const shortcutsToShow = this._keyToModalShortcut.size > 1 && !forceBaseShortcuts
+			? Array.from(this._keyToModalShortcut.values()) // copy values, they will change
+			: [...this._keyToShortcut.values(), ...this._desktopShortcuts]
+		import("../gui/dialogs/ShortcutDialog.js")
+			.then(({showShortcutDialog}) => showShortcutDialog(shortcutsToShow))
+			.then(() => this._isHelpOpen = false)
 	}
 
-	_createKeyIdentifier(keycode: number, ctrl: ?boolean, alt: ?boolean, shift: ?boolean, meta: ?boolean): string {
-		return keycode + (ctrl ? "C" : "") + (alt ? "A" : "") + (shift ? "S" : "") + (meta ? "M" : "")
-	}
-
-	registerShortcuts(shortcuts: Shortcut[]) {
+	registerShortcuts(shortcuts: Array<Shortcut>) {
 		Keys.META.code = (client.browser === BrowserType.FIREFOX ? 224 : 91)
-		addAll(this._shortcuts, shortcuts)
-		for (let s of shortcuts) {
-			let id = this._createKeyIdentifier(s.key.code, s.ctrl, s.alt, s.shift, s.meta)
-			this._keyToShortcut[id] = s
-		}
+		this._applyOperation(shortcuts, (id, s) => this._keyToShortcut.set(id, s))
 	}
 
-	unregisterShortcuts(shortcuts: Shortcut[]) {
-		removeAll(this._shortcuts, shortcuts)
-		for (let s of shortcuts) {
-			let id = this._createKeyIdentifier(s.key.code, s.ctrl, s.alt, s.shift, s.meta)
-			delete this._keyToShortcut[id]
-		}
+	unregisterShortcuts(shortcuts: Array<Shortcut>) {
+		this._applyOperation(shortcuts, (id, s) => this._keyToShortcut.delete(id))
 	}
 
-	registerModalShortcuts(shortcuts: Shortcut[]) {
-		addAll(this._modalShortcuts, shortcuts)
-		for (let s of shortcuts) {
-			let id = this._createKeyIdentifier(s.key.code, s.ctrl, s.alt, s.shift, s.meta)
-			this._keyToModalShortcut[id] = s
-		}
+	registerDesktopShortcuts(shortcuts: Array<Shortcut>) {
+		this._applyOperation(shortcuts, (id, s) => this._desktopShortcuts.push(s))
 	}
 
-	registerDesktopShortcuts(shortcuts: Shortcut[]) {
-		addAll(this._desktopShortcuts, shortcuts)
+	registerModalShortcuts(shortcuts: Array<Shortcut>) {
+		this._applyOperation(shortcuts, (id, s) => {
+			this._keyToModalShortcut.set(id, s)
+		})
 	}
 
-	unregisterModalShortcuts(shortcuts: Shortcut[]) {
-		removeAll(this._modalShortcuts, shortcuts)
-		for (let s of shortcuts) {
-			let id = this._createKeyIdentifier(s.key.code, s.ctrl, s.alt, s.shift, s.meta)
-			delete this._keyToModalShortcut[id]
-		}
+	unregisterModalShortcuts(shortcuts: Array<Shortcut>) {
+		this._applyOperation(shortcuts, (id, s) => {
+			this._keyToModalShortcut.delete(id)
+		})
 	}
 
+	/**
+	 *
+	 * @param shortcuts list of shortcuts to operate on
+	 * @param operation operation to execute for every shortcut and its ID
+	 * @private
+	 */
+	_applyOperation(shortcuts: Array<Shortcut>, operation: (id: string, s: Shortcut) => mixed) {
+		shortcuts.forEach(s => operation(createKeyIdentifier(s.key.code, s.ctrl, s.alt, s.shift, s.meta), s))
+	}
 }
 
 export function isKeyPressed(keyCode: number, ...keys: Array<KeysEnum>): boolean {

@@ -1,7 +1,7 @@
 // @flow
 import m from "mithril"
 import stream from "mithril/stream/stream.js"
-import {assertMainOrNode} from "../api/Env"
+import {assertMainOrNode} from "../api/common/Env"
 import type {TextFieldAttrs} from "../gui/base/TextFieldN"
 import {TextFieldN} from "../gui/base/TextFieldN"
 import {lang} from "../misc/LanguageViewModel"
@@ -15,16 +15,20 @@ import {formatDateTimeFromYesterdayOn} from "../misc/Formatter"
 import {SessionState} from "../api/common/TutanotaConstants"
 import {EditSecondFactorsForm} from "./EditSecondFactorsForm"
 import {LazyLoaded} from "../api/common/utils/LazyLoaded"
+import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
 import type {ButtonAttrs} from "../gui/base/ButtonN"
 import {ButtonN, ButtonType} from "../gui/base/ButtonN"
 import {NotFoundError} from "../api/common/error/RestError"
 import * as RecoverCodeDialog from "./RecoverCodeDialog"
 import {attachDropdown} from "../gui/base/DropdownN"
-import type {ExpanderAttrs} from "../gui/base/ExpanderN"
-import {ExpanderButtonN, ExpanderPanelN} from "../gui/base/ExpanderN"
+import type {ExpanderAttrs} from "../gui/base/Expander"
+import {ExpanderButtonN, ExpanderPanelN} from "../gui/base/Expander"
 import type {TableAttrs, TableLineAttrs} from "../gui/base/TableN"
 import {ColumnWidth, TableN} from "../gui/base/TableN"
+import {ifAllowedTutanotaLinks} from "../gui/base/GuiUtils"
+import type {UpdatableSettingsViewer} from "./SettingsView"
+import {ofClass, promiseMap} from "../api/common/utils/PromiseUtils"
 
 assertMainOrNode()
 
@@ -48,7 +52,7 @@ export class LoginSettingsViewer implements UpdatableSettingsViewer {
 		this._updateSessions()
 	}
 
-	view(): VirtualElement {
+	view(): Children {
 		const mailAddressAttrs: TextFieldAttrs = {
 			label: "mailAddress_label",
 			value: this._mailAddress,
@@ -93,11 +97,10 @@ export class LoginSettingsViewer implements UpdatableSettingsViewer {
 		const recoveryCodeFieldAttrs: TextFieldAttrs = {
 			label: "recoveryCode_label",
 			helpLabel: () => {
-				const lnk = lang.getInfoLink("recoverCode_link")
-				return [
+				return ifAllowedTutanotaLinks("recoverCode_link", link => [
 					m("span", lang.get("moreInfo_msg") + " "),
-					m("span.text-break", [m(`a[href=${lnk}][target=_blank]`, lnk)])
-				]
+					m("span.text-break", [m(`a[href=${link}][target=_blank]`, link)])
+				])
 			},
 			value: this._stars,
 			disabled: true,
@@ -124,30 +127,35 @@ export class LoginSettingsViewer implements UpdatableSettingsViewer {
 			lines: this._closedSessionsTableLines(),
 		}
 
-		return m("", [
-			m("#user-settings.fill-absolute.scroll.plr-l.pb-xl", [
-				m(".h4.mt-l", lang.get('loginCredentials_label')),
-				m(TextFieldN, mailAddressAttrs),
-				m(TextFieldN, passwordAttrs),
-				m(TextFieldN, recoveryCodeFieldAttrs),
-				(!logins.getUserController().isOutlookAccount()) ?
-					m(this._secondFactorsForm) : null,
-				m(".h4.mt-l", lang.get('activeSessions_label')),
-				m(TableN, activeSessionTableAttrs),
-				m(".small", lang.get("sessionsInfo_msg")),
-				m(".flex-space-between.items-center.mt-l.mb-s", [
-					m(".h4", lang.get('closedSessions_label')),
-					m(ExpanderButtonN, closedSessionExpanderAttrs)
-				]),
-				m(ExpanderPanelN, {expanded: this._closedSessionsExpanded}, m(TableN, closedSessionTableAttrs)),
-				m(".small", lang.get("sessionsWillBeDeleted_msg")),
-				m(".small", lang.get("sessionsInfo_msg")),
+		// Might be not there when we are logging out
+		if (logins.isUserLoggedIn()) {
+			const user = logins.getUserController()
+			return m("", [
+				m("#user-settings.fill-absolute.scroll.plr-l.pb-xl", [
+					m(".h4.mt-l", lang.get('loginCredentials_label')),
+					m(TextFieldN, mailAddressAttrs),
+					m(TextFieldN, passwordAttrs),
+					user.isGlobalAdmin() ? m(TextFieldN, recoveryCodeFieldAttrs) : null,
+					m(this._secondFactorsForm),
+					m(".h4.mt-l", lang.get('activeSessions_label')),
+					m(TableN, activeSessionTableAttrs),
+					m(".small", lang.get("sessionsInfo_msg")),
+					m(".flex-space-between.items-center.mt-l.mb-s", [
+						m(".h4", lang.get('closedSessions_label')),
+						m(ExpanderButtonN, closedSessionExpanderAttrs)
+					]),
+					m(ExpanderPanelN, {expanded: this._closedSessionsExpanded}, m(TableN, closedSessionTableAttrs)),
+					m(".small", lang.get("sessionsWillBeDeleted_msg")),
+					m(".small", lang.get("sessionsInfo_msg")),
+				])
 			])
-		])
+		} else {
+			return null
+		}
 	}
 
-	_updateSessions() {
-		loadAll(SessionTypeRef, neverNull(logins.getUserController().user.auth).sessions).then(sessions => {
+	_updateSessions(): Promise<void> {
+		return loadAll(SessionTypeRef, neverNull(logins.getUserController().user.auth).sessions).then(sessions => {
 			sessions.sort((s1, s2) => s2.lastAccessTime.getTime() - s1.lastAccessTime.getTime())
 			this._activeSessionsTableLines(sessions
 				.filter(session => session.state === SessionState.SESSION_STATE_ACTIVE)
@@ -162,9 +170,9 @@ export class LoginSettingsViewer implements UpdatableSettingsViewer {
 						actionButtonAttrs: thisSession ? null : {
 							label: "closeSession_action",
 							click: () => {
-								erase(session).catch(NotFoundError, () => {
+								erase(session).catch(ofClass(NotFoundError, () => {
 									console.log(`session ${JSON.stringify(session._id)} already deleted`)
-								})
+								}))
 							},
 							icon: () => Icons.Cancel
 						}
@@ -184,12 +192,15 @@ export class LoginSettingsViewer implements UpdatableSettingsViewer {
 		})
 	}
 
-	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>) {
-		for (let update of updates) {
+	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>): Promise<void> {
+		return promiseMap(updates, update => {
+			let promise = Promise.resolve()
 			if (isUpdateForTypeRef(SessionTypeRef, update)) {
-				this._updateSessions()
+				promise = this._updateSessions()
 			}
-			this._secondFactorsForm.entityEventReceived(update)
-		}
+			return promise.then(() => {
+				return this._secondFactorsForm.entityEventReceived(update)
+			})
+		}).then(noOp)
 	}
 }

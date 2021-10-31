@@ -1,34 +1,38 @@
 // @flow
+import type {EntityRestInterface} from "./EntityRestClient"
 import {typeRefToPath} from "./EntityRestClient"
-import type {HttpMethodEnum, ListElement} from "../../common/EntityFunctions"
+import type {HttpMethodEnum} from "../../common/EntityFunctions"
 import {
-	firstBiggerThanSecond,
-	GENERATED_MAX_ID,
-	GENERATED_MIN_ID,
-	getLetId,
 	HttpMethod,
-	isSameTypeRef,
-	READ_ONLY_HEADER,
-	resolveTypeReference,
-	TypeRef
+	resolveTypeReference
 } from "../../common/EntityFunctions"
 import {OperationType} from "../../common/TutanotaConstants"
 import {flat, remove} from "../../common/utils/ArrayUtils"
 import {clone, containsEventOfType, downcast, getEventOfType, neverNull} from "../../common/utils/Utils"
 import {PermissionTypeRef} from "../../entities/sys/Permission"
 import {EntityEventBatchTypeRef} from "../../entities/sys/EntityEventBatch"
-import {assertWorkerOrNode} from "../../Env"
-import EC from "../../common/EntityConstants"
+import {assertWorkerOrNode} from "../../common/Env"
+import {ValueType} from "../../common/EntityConstants"
 import {SessionTypeRef} from "../../entities/sys/Session"
-import {StatisticLogEntryTypeRef} from "../../entities/tutanota/StatisticLogEntry"
 import {BucketPermissionTypeRef} from "../../entities/sys/BucketPermission"
 import {SecondFactorTypeRef} from "../../entities/sys/SecondFactor"
 import {RecoverCodeTypeRef} from "../../entities/sys/RecoverCode"
 import {NotAuthorizedError, NotFoundError} from "../../common/error/RestError"
 import {MailTypeRef} from "../../entities/tutanota/Mail"
 import type {EntityUpdate} from "../../entities/sys/EntityUpdate"
+import {RejectedSenderTypeRef} from "../../entities/sys/RejectedSender"
+import {
+	firstBiggerThanSecond,
+	GENERATED_MAX_ID,
+	GENERATED_MIN_ID,
+	getLetId,
+	READ_ONLY_HEADER
+} from "../../common/utils/EntityUtils";
+import type {ListElement} from "../../common/utils/EntityUtils"
+import {isSameTypeRef, TypeRef} from "../../common/utils/TypeRef";
+import {promiseMap} from "../../common/utils/PromiseUtils"
+import {ProgrammingError} from "../../common/error/ProgrammingError"
 
-const ValueType = EC.ValueType
 
 assertWorkerOrNode()
 
@@ -94,7 +98,7 @@ export class EntityRestCache implements EntityRestInterface {
 		this._listEntities = {}
 		this._ignoredTypes = [
 			EntityEventBatchTypeRef, PermissionTypeRef, BucketPermissionTypeRef, SessionTypeRef,
-			StatisticLogEntryTypeRef, SecondFactorTypeRef, RecoverCodeTypeRef
+			SecondFactorTypeRef, RecoverCodeTypeRef, RejectedSenderTypeRef
 		]
 	}
 
@@ -150,15 +154,15 @@ export class EntityRestCache implements EntityRestInterface {
 		}
 	}
 
-	isRangeRequest(listId: ?Id, id: ?Id, queryParameter: ?Params) {
+	isRangeRequest(listId: ?Id, id: ?Id, queryParameter: ?Params): boolean {
 		// check for null and undefined because "" and 0 are als falsy
-		return listId && !id
-			&& queryParameter
+		return listId != null && !id
+			&& queryParameter != null
 			&& queryParameter["start"] !== null
 			&& queryParameter["start"] !== undefined
 			&& queryParameter["count"] !== null
 			&& queryParameter["count"] !== undefined
-			&& queryParameter["reverse"]
+			&& queryParameter["reverse"] != null
 	}
 
 	_loadMultiple<T>(typeRef: TypeRef<T>, method: HttpMethodEnum, listId: ?Id, id: ?Id, entity: ?T, queryParameter: Params,
@@ -418,67 +422,80 @@ export class EntityRestCache implements EntityRestInterface {
 	 *
 	 * @return Promise, which resolves to the array of valid events (if response is NotFound or NotAuthorized we filter it out)
 	 */
-	entityEventsReceived(data: Array<EntityUpdate>): Promise<Array<EntityUpdate>> {
-		return Promise
-			.map(data, (update) => {
-				const {instanceListId, instanceId, operation, type, application} = update
-				if (application === "monitor") return
+	entityEventsReceived(batch: $ReadOnlyArray<EntityUpdate>): Promise<Array<EntityUpdate>> {
+		return promiseMap(batch, (update) => {
+			const {instanceListId, instanceId, operation, type, application} = update
+			if (application === "monitor") return null
 
-				const typeRef = new TypeRef(application, type)
-				switch (operation) {
-					case OperationType.UPDATE:
-						return this._processUpdateEvent(typeRef, update)
+			const typeRef = new TypeRef(application, type)
+			switch (operation) {
+				case OperationType.UPDATE:
+					return this._processUpdateEvent(typeRef, update)
 
-					case OperationType.DELETE:
-						if (isSameTypeRef(MailTypeRef, typeRef) && containsEventOfType(data, OperationType.CREATE, instanceId)) {
-							// move for mail is handled in create event.
-						} else {
-							this._tryRemoveFromCache(typeRef, instanceListId, instanceId)
-						}
-						return update
+				case OperationType.DELETE:
+					if (isSameTypeRef(MailTypeRef, typeRef) && containsEventOfType(batch, OperationType.CREATE, instanceId)) {
+						// move for mail is handled in create event.
+					} else {
+						this._tryRemoveFromCache(typeRef, instanceListId, instanceId)
+					}
+					return update
 
-					case OperationType.CREATE:
-						return this._processCreateEvent(typeRef, update, data)
-				}
-			})
-			.filter(Boolean)
+				case OperationType.CREATE:
+					return this._processCreateEvent(typeRef, update, batch)
+				default:
+					throw new ProgrammingError("Unknown operation type: " + operation)
+			}
+		})
+			.then((result) => result.filter(Boolean))
 	}
 
-	_processCreateEvent(typeRef: TypeRef<*>, update: EntityUpdate, batch: Array<EntityUpdate>): $Promisable<EntityUpdate | null> { // do not return undefined
+	_processCreateEvent(
+		typeRef: TypeRef<*>,
+		update: EntityUpdate,
+		batch: $ReadOnlyArray<EntityUpdate>,
+	): $Promisable<EntityUpdate | null> { // do not return undefined to avoid implicit returns
 		const {instanceListId, instanceId} = update
+
+		// We put new instances into cache only when it's a new instance in the cached range which is only for the list instances.
 		if (instanceListId) {
-			const path = typeRefToPath(typeRef)
 			const deleteEvent = getEventOfType(batch, OperationType.DELETE, instanceId)
-			if (deleteEvent && isSameTypeRef(MailTypeRef, typeRef) && this._isInCache(typeRef, deleteEvent.instanceListId, instanceId)) { // It is a move event
+			const path = typeRefToPath(typeRef)
+			if (deleteEvent && isSameTypeRef(MailTypeRef, typeRef) && this._isInCache(typeRef, deleteEvent.instanceListId, instanceId)) {
+				// It is a move event for cached mail
 				const element = this._getFromCache(typeRef, deleteEvent.instanceListId, instanceId)
 				this._tryRemoveFromCache(typeRef, deleteEvent.instanceListId, instanceId)
 				element._id = [instanceListId, instanceId]
 				this._putIntoCache(element)
 				return update
 			} else if (this._isInCacheRange(path, instanceListId, instanceId)) {
+				// No need to try to download something that's not there anymore
 				return this._entityRestClient.entityRequest(typeRef, HttpMethod.GET, instanceListId, instanceId)
 				           .then(entity => this._putIntoCache(entity))
-				           .return(update)
-				           .catch(this._handleProcessingError)
+				           .then(() => update)
+				           .catch((e) => this._handleProcessingError(e))
+			} else {
+				return update
 			}
+		} else {
+			return update
 		}
-		return update
 	}
 
 	_processUpdateEvent(typeRef: TypeRef<*>, update: EntityUpdate): $Promisable<EntityUpdate | null> {
 		const {instanceListId, instanceId} = update
 		if (this._isInCache(typeRef, instanceListId, instanceId)) {
+			// No need to try to download something that's not there anymore
 			return this._entityRestClient.entityRequest(typeRef, HttpMethod.GET, instanceListId, instanceId)
 			           .then(entity => this._putIntoCache(entity))
-			           .return(update)
-			           .catch(this._handleProcessingError)
+			           .then(() => update)
+			           .catch((e) => this._handleProcessingError(e))
 		}
 		return update
 	}
 
-	_handleProcessingError(e: Error): ?EntityUpdate {
+	_handleProcessingError(e: Error): EntityUpdate | null {
 		// skip event if NotFoundError. May occur if an entity is removed in parallel.
-		// Skip event if. May occur if the user was removed from the owner group.
+		// Skip event if NotAuthorizedError. May occur if the user was removed from the owner group.
 		if (e instanceof NotFoundError || e instanceof NotAuthorizedError) {
 			return null
 		} else {

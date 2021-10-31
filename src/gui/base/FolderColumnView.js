@@ -1,25 +1,27 @@
 // @flow
 
-import {assertMainOrNode} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import {DrawerMenu} from "../nav/DrawerMenu"
 import {theme} from "../theme"
 import m from "mithril"
 import {ButtonN, ButtonType} from "./ButtonN"
 import type {TranslationKey} from "../../misc/LanguageViewModel"
 import {lang} from "../../misc/LanguageViewModel"
-import {AriaLandmarks, landmarkAttrs} from "../../api/common/utils/AriaUtils"
+import {AriaLandmarks, landmarkAttrs} from "../AriaUtils"
+import type {clickHandler} from "./GuiUtils"
+import type {lazy} from "../../api/common/utils/Utils"
 
 assertMainOrNode()
 
 export type Attrs = {
-	/** Button to be displayed on top of the  */
+	/** Button to be displayed on top of the column*/
 	button: ?{label: TranslationKey, click: clickHandler},
 	content: Children,
 	ariaLabel: TranslationKey | lazy<string>
 }
 
 export class FolderColumnView implements MComponent<Attrs> {
-	view({attrs}: Vnode<Attrs>) {
+	view({attrs}: Vnode<Attrs>): Children {
 		return m(".flex.height-100p", [
 			m(DrawerMenu),
 			m(".folder-column.flex-grow.overflow-x-hidden.flex.col"

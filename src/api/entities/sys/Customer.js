@@ -1,10 +1,13 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {AuditLogRef} from "./AuditLogRef"
 import type {UserAreaGroups} from "./UserAreaGroups"
 import type {Feature} from "./Feature"
+import type {RejectedSendersRef} from "./RejectedSendersRef"
 import type {WhitelabelChildrenRef} from "./WhitelabelChildrenRef"
 import type {WhitelabelParent} from "./WhitelabelParent"
 
@@ -19,72 +22,63 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 35,
-			"since": 1,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"_id": {
-			"name": "_id",
 			"id": 33,
-			"since": 1,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerGroup": {
-			"name": "_ownerGroup",
 			"id": 991,
-			"since": 17,
 			"type": "GeneratedId",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_permissions": {
-			"name": "_permissions",
 			"id": 34,
-			"since": 1,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"approvalStatus": {
-			"name": "approvalStatus",
 			"id": 926,
-			"since": 12,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
+		"businessUse": {
+			"id": 1754,
+			"type": "Boolean",
+			"cardinality": "ZeroOrOne",
+			"final": false,
+			"encrypted": false
+		},
 		"canceledPremiumAccount": {
-			"name": "canceledPremiumAccount",
 			"id": 902,
-			"since": 10,
 			"type": "Boolean",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"orderProcessingAgreementNeeded": {
-			"name": "orderProcessingAgreementNeeded",
 			"id": 1347,
-			"since": 31,
 			"type": "Boolean",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"type": {
-			"name": "type",
 			"id": 36,
-			"since": 1,
 			"type": "Number",
 			"cardinality": "One",
 			"final": true,
@@ -93,171 +87,142 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"auditLog": {
-			"name": "auditLog",
 			"id": 1161,
-			"since": 22,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "AuditLogRef",
-			"final": true
+			"dependency": null
 		},
 		"contactFormUserAreaGroups": {
-			"name": "contactFormUserAreaGroups",
 			"id": 1160,
-			"since": 22,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "UserAreaGroups",
-			"final": true
+			"dependency": null
 		},
 		"contactFormUserGroups": {
-			"name": "contactFormUserGroups",
 			"id": 1159,
-			"since": 22,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "UserAreaGroups",
-			"final": true
+			"dependency": null
 		},
 		"customizations": {
-			"name": "customizations",
 			"id": 1256,
-			"since": 25,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "Feature",
-			"final": false
+			"dependency": null
+		},
+		"rejectedSenders": {
+			"id": 1750,
+			"type": "AGGREGATION",
+			"cardinality": "ZeroOrOne",
+			"final": true,
+			"refType": "RejectedSendersRef",
+			"dependency": null
 		},
 		"userAreaGroups": {
-			"name": "userAreaGroups",
 			"id": 992,
-			"since": 17,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "UserAreaGroups",
-			"final": true
+			"dependency": null
 		},
 		"whitelabelChildren": {
-			"name": "whitelabelChildren",
 			"id": 1277,
-			"since": 26,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "WhitelabelChildrenRef",
-			"final": true
+			"dependency": null
 		},
 		"whitelabelParent": {
-			"name": "whitelabelParent",
 			"id": 1276,
-			"since": 26,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "WhitelabelParent",
-			"final": true
+			"dependency": null
 		},
 		"adminGroup": {
-			"name": "adminGroup",
 			"id": 37,
-			"since": 1,
 			"type": "ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "Group",
 			"final": true,
-			"external": false
+			"refType": "Group"
 		},
 		"adminGroups": {
-			"name": "adminGroups",
 			"id": 39,
-			"since": 1,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "GroupInfo",
 			"final": true,
-			"external": false
+			"refType": "GroupInfo"
 		},
 		"customerGroup": {
-			"name": "customerGroup",
 			"id": 38,
-			"since": 1,
 			"type": "ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "Group",
 			"final": true,
-			"external": false
+			"refType": "Group"
 		},
 		"customerGroups": {
-			"name": "customerGroups",
 			"id": 40,
-			"since": 1,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "GroupInfo",
 			"final": true,
-			"external": false
+			"refType": "GroupInfo"
 		},
 		"customerInfo": {
-			"name": "customerInfo",
 			"id": 160,
-			"since": 1,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "CustomerInfo",
 			"final": true,
-			"external": false
+			"refType": "CustomerInfo"
 		},
 		"orderProcessingAgreement": {
-			"name": "orderProcessingAgreement",
 			"id": 1348,
-			"since": 31,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "ZeroOrOne",
-			"refType": "OrderProcessingAgreement",
 			"final": true,
-			"external": false
+			"refType": "OrderProcessingAgreement"
 		},
 		"properties": {
-			"name": "properties",
 			"id": 662,
-			"since": 6,
 			"type": "ELEMENT_ASSOCIATION",
 			"cardinality": "ZeroOrOne",
-			"refType": "CustomerProperties",
 			"final": true,
-			"external": false
+			"refType": "CustomerProperties"
 		},
 		"serverProperties": {
-			"name": "serverProperties",
 			"id": 960,
-			"since": 13,
 			"type": "ELEMENT_ASSOCIATION",
 			"cardinality": "ZeroOrOne",
-			"refType": "CustomerServerProperties",
 			"final": true,
-			"external": false
+			"refType": "CustomerServerProperties"
 		},
 		"teamGroups": {
-			"name": "teamGroups",
 			"id": 42,
-			"since": 1,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "GroupInfo",
 			"final": true,
-			"external": false
+			"refType": "GroupInfo"
 		},
 		"userGroups": {
-			"name": "userGroups",
 			"id": 41,
-			"since": 1,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "GroupInfo",
 			"final": true,
-			"external": false
+			"refType": "GroupInfo"
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createCustomer(values?: $Shape<$Exact<Customer>>): Customer {
@@ -272,6 +237,7 @@ export type Customer = {
 	_ownerGroup: ?Id;
 	_permissions: Id;
 	approvalStatus: NumberString;
+	businessUse: ?boolean;
 	canceledPremiumAccount: boolean;
 	orderProcessingAgreementNeeded: boolean;
 	type: NumberString;
@@ -280,6 +246,7 @@ export type Customer = {
 	contactFormUserAreaGroups: ?UserAreaGroups;
 	contactFormUserGroups: ?UserAreaGroups;
 	customizations: Feature[];
+	rejectedSenders: ?RejectedSendersRef;
 	userAreaGroups: ?UserAreaGroups;
 	whitelabelChildren: ?WhitelabelChildrenRef;
 	whitelabelParent: ?WhitelabelParent;

@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const UserAuthenticationTypeRef: TypeRef<UserAuthentication> = new TypeRef("sys", "UserAuthentication")
@@ -14,9 +16,7 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 1207,
-			"since": 23,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
@@ -25,38 +25,29 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"recoverCode": {
-			"name": "recoverCode",
 			"id": 1416,
-			"since": 36,
 			"type": "ELEMENT_ASSOCIATION",
 			"cardinality": "ZeroOrOne",
-			"refType": "RecoverCode",
 			"final": false,
-			"external": false
+			"refType": "RecoverCode"
 		},
 		"secondFactors": {
-			"name": "secondFactors",
 			"id": 1209,
-			"since": 23,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "SecondFactor",
 			"final": true,
-			"external": false
+			"refType": "SecondFactor"
 		},
 		"sessions": {
-			"name": "sessions",
 			"id": 1208,
-			"since": 23,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "Session",
 			"final": true,
-			"external": false
+			"refType": "Session"
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createUserAuthentication(values?: $Shape<$Exact<UserAuthentication>>): UserAuthentication {

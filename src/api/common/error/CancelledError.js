@@ -1,5 +1,7 @@
 // @flow
+//@bundleInto:common-min
 import {TutanotaError} from "./TutanotaError"
+
 
 export class CancelledError extends TutanotaError {
 	/**

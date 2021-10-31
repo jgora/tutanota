@@ -3,17 +3,18 @@ import m from "mithril"
 import type {BootIconsEnum} from "./icons/BootIcons"
 import {BootIcons, BootIconsSvg} from "./icons/BootIcons"
 import {theme} from "../theme"
-import {assertMainOrNodeBoot} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import type {IconsEnum} from "./icons/Icons"
-import {asyncImport} from "../../api/common/utils/Utils"
+import type {lazy} from "../../api/common/utils/Utils"
 
-assertMainOrNodeBoot()
+assertMainOrNode()
 
 export type IconAttrs = {
 	icon: AllIconsEnum,
 	class?: string,
 	large?: boolean,
 	style?: Object,
+	container?: "span" | "div" // defaults to "span"
 }
 
 export type AllIconsEnum = BootIconsEnum | IconsEnum
@@ -21,23 +22,23 @@ export type AllIconsEnum = BootIconsEnum | IconsEnum
 export type lazyIcon = lazy<AllIconsEnum>;
 
 let IconsSvg = {}
-asyncImport(typeof module !== "undefined" ? module.id : __moduleName, `${env.rootPathPrefix}src/gui/base/icons/Icons.js`)
+import("./icons/Icons.js")
 	.then(IconsModule => {
 		IconsSvg = IconsModule.IconsSvg
 	})
 
-
-class _Icon {
-	view(vnode: Vnode<IconAttrs>): Children | null | void {
-		let icon = BootIconsSvg[(vnode.attrs.icon: any)] ? BootIconsSvg[(vnode.attrs.icon: any)] : IconsSvg[(vnode.attrs.icon: any)]
-		return m("span.icon", {
+export class Icon implements MComponent<IconAttrs> {
+	view(vnode: Vnode<IconAttrs>): Children {
+		const icon = BootIconsSvg[(vnode.attrs.icon: any)] ? BootIconsSvg[(vnode.attrs.icon: any)] : IconsSvg[(vnode.attrs.icon: any)]
+		const container = vnode.attrs.container || "span"
+		return m(container + ".icon", {
 			"aria-hidden": "true",
 			class: this.getClass(vnode.attrs),
 			style: this.getStyle(vnode.attrs.style)
 		}, m.trust(icon)) // icon is typed, so we may not embed untrusted data
 	}
 
-	getStyle(style: ?Object) {
+	getStyle(style: ?Object): {fill: string} {
 		style = style ? style : {}
 		if (!style.fill) {
 			style.fill = theme.content_accent
@@ -45,7 +46,7 @@ class _Icon {
 		return style
 	}
 
-	getClass(attrs: IconAttrs) {
+	getClass(attrs: IconAttrs): string {
 		if (attrs.large) {
 			return "icon-large"
 		} else if (attrs.class) {
@@ -55,8 +56,6 @@ class _Icon {
 		}
 	}
 }
-
-export const Icon: Class<MComponent<IconAttrs>> = _Icon
 
 export function progressIcon(): Vnode<IconAttrs> {
 	return m(Icon, {

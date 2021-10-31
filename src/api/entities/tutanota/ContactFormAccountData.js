@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {ContactFormStatisticField} from "./ContactFormStatisticField"
 import type {ContactFormStatisticEntry} from "./ContactFormStatisticEntry"
@@ -18,9 +20,7 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 792,
-			"since": 19,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -29,54 +29,47 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"statisticFields": {
-			"name": "statisticFields",
 			"id": 795,
-			"since": 19,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "ContactFormStatisticField",
-			"final": false
+			"dependency": null
 		},
 		"statistics": {
-			"name": "statistics",
 			"id": 831,
-			"since": 22,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "ContactFormStatisticEntry",
-			"final": true
+			"dependency": null
 		},
 		"userData": {
-			"name": "userData",
 			"id": 793,
-			"since": 19,
 			"type": "AGGREGATION",
 			"cardinality": "One",
+			"final": false,
 			"refType": "ContactFormUserData",
-			"final": false
+			"dependency": null
 		},
 		"userGroupData": {
-			"name": "userGroupData",
 			"id": 794,
-			"since": 19,
 			"type": "AGGREGATION",
 			"cardinality": "One",
+			"final": false,
 			"refType": "InternalGroupData",
-			"final": false
+			"dependency": null
 		},
 		"contactForm": {
-			"name": "contactForm",
 			"id": 796,
-			"since": 19,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "ContactForm",
 			"final": false,
-			"external": false
+			"refType": "ContactForm"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createContactFormAccountData(values?: $Shape<$Exact<ContactFormAccountData>>): ContactFormAccountData {

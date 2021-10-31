@@ -1,5 +1,5 @@
 //@flow
-import {assertMainOrNodeBoot, Mode} from "../api/Env"
+import {assertMainOrNodeBoot, Mode} from "../api/common/Env"
 import type {BrowserData, BrowserTypeEnum, DeviceTypeEnum} from "./ClientConstants"
 import {BrowserType, DeviceType} from "./ClientConstants"
 import {neverNull} from "../api/common/utils/Utils"
@@ -29,18 +29,87 @@ class ClientDetector {
 	}
 
 	/**
+	 * This function uses syntax constructs which we want to make sure are supported. If they are not then this file cannot be imported.
+	 */
+	syntaxChecks() {
+		// By default rollup disables tree-shaking inside the try-catch.
+		try {
+			const arrowFunction = () => {
+				return 1
+			}
+			let aLet = 2
+
+			function* testGenerator() {
+			}
+
+			async function testAsync() {
+			}
+
+			function testDefaultArgs(a = 2) {
+			}
+
+			testGenerator()
+			testAsync()
+			testDefaultArgs()
+
+			const anArray = [1, 2, 3]
+			const spreadArray = [...anArray]
+
+			const dynamicString = ""
+			const impossibleCondition = arrowFunction() === aLet
+			if (impossibleCondition) {
+				import(dynamicString)
+			}
+
+			const objectSyntax = {
+				[dynamicString]: true,
+				testFn() {},
+				get accessor() {},
+				set accessor(newValue) {},
+			}
+
+			const templateString = `test ${dynamicString}`
+			const x = 1
+			const y = 2
+			const propertyShorthand = {x, y}
+			const {x: x2, y: y2} = propertyShorthand
+			const [a1, a2, ...arest] = anArray
+
+			class WithStatisMember {
+				static aFuncton() {
+				}
+			}
+
+			for (const item of testGenerator()) {
+			}
+
+
+		} catch (e) {
+		}
+	}
+
+	testBuiltins(): boolean {
+		return (
+			typeof Set !== "undefined" &&
+			typeof Map !== "undefined" &&
+			typeof Array.prototype.includes === "function" &&
+			typeof Object.entries === "function" &&
+			typeof Object.values === "function" &&
+			typeof Object.fromEntries === "function" &&
+			typeof Symbol !== "undefined" &&
+			typeof Uint8Array !== "undefined" &&
+			typeof Proxy !== "undefined" &&
+			typeof Reflect !== "undefined" &&
+			typeof Promise.prototype.finally !== "undefined"
+		)
+	}
+
+	/**
 	 * Browsers which support these features are supported
 	 */
 	isSupported(): boolean {
-		return this.isSupportedBrowserVersion() &&
-			this.flexbox() &&
-			this.websockets() &&
-			this.xhr2() &&
-			this.randomNumbers() &&
-			this.dateFormat() &&
-			this.blob() &&
-			this.history() &&
-			this.supportsFocus()
+		this.syntaxChecks()
+		return this.isSupportedBrowserVersion() && this.testBuiltins() && this.websockets()
 	}
 
 	isMobileDevice(): boolean {
@@ -50,7 +119,6 @@ class ClientDetector {
 	isDesktopDevice(): boolean {
 		return this.device === DeviceType.DESKTOP
 	}
-
 
 	/**
 	 * @see https://github.com/Modernizr/Modernizr/blob/master/feature-detects/css/flexbox.js
@@ -94,20 +162,16 @@ class ClientDetector {
 	 * @see https://github.com/Modernizr/Modernizr/blob/master/feature-detects/blob.js
 	 */
 	blob(): boolean {
-		try {
-			return !!new Blob()
-		} catch (e) {
-			return false
-		}
+		return typeof Blob !== "undefined"
 	}
 
 	localStorage(): boolean {
 		try {
-			return localStorage ? true : false
+			return localStorage != null
 		} catch (e) {
+			// DOMException is thrown if all cookies are disabled
 			return false
 		}
-
 	}
 
 	/**
@@ -144,7 +208,7 @@ class ClientDetector {
 
 	indexedDb(): boolean {
 		try {
-			return indexedDB != null
+			return window.indexedDB != null
 		} catch (e) {
 			return false
 		}
@@ -180,10 +244,6 @@ class ClientDetector {
 		var edgeIndex = this.userAgent.indexOf("Edge") // "Old" edge based on EdgeHTML, "new" one based on Blink has only "Edg"
 		var ie11Index = this.userAgent.indexOf("Trident/7.0")
 		var androidIndex = this.userAgent.indexOf("Android")
-		var blackBerryIndex = this.userAgent.indexOf("BB10")
-		var ubuntuMobileIndex = this.userAgent.indexOf("Ubuntu Mobile")
-		var ubuntuTabletIndex = this.userAgent.indexOf("Ubuntu Tablet")
-		var ubuntuIndex = this.userAgent.indexOf("Ubuntu")
 
 		var versionIndex = -1
 		if (edgeIndex !== -1) {
@@ -203,9 +263,6 @@ class ClientDetector {
 		} else if (paleMoonIndex !== -1) {
 			this.browser = BrowserType.PALEMOON
 			versionIndex = paleMoonIndex + 9
-		} else if (waterfoxIndex !== -1) {
-			this.browser = BrowserType.WATERFOX
-			versionIndex = waterfoxIndex + 9
 		} else if ((firefoxIndex !== -1 || iceweaselIndex !== -1) && (operaIndex1 === -1) && (operaIndex2 === -1)) {
 			// Opera may pretend to be Firefox, so it is skipped
 			this.browser = BrowserType.FIREFOX
@@ -217,19 +274,14 @@ class ClientDetector {
 		} else if (chromeIndex !== -1) {
 			this.browser = BrowserType.CHROME
 			versionIndex = chromeIndex + 7
-		} else if (androidIndex !== -1) {
-			if (ubuntuIndex !== -1) { // ubuntu phone browser
-				this.browser = BrowserType.UBUNTU
-				versionIndex = ubuntuIndex + 7
-			} else { // default android browser
-				// keep this check after Chrome, Firefox and Opera, because the Android browser does not identify itself in any other way
-				this.browser = BrowserType.ANDROID
-				versionIndex = androidIndex + 8
-			}
+		} else if (androidIndex !== -1) { // default android browser
+			// keep this check after Chrome, Firefox and Opera, because the Android browser does not identify itself in any other way
+			this.browser = BrowserType.ANDROID
+			versionIndex = androidIndex + 8
 		} else if (chromeIosIndex !== -1) {
 			this.browser = BrowserType.CHROME
 			versionIndex = chromeIosIndex + 6
-		} else if (safariIndex !== -1 && chromeIndex === -1 && blackBerryIndex === -1) {
+		} else if (safariIndex !== -1 && chromeIndex === -1) {
 			// Chrome and black berry pretends to be Safari, so it is skipped
 			this.browser = BrowserType.SAFARI
 			// Safari prints its version after "Version/"
@@ -253,12 +305,6 @@ class ClientDetector {
 		} else if (ie11Index !== -1) {
 			this.browser = BrowserType.IE
 			this.browserVersion = 11
-		} else if (blackBerryIndex !== -1) {
-			this.browser = BrowserType.BB
-			this.browserVersion = 10
-		} else if (ubuntuMobileIndex !== -1 || ubuntuTabletIndex !== -1) {
-			this.browser = BrowserType.UBUNTU
-			this.browserVersion = 1 // dummy, no browser version is provided
 		}
 		if (versionIndex !== -1) {
 			var mainVersionEndIndex = this.userAgent.indexOf(".", versionIndex)
@@ -319,27 +365,23 @@ class ClientDetector {
 			} else {
 				this.device = DeviceType.ANDROID
 			}
-		} else if (this.userAgent.match(/Windows Phone/) != null) {
-			this.device = DeviceType.WINDOWS_PHONE
 		} else if (this.userAgent.match(/Windows NT/) != null) {
 			this.device = DeviceType.DESKTOP
-		} else if (this.userAgent.match(/BB10/) != null) {
-			this.device = DeviceType.BB
 		} else if (this.userAgent.match(/Mobile/) != null || this.userAgent.match(/Tablet/) != null) {
 			this.device = DeviceType.OTHER_MOBILE
 		}
 	}
 
-	isTouchSupported() {
+	isTouchSupported(): boolean {
 		return 'ontouchstart' in window
 	}
 
-	isIos() {
+	isIos(): boolean {
 		return this.device === DeviceType.IPAD || this.device === DeviceType.IPHONE
 	}
 
 
-	cssPropertyValueSupported(prop: string, value: string) {
+	cssPropertyValueSupported(prop: string, value: string): boolean {
 		let d = (document.createElement('div'): any)
 		d.style[prop] = value
 		return d.style[prop] === value
@@ -360,8 +402,7 @@ class ClientDetector {
 		return 'Unknown'
 	}
 
-
-	isIE() {
+	isIE(): boolean {
 		return this.browser === BrowserType.IE
 	}
 
@@ -369,14 +410,14 @@ class ClientDetector {
 		return this.notOldFirefox() && this.notOldChrome()
 	}
 
-	notOldFirefox() {
+	notOldFirefox(): boolean {
 		// issue only occurs for old Firefox browsers
 		// https://github.com/tutao/tutanota/issues/835
 		return this.browser !== BrowserType.FIREFOX || this.browserVersion > 40
 	}
 
-	notOldChrome() {
-		return this.browser !== BrowserType.CHROME || this.browserVersion > 37
+	notOldChrome(): boolean {
+		return this.browser !== BrowserType.CHROME || this.browserVersion > 55
 	}
 
 	canDownloadMultipleFiles(): boolean {
@@ -393,8 +434,6 @@ class ClientDetector {
 		return this.isIos()
 			|| this.browser === BrowserType.SAFARI
 			|| this.browser === BrowserType.PALEMOON
-			|| this.browser === BrowserType.WATERFOX
-			// Waterfox looks like Firefox 60 currently
 			|| this.browser === BrowserType.FIREFOX && this.browserVersion <= 60
 			|| this.browser === BrowserType.CHROME && this.browserVersion < 59
 	}

@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const CloseSessionServicePostTypeRef: TypeRef<CloseSessionServicePost> = new TypeRef("sys", "CloseSessionServicePost")
@@ -14,18 +16,14 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1596,
-			"since": 50,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"accessToken": {
-			"name": "accessToken",
 			"id": 1597,
-			"since": 50,
 			"type": "String",
 			"cardinality": "One",
 			"final": false,
@@ -34,18 +32,15 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"sessionId": {
-			"name": "sessionId",
 			"id": 1598,
-			"since": 50,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "Session",
 			"final": false,
-			"external": false
+			"refType": "Session"
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createCloseSessionServicePost(values?: $Shape<$Exact<CloseSessionServicePost>>): CloseSessionServicePost {

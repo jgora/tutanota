@@ -1,7 +1,8 @@
 //@flow
+//@bundleInto:common-min
 
-import {stringToUtf8Uint8Array} from "./utils/Encoding"
 import {errorToString} from "./utils/Utils"
+
 
 export const LOG_SIZE = 1000
 
@@ -40,9 +41,14 @@ export class Logger {
 		}
 	}
 
-	formatLogEntry(date: Date, level: string, ...rest: Array<any>) {
+	formatLogEntry(date: Date, level: string, ...rest: Array<any>): string {
 		const formattedArgs = rest.map((obj) => {
-			return (obj instanceof Error ? errorToString(obj) : JSON.stringify(obj))
+			try {
+				return (obj instanceof Error ? errorToString(obj) : JSON.stringify(obj))
+			} catch (e) {
+				return "[cyclic object]"
+			}
+
 		})
 		const message = formattedArgs.join(",")
 		return `${date.toISOString()} ${level} ${message}`
@@ -58,17 +64,19 @@ export class Logger {
 
 }
 
-export function createLogFile(timestamp: number, entries: Array<string>, scope: string): DataFile {
-	const content = entries.join("\n")
-	const data = stringToUtf8Uint8Array(content)
-	return {
-		_type: 'DataFile',
-		name: timestamp + "_" + scope + "_tutanota.log",
-		mimeType: "text/plain",
-		data,
-		size: data.byteLength,
-		id: null
-	}
+export function createLogFile(timestamp: number, entries: Array<string>, scope: string): Promise<DataFile> {
+	return import("./utils/Encoding").then(({stringToUtf8Uint8Array}) => {
+		const content = entries.join("\n")
+		const data = stringToUtf8Uint8Array(content)
+		return {
+			_type: 'DataFile',
+			name: timestamp + "_" + scope + "_tutanota.log",
+			mimeType: "text/plain",
+			data,
+			size: data.byteLength,
+			id: null
+		}
+	})
 }
 
 export function replaceNativeLogger(global: any, loggerInstance: Logger, force: boolean = false) {

@@ -1,26 +1,28 @@
 // @flow
 import m from "mithril"
-import {assertMainOrNode} from "../../api/Env"
+import {assertMainOrNode} from "../../api/common/Env"
 import {lang} from "../../misc/LanguageViewModel"
 import type {TranslationKey} from "../../misc/LanguageViewModel"
 
 assertMainOrNode()
 
-export class StatusField {
+export type StatusTypeEnum = 'neutral' | 'valid' | 'invalid'
 
-	view: Function;
-	_status: Stream<Status>;
+export type StatusFieldAttrs = {
+	status: Status,
+}
 
-	constructor(status: Stream<Status>) {
-		this._status = status
-		this.view = () => m("", lang.get(this._status().text))
+export class StatusField implements MComponent<StatusFieldAttrs> {
+
+	view(vnode: Vnode<StatusFieldAttrs>): Children {
+		const {status} = vnode.attrs
+		if (!status) return null
+
+		return m("", lang.get(status.text))
 	}
+}
 
-	isValid(): boolean {
-		return this._status().type === 'valid'
-	}
-
-	getErrorMessageId(): ?TranslationKey {
-		return (this._status().type !== "valid") ? this._status().text : null
-	}
+export type Status = {
+	type: StatusTypeEnum,
+	text: TranslationKey
 }

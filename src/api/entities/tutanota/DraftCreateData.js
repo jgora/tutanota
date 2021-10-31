@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {DraftData} from "./DraftData"
 
@@ -15,45 +17,35 @@ export const _TypeModel: TypeModel = {
 	"encrypted": true,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 509,
-			"since": 11,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"conversationType": {
-			"name": "conversationType",
 			"id": 511,
-			"since": 11,
 			"type": "Number",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"ownerEncSessionKey": {
-			"name": "ownerEncSessionKey",
 			"id": 512,
-			"since": 11,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"previousMessageId": {
-			"name": "previousMessageId",
 			"id": 510,
-			"since": 11,
 			"type": "String",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"symEncSessionKey": {
-			"name": "symEncSessionKey",
 			"id": 513,
-			"since": 11,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
@@ -62,17 +54,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"draftData": {
-			"name": "draftData",
 			"id": 515,
-			"since": 11,
 			"type": "AGGREGATION",
 			"cardinality": "One",
+			"final": false,
 			"refType": "DraftData",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createDraftCreateData(values?: $Shape<$Exact<DraftCreateData>>): DraftCreateData {

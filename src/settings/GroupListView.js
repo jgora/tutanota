@@ -2,15 +2,15 @@
 import m from "mithril"
 import {List} from "../gui/base/List"
 import {load, loadAll} from "../api/main/Entity"
-import {GENERATED_MAX_ID} from "../api/common/EntityFunctions"
-import {assertMainOrNode} from "../api/Env"
+import {assertMainOrNode} from "../api/common/Env"
 import {lang} from "../misc/LanguageViewModel"
 import {NotFoundError} from "../api/common/error/RestError"
 import {size} from "../gui/size"
+import type {GroupInfo} from "../api/entities/sys/GroupInfo"
 import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
 import {CustomerTypeRef} from "../api/entities/sys/Customer"
-import {compareGroupInfos, neverNull} from "../api/common/utils/Utils"
-import {SettingsView} from "./SettingsView"
+import {neverNull, noOp} from "../api/common/utils/Utils"
+import type {SettingsView, UpdatableSettingsViewer} from "./SettingsView"
 import {LazyLoaded} from "../api/common/utils/LazyLoaded"
 import {logins} from "../api/main/LoginController"
 import {GroupViewer} from "./GroupViewer"
@@ -20,14 +20,18 @@ import {Icons} from "../gui/base/icons/Icons"
 import {OperationType} from "../api/common/TutanotaConstants"
 import {BootIcons} from "../gui/base/icons/BootIcons"
 import {header} from "../gui/base/Header"
-import {isAdministratedGroup} from "../search/SearchUtils"
+import {isAdministratedGroup} from "../search/model/SearchUtils"
 import {GroupMemberTypeRef} from "../api/entities/sys/GroupMember"
 import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
 import {ButtonN, ButtonType} from "../gui/base/ButtonN"
-import {showNotAvailableForFreeDialog} from "../misc/ErrorHandlerImpl"
-import type {GroupInfo} from "../api/entities/sys/GroupInfo"
 import type {GroupMembership} from "../api/entities/sys/GroupMembership"
+import {compareGroupInfos} from "../api/common/utils/GroupUtils";
+import {GENERATED_MAX_ID} from "../api/common/utils/EntityUtils";
+import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
+import {locator} from "../api/main/MainLocator"
+import {ListColumnWrapper} from "../gui/ListColumnWrapper"
+import {ofClass, promiseMap} from "../api/common/utils/PromiseUtils"
 
 assertMainOrNode()
 
@@ -79,9 +83,9 @@ export class GroupListView implements UpdatableSettingsViewer {
 			},
 			loadSingle: (elementId) => {
 				return this._listId.getAsync().then(listId => {
-					return load(GroupInfoTypeRef, [listId, elementId]).catch(NotFoundError, (e) => {
+					return load(GroupInfoTypeRef, [listId, elementId]).catch(ofClass(NotFoundError, (e) => {
 						// we return null if the entity does not exist
-					})
+					}))
 				})
 			},
 			sortCompare: compareGroupInfos,
@@ -93,26 +97,23 @@ export class GroupListView implements UpdatableSettingsViewer {
 			swipe: {
 				renderLeftSpacer: () => [],
 				renderRightSpacer: () => [],
-				swipeLeft: (listElement) => Promise.resolve(),
-				swipeRight: (listElement) => Promise.resolve(),
+				swipeLeft: (listElement) => Promise.resolve(false),
+				swipeRight: (listElement) => Promise.resolve(false),
 				enabled: false
 			},
-			elementsDraggable: false,
 			multiSelectionAllowed: false,
 			emptyMessage: lang.get("noEntries_msg")
 		})
 
-		this.view = (): VirtualElement => {
-			return m(".flex.flex-column.fill-absolute", [
-				m(".flex.flex-column.justify-center.plr-l.list-border-right.list-bg.list-header",
-					m(".mr-negative-s.align-self-end", m(ButtonN, {
+		this.view = (): Children => {
+			return m(ListColumnWrapper, {
+					headerContent: m(".mr-negative-s.align-self-end", m(ButtonN, {
 						label: "addGroup_label",
 						type: ButtonType.Primary,
 						click: () => this.addButtonClicked()
 					}))
-				),
-				m(".rel.flex-grow", m(this.list))
-			])
+				},
+				m(this.list))
 		}
 
 		this.list.loadInitial()
@@ -143,7 +144,7 @@ export class GroupListView implements UpdatableSettingsViewer {
 			this._settingsView.detailsViewer = null
 			m.redraw()
 		} else if (groupInfos.length === 1 && selectionChanged) {
-			this._settingsView.detailsViewer = new GroupViewer(groupInfos[0])
+			this._settingsView.detailsViewer = new GroupViewer(locator.entityClient, groupInfos[0])
 			if (elementClicked) {
 				this._settingsView.focusSettingsDetailsColumn()
 			}
@@ -160,35 +161,35 @@ export class GroupListView implements UpdatableSettingsViewer {
 		}
 	}
 
-	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>) {
-		for (let update of updates) {
-			this.processUpdate(update)
-		}
+	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>): Promise<void> {
+		return promiseMap(updates, update => {
+			return this.processUpdate(update)
+		}).then(noOp)
 	}
 
-	processUpdate(update: EntityUpdateData): void {
+	processUpdate(update: EntityUpdateData): Promise<void> {
 		const {instanceListId, instanceId, operation} = update
 		if (isUpdateForTypeRef(GroupInfoTypeRef, update) && this._listId.getSync() === instanceListId) {
 			if (!logins.getUserController().isGlobalAdmin()) {
 				let listEntity = this.list.getEntity(instanceId)
-				load(GroupInfoTypeRef, [neverNull(instanceListId), instanceId]).then(gi => {
+				return load(GroupInfoTypeRef, [neverNull(instanceListId), instanceId]).then(gi => {
 					let localAdminGroupIds = logins.getUserController()
 					                               .getLocalAdminGroupMemberships()
 					                               .map(gm => gm.group)
 					if (listEntity) {
 						if (!isAdministratedGroup(localAdminGroupIds, gi)) {
-							this.list.entityEventReceived(instanceId, OperationType.DELETE)
+							return this.list.entityEventReceived(instanceId, OperationType.DELETE)
 						} else {
-							this.list.entityEventReceived(instanceId, operation)
+							return this.list.entityEventReceived(instanceId, operation)
 						}
 					} else {
 						if (isAdministratedGroup(localAdminGroupIds, gi)) {
-							this.list.entityEventReceived(instanceId, OperationType.CREATE)
+							return this.list.entityEventReceived(instanceId, OperationType.CREATE)
 						}
 					}
 				})
 			} else {
-				this.list.entityEventReceived(instanceId, operation)
+				return this.list.entityEventReceived(instanceId, operation)
 			}
 		} else if (!logins.getUserController().isGlobalAdmin() && isUpdateForTypeRef(GroupMemberTypeRef, update)) {
 			let oldLocalAdminGroupMembership = this._localAdminGroupMemberships.find(gm => gm.groupMember[1]
@@ -196,13 +197,18 @@ export class GroupListView implements UpdatableSettingsViewer {
 			let newLocalAdminGroupMembership = logins.getUserController()
 			                                         .getLocalAdminGroupMemberships()
 			                                         .find(gm => gm.groupMember[1] === instanceId)
+			let promise = Promise.resolve()
 			if (operation === OperationType.CREATE && !oldLocalAdminGroupMembership && newLocalAdminGroupMembership) {
-				this.list.entityEventReceived(newLocalAdminGroupMembership.groupInfo[1], operation)
+				promise = this.list.entityEventReceived(newLocalAdminGroupMembership.groupInfo[1], operation)
 			} else if (operation === OperationType.DELETE && oldLocalAdminGroupMembership
 				&& !newLocalAdminGroupMembership) {
-				this.list.entityEventReceived(oldLocalAdminGroupMembership.groupInfo[1], operation)
+				promise = this.list.entityEventReceived(oldLocalAdminGroupMembership.groupInfo[1], operation)
 			}
-			this._localAdminGroupMemberships = logins.getUserController().getLocalAdminGroupMemberships()
+			return promise.then(() => {
+				this._localAdminGroupMemberships = logins.getUserController().getLocalAdminGroupMemberships()
+			})
+		} else {
+			return Promise.resolve()
 		}
 	}
 }

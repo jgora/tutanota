@@ -1,11 +1,12 @@
 // @flow
-import sjcl from "./lib/crypto-sjcl-1.0.7"
+// $FlowIgnore[untyped-import]
+import sjcl from "./lib/sjcl"
 import {random} from "./Randomizer"
 import {bitArrayToUint8Array, uint8ArrayToBitArray} from "./CryptoUtils"
 import {arrayEquals, concat} from "../../common/utils/ArrayUtils"
 import {uint8ArrayToBase64} from "../../common/utils/Encoding"
 import {CryptoError} from "../../common/error/CryptoError"
-import {assertWorkerOrNode} from "../../Env"
+import {assertWorkerOrNode} from "../../common/Env"
 import {hash} from "./Sha256"
 import * as Sha512 from "./Sha512"
 
@@ -50,7 +51,7 @@ export function aes256Encrypt(key: Aes256Key, bytes: Uint8Array, iv: Uint8Array,
 	if (useMac) {
 		let hmac = new sjcl.misc.hmac(subKeys.mKey, sjcl.hash.sha256)
 		let macBytes = bitArrayToUint8Array(hmac.encrypt(uint8ArrayToBitArray(data)))
-		data = concat(data, macBytes)
+		data = concat(new Uint8Array([MAC_ENABLED_PREFIX]), data, macBytes)
 	}
 	return data
 }

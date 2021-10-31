@@ -1,18 +1,25 @@
 // @flow
-import o from "ospec/ospec.js"
+import o from "ospec"
 import {createContact} from "../../../src/api/entities/tutanota/Contact"
 import {ContactAddressTypeRef} from "../../../src/api/entities/tutanota/ContactAddress"
 import {neverNull} from "../../../src/api/common/utils/Utils"
 import {vCardFileToVCards, vCardListToContacts} from "../../../src/contacts/VCardImporter"
+// $FlowIgnore[untyped-import]
 import en from "../../../src/translations/en"
 import {lang} from "../../../src/misc/LanguageViewModel"
 import {ContactMailAddressTypeRef} from "../../../src/api/entities/tutanota/ContactMailAddress"
 import {ContactPhoneNumberTypeRef} from "../../../src/api/entities/tutanota/ContactPhoneNumber"
 
+
 o.spec("VCardImporterTest", function () {
 
-	o.before(function () {
+	o.before(async function () {
 		window.whitelabelCustomizations = null
+		if (global.isBrowser) {
+			global.TextDecoder = window.TextDecoder
+		} else {
+			global.TextDecoder = (await import("util")).TextDecoder
+		}
 		lang.init(en)
 	})
 
@@ -299,6 +306,69 @@ END:VCARD`
 		let contacts = vCardListToContacts(neverNull(vCardFileToVCards(vcards)), "")
 		o(neverNull(contacts[0].birthdayIso)).equals("--03-31")
 		o(neverNull(contacts[1].birthdayIso)).equals("--03-31")
+	});
+
+	o("quoted printable utf-8 entirely encoded", function () {
+		let vcards = "BEGIN:VCARD\n"
+			+ "VERSION:2.1\n"
+			+ "N:Mustermann;Max;;;\n"
+			+ "FN:Max Mustermann\n"
+			+ "ADR;HOME;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:;;=54=65=73=74=73=74=72=61=C3=9F=65=20=34=32;;;;\n"
+			+ "END:VCARD"
+		let contacts = vCardListToContacts(neverNull(vCardFileToVCards(vcards)), "")
+		o(neverNull(contacts[0].addresses[0].address)).equals("Teststraße 42")
+	})
+
+	o("quoted printable utf-8 partially encoded", function () {
+		let vcards = "BEGIN:VCARD\n"
+			+ "VERSION:2.1\n"
+			+ "N:Mustermann;Max;;;\n"
+			+ "FN:Max Mustermann\n"
+			+ "ADR;HOME;CHARSET=UTF-8;ENCODING=QUOTED-PRINTABLE:;;Teststra=C3=9Fe 42;;;;\n"
+			+ "END:VCARD"
+		let contacts = vCardListToContacts(neverNull(vCardFileToVCards(vcards)), "")
+		o(neverNull(contacts[0].addresses[0].address)).equals("Teststraße 42")
+	})
+
+	o("base64 utf-8", function () {
+		let vcards = "BEGIN:VCARD\n"
+			+ "VERSION:2.1\n"
+			+ "N:Mustermann;Max;;;\n"
+			+ "FN:Max Mustermann\n"
+			+ "ADR;HOME;CHARSET=UTF-8;ENCODING=BASE64:;;w4TDpMOkaGhtbQ==;;;;\n"
+			+ "END:VCARD"
+		let contacts = vCardListToContacts(neverNull(vCardFileToVCards(vcards)), "")
+		o(neverNull(contacts[0].addresses[0].address)).equals("Ääähhmm")
+	})
+
+	o("test with latin charset", function () {
+		let vcards = "BEGIN:VCARD\n"
+			+ "VERSION:2.1\n"
+			+ "N:Mustermann;Max;;;\n"
+			+ "FN:Max Mustermann\n"
+			+ "ADR;HOME;CHARSET=ISO-8859-1;ENCODING=QUOTED-PRINTABLE:;;Rua das Na=E7=F5es;;;;\n"
+			+ "END:VCARD"
+		let contacts = vCardListToContacts(neverNull(vCardFileToVCards(vcards)), "")
+		o(neverNull(contacts[0].addresses[0].address)).equals("Rua das Nações")
+	})
+
+	o("test with no charset but encoding", function () {
+		let vcards = "BEGIN:VCARD\n"
+			+ "VERSION:2.1\n"
+			+ "N;ENCODING=QUOTED-PRINTABLE:=4E;\n"
+			+ "END:VCARD\nD"
+		let contacts = vCardListToContacts(neverNull(vCardFileToVCards(vcards)), "")
+		o(neverNull(contacts[0].lastName)).equals("N")
+	})
+
+	o("base64 implicit utf-8", function () {
+		let vcards = "BEGIN:VCARD\n"
+			+ "VERSION:2.1\n"
+			+ "N:Mustermann;Max;;;\n"
+			+ "FN:Max Mustermann\n"
+			+ "ADR;HOME;ENCODING=BASE64:;;w4TDpMOkaGhtbQ==;;;;\n"
+			+ "END:VCARD"
+		let contacts = vCardListToContacts(neverNull(vCardFileToVCards(vcards)), "")
+		o(neverNull(contacts[0].addresses[0].address)).equals("Ääähhmm")
 	})
 })
-

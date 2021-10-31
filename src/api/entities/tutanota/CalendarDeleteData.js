@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const CalendarDeleteDataTypeRef: TypeRef<CalendarDeleteData> = new TypeRef("tutanota", "CalendarDeleteData")
@@ -14,9 +16,7 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 983,
-			"since": 34,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -25,18 +25,15 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"groupRootId": {
-			"name": "groupRootId",
 			"id": 984,
-			"since": 34,
 			"type": "ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "CalendarGroupRoot",
 			"final": false,
-			"external": false
+			"refType": "CalendarGroupRoot"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createCalendarDeleteData(values?: $Shape<$Exact<CalendarDeleteData>>): CalendarDeleteData {

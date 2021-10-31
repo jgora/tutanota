@@ -1,9 +1,42 @@
 //@flow
 
+// straight from the flowlib/bom.js, flow just didn't pick it up for some reason
+// declare class Request {
+// 	constructor(input: RequestInfo, init?: RequestOptions): void;
+// 	clone(): Request;
+//
+// 	url: string;
+//
+// 	cache: CacheType;
+// 	credentials: CredentialsType;
+// 	headers: Headers;
+// 	integrity: string;
+// 	method: string;
+// 	mode: ModeType;
+// 	redirect: RedirectType;
+// 	referrer: string;
+// 	referrerPolicy: ReferrerPolicyType;
+// 	+signal: AbortSignal;
+//
+// 	// Body methods and attributes
+// 	bodyUsed: boolean;
+//
+// 	arrayBuffer(): Promise<ArrayBuffer>;
+// 	blob(): Promise<Blob>;
+// 	formData(): Promise<FormData>;
+// 	json(): Promise<any>;
+// 	text(): Promise<string>;
+// }
+
 // set by the build script
+import {getPathBases} from "../ApplicationPaths"
+
 declare var filesToCache: () => Array<string | URL>;
 declare var version: () => string;
 declare var customDomainCacheExclusions: () => Array<string>;
+
+// test case
+var versionString = typeof version === "undefined" ? "test" : version()
 
 const isTutanotaDomain = () =>
 	// *.tutanota.com or without dots (e.g. localhost). otherwise it is a custom domain
@@ -15,7 +48,7 @@ const urlWithoutQuery = (urlString) => {
 }
 
 
-class ServiceWorker {
+export class ServiceWorker {
 	_caches: CacheStorage
 	_cacheName: string
 	_selfLocation: string
@@ -57,6 +90,8 @@ class ServiceWorker {
 		const urlWithoutParams = urlWithoutQuery(evt.request.url)
 		if (this._urlsToCache.indexOf(urlWithoutParams) !== -1 || (this._isTutanotaDomain && this._selfLocation === urlWithoutParams)) {
 			evt.respondWith(this._fromCache(urlWithoutParams))
+		} else if (/translation-.+-.+\.js/.test(urlWithoutParams)) {
+			evt.respondWith(this.fromCacheOrFetchAndCache(evt.request))
 		} else if (this._shouldRedirectToDefaultPage(urlWithoutParams)) {
 			evt.respondWith(this._redirectToDefaultPage(evt.request.url))
 		}
@@ -98,13 +133,28 @@ class ServiceWorker {
 		           })
 	}
 
+	fromCacheOrFetchAndCache(request: Request): Promise<Response> {
+		return this._caches.open(this._cacheName).then((cache) => {
+			return cache.match(request.url).then((response) => {
+				if (response) {
+					return response
+				} else {
+					return fetch(request, {redirect: "error"}).then((networkResponse) => {
+						return cache.put(request, networkResponse.clone())
+						            .then(() => networkResponse)
+					})
+				}
+			})
+		})
+	}
+
 	_fromCache(requestUrl: string): Promise<Response> {
 		return this._caches
 		           .open(this._cacheName)
 		           .then(cache => cache.match(requestUrl))
-		           // Cache magically disappears on iOS 12.1 after the browser restart.
-		           // See #758. See https://bugs.webkit.org/show_bug.cgi?id=190269
-		           .then(r => r || fetch(requestUrl))
+			// Cache magically disappears on iOS 12.1 after the browser restart.
+			// See #758. See https://bugs.webkit.org/show_bug.cgi?id=190269
+			       .then(r => r || fetch(requestUrl))
 	}
 
 	// needed because FF fails to cache.addAll()
@@ -140,18 +190,20 @@ class ServiceWorker {
 }
 
 const init = (sw: ServiceWorker) => {
+	console.log("sw init", versionString)
 	self.addEventListener("install", (evt) => {
-		console.log("SW: being installed")
+		console.log("SW: being installed", versionString)
 		evt.waitUntil(sw.precache())
 	})
 	self.addEventListener('activate', (event) => {
+		console.log("sw activate", versionString)
 		event.waitUntil(sw.deleteOldCaches().then(() => self.clients.claim()))
 	})
 	self.addEventListener('fetch', (evt) => {
 		sw.respond(evt)
 	})
 	self.addEventListener("message", (event) => {
-		console.log("sw message", event)
+		console.log("sw message", versionString, event)
 		if (event.data === "update") {
 			self.skipWaiting()
 		}
@@ -169,18 +221,23 @@ const init = (sw: ServiceWorker) => {
 	})
 }
 
-// do not add listeners for Node tests
-if (typeof env !== "undefined" && env.mode === "Test") {
-	module.exports = {ServiceWorker}
-} else {
-	const cacheName = "CODE_CACHE-v" + version()
+// Only exported for tests.
+// We export it like this because this file is standalone and not wrapped into module loader context when bundled.
+// With normal import Babel generates code which tries to set __esModule on exports but we have no exports in standalone.
+// We hack module in dist.js by prepending `self.module` = {} so that the line below actually works.
+// We should probably split the class and the actual content into separate files and just bundle them together during the build.
+// module.exports = {ServiceWorker}-
+
+// do not add listeners for Node tests. env is not set for production
+if (typeof env === "undefined" || env.mode !== "Test") {
+	const cacheName = "CODE_CACHE-v" + versionString
 	const selfLocation = self.location.href.substring(0, self.location.href.indexOf("sw.js"))
 	const exclusions = customDomainCacheExclusions()
 	const urlsToCache = (isTutanotaDomain()
 		? filesToCache()
 		: filesToCache().filter(file => !exclusions.includes(file)))
 		.map(file => selfLocation + file)
-	const applicationPaths = ["login", "signup", "recover", "mail", "contact", "settings", "search", "contactform", "calendar"]
+	const applicationPaths = getPathBases()
 	const sw = new ServiceWorker(urlsToCache, caches, cacheName, selfLocation, applicationPaths, isTutanotaDomain())
 	init(sw)
 }

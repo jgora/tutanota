@@ -1,65 +1,113 @@
 // @flow
 import m from "mithril"
-import {assertMainOrNode} from "../api/Env"
+import {assertMainOrNode} from "../api/common/Env"
 import {Dialog, DialogType} from "../gui/base/Dialog"
 import {lang} from "../misc/LanguageViewModel"
-import {update} from "../api/main/Entity"
 import {DropDownSelector} from "../gui/base/DropDownSelector"
 import {EmailSignatureType, FeatureType} from "../api/common/TutanotaConstants"
-import {neverNull} from "../api/common/utils/Utils"
 import {logins} from "../api/main/LoginController"
-import {getDefaultSignature, insertInlineImageB64ClickHandler} from "../mail/MailUtils"
-import {HtmlEditor} from "../gui/base/HtmlEditor"
+import {HtmlEditor} from "../gui/editor/HtmlEditor"
 import stream from "mithril/stream/stream.js"
 import type {TutanotaProperties} from "../api/entities/tutanota/TutanotaProperties"
+import {insertInlineImageB64ClickHandler} from "../mail/view/MailViewerUtils"
+import {PayloadTooLargeError} from "../api/common/error/RestError"
+import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
+import {neverNull} from "../api/common/utils/Utils"
+import {locator} from "../api/main/MainLocator"
+import {ofClass} from "../api/common/utils/PromiseUtils"
 
 assertMainOrNode()
 
+// signatures can become large, for example if they include a base64 embedded image. we ask for confirmation in such cases
+const RECOMMENDED_SIGNATURE_SIZE_LIMIT = 15 * 1024
+
 export function show(props: TutanotaProperties) {
-	let currentCustomSignature = logins.getUserController().props.customEmailSignature
-	if (currentCustomSignature === "" && !logins.isEnabled(FeatureType.DisableDefaultSignature)) {
-		currentCustomSignature = getDefaultSignature()
-	}
-
-	let previousType = logins.getUserController().props.emailSignatureType
-
-	const editor = new HtmlEditor("preview_label", {enabled: true, imageButtonClickHandler: insertInlineImageB64ClickHandler})
-		.showBorders()
-		.setMinHeight(200)
-		.setValue(getSignature(previousType, currentCustomSignature))
-
-	let typeField = new DropDownSelector("userEmailSignature_label", null, getSignatureTypes(props), stream(previousType))
-	typeField.selectedValue.map(type => {
-		if (previousType === EmailSignatureType.EMAIL_SIGNATURE_TYPE_CUSTOM) {
-			currentCustomSignature = editor.getValue()
+	import("../mail/signature/Signature").then(({getDefaultSignature}) => {
+		const defaultSignature = getDefaultSignature()
+		let currentCustomSignature = logins.getUserController().props.customEmailSignature
+		if (currentCustomSignature === "" && !logins.isEnabled(FeatureType.DisableDefaultSignature)) {
+			currentCustomSignature = defaultSignature
 		}
-		previousType = type
-		editor.setValue(getSignature(type, currentCustomSignature))
-		editor.setEnabled(type === EmailSignatureType.EMAIL_SIGNATURE_TYPE_CUSTOM)
-	})
 
-	let form = {
-		view: () => {
-			return [
-				m(typeField),
-				m(editor),
-			]
-		}
-	}
-	let editSignatureOkAction = (dialog) => {
-		logins.getUserController().props.emailSignatureType = typeField.selectedValue()
-		if (typeField.selectedValue() === EmailSignatureType.EMAIL_SIGNATURE_TYPE_CUSTOM) {
-			logins.getUserController().props.customEmailSignature = editor.getValue()
-		}
-		update(logins.getUserController().props)
-		dialog.close()
-	}
+		let previousType = logins.getUserController().props.emailSignatureType
 
-	Dialog.showActionDialog({
-		title: lang.get("userEmailSignature_label"),
-		child: form,
-		type: DialogType.EditLarge,
-		okAction: editSignatureOkAction
+		const editor = new HtmlEditor("preview_label", {enabled: true, imageButtonClickHandler: insertInlineImageB64ClickHandler})
+			.showBorders()
+			.setMinHeight(200)
+			.setValue(getSignature(previousType, defaultSignature, currentCustomSignature))
+
+		let typeField = new DropDownSelector("userEmailSignature_label", null, getSignatureTypes(props), stream(previousType))
+		typeField.selectedValue.map(type => {
+			if (previousType === EmailSignatureType.EMAIL_SIGNATURE_TYPE_CUSTOM) {
+				currentCustomSignature = editor.getValue()
+			}
+			previousType = type
+			editor.setValue(getSignature(type, defaultSignature, currentCustomSignature))
+			editor.setEnabled(type === EmailSignatureType.EMAIL_SIGNATURE_TYPE_CUSTOM)
+		})
+
+		let form = {
+			view: () => {
+				return [
+					m(typeField),
+					m(editor),
+				]
+			}
+		}
+		let editSignatureOkAction = (dialog) => {
+			const props = logins.getUserController().props
+
+			const newType = typeField.selectedValue()
+			const newCustomValue = editor.getValue()
+
+			const oldType = props.emailSignatureType
+			const oldCustomValue = props.customEmailSignature
+
+			const updateSignature = () => {
+				props.emailSignatureType = newType
+				if (newType === EmailSignatureType.EMAIL_SIGNATURE_TYPE_CUSTOM) {
+					props.customEmailSignature = newCustomValue
+				}
+				const updatePromise = locator.entityClient.update(props)
+				return showProgressDialog("pleaseWait_msg", updatePromise)
+					.then(() => dialog.close())
+					.catch(ofClass(PayloadTooLargeError, () => {
+						props.emailSignatureType = oldType
+						props.customEmailSignature = oldCustomValue
+						return Dialog.error("requestTooLarge_msg")
+					}))
+			}
+
+			if (newType === oldType && (newType !== EmailSignatureType.EMAIL_SIGNATURE_TYPE_CUSTOM || newCustomValue === oldCustomValue)) {
+				return dialog.close()
+			} else {
+				if (newType === EmailSignatureType.EMAIL_SIGNATURE_TYPE_CUSTOM
+					&& newCustomValue.length > RECOMMENDED_SIGNATURE_SIZE_LIMIT) {
+					const signatureSizeKb = Math.floor(newCustomValue.length / 1024)
+					const confirmLargeSignatureAttrs = {
+						title: lang.get("userEmailSignature_label"),
+						child: {
+							view: () => m("p", lang.get("largeSignature_msg", {"{1}": signatureSizeKb}))
+						},
+						okAction: (dialog) => {
+							dialog.close()
+							updateSignature()
+						},
+						allowOkWithReturn: true,
+					}
+					Dialog.showActionDialog(confirmLargeSignatureAttrs)
+				} else {
+					updateSignature()
+				}
+			}
+		}
+
+		Dialog.showActionDialog({
+			title: lang.get("userEmailSignature_label"),
+			child: form,
+			type: DialogType.EditLarge,
+			okAction: editSignatureOkAction
+		})
 	})
 }
 
@@ -78,16 +126,16 @@ export function getSignatureTypes(props: TutanotaProperties): {name: string, val
 	return signatureTypes
 }
 
-export function getSignatureType(props: TutanotaProperties): {name: string, value: string} {
-	return neverNull(getSignatureTypes(props).find(t => t.value === props.emailSignatureType))
-}
-
-function getSignature(type: string, currentCustomSignature: string): string {
+function getSignature(type: string, defaultSignature: string, currentCustomSignature: string): string {
 	if (type === EmailSignatureType.EMAIL_SIGNATURE_TYPE_DEFAULT) {
-		return getDefaultSignature()
+		return defaultSignature
 	} else if (type === EmailSignatureType.EMAIL_SIGNATURE_TYPE_CUSTOM) {
 		return currentCustomSignature
 	} else {
 		return ""
 	}
+}
+
+export function getSignatureType(props: TutanotaProperties): {name: string, value: string} {
+	return neverNull(getSignatureTypes(props).find(t => t.value === props.emailSignatureType))
 }

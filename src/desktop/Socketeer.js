@@ -1,25 +1,31 @@
 // @flow
 
-import net from 'net'
-import {app} from 'electron'
-import {neverNull} from "../api/common/utils/Utils"
+import type {App} from 'electron'
+import type {WindowManager} from "./DesktopWindowManager"
+import type {IPC} from "./IPC"
+import {isMailAddress} from "../misc/FormatValidator"
+import {log} from "./DesktopLog";
+import type {TimeoutSetter} from "../api/common/utils/Utils"
 
 const SOCKET_PATH = '/tmp/tutadb.sock'
+
+type net = $Exports<"net">
 
 /**
  * this is used to control our administration tool
  */
 export class Socketeer {
-	_server: ?net.Server;
-	_connection: ?net.Socket;
-	_delayHandler: typeof setTimeout
+	_server: ?net$Server;
+	_connection: ?net$Socket;
+	_delayHandler: TimeoutSetter
+	_net: net
 
-	constructor(delayHandler: typeof setTimeout = setTimeout) {
+	constructor(net: net, app: App, delayHandler: TimeoutSetter = setTimeout) {
+		this._net = net
 		this._delayHandler = delayHandler
 
 		app.on('will-quit', () => {
 			if (this._server || this._connection) {
-				console.log("cleaning up socket...")
 				if (this._connection) {
 					this._connection.end()
 				}
@@ -30,13 +36,23 @@ export class Socketeer {
 		})
 	}
 
+	attach(wm: WindowManager, ipc: IPC) {
+		this.startClient(async msg => {
+			const mailAddress = JSON.parse(msg).mailAddress
+			if (typeof mailAddress === 'string' && isMailAddress(mailAddress, false)) {
+				const targetWindowId = (await wm.getLastFocused(false)).id
+				ipc.sendRequest(targetWindowId, 'openCustomer', [mailAddress])
+			}
+		})
+	}
+
 	startServer() {
-		console.log('opening admin socket')
+		log.debug('opening admin socket')
 		if (this._server) {
 			return
 		}
-		this._server = net.createServer(c => {
-			console.log("got connection")
+		const server = this._server = this._net.createServer(c => {
+			log.debug("got connection")
 			this._connection = c
 			c.on('data', () => {
 				console.warn("Data was pushed through admin socket, aborting connection")
@@ -44,15 +60,22 @@ export class Socketeer {
 			}).on('end', () => {
 				this._connection = null
 			})
+		}).on("listening", () => {
+			log.debug("Socketeer: server is listening")
 		}).on('error', e => {
-			if (e.code === 'EADDRINUSE' && this._server) {
-				console.log('Socket in use, retrying...')
+			log.warn("Socketeer: server error", e)
+			if (e.code === 'EADDRINUSE') {
 				this._delayHandler(() => {
-					neverNull(this._server).close()
-					neverNull(this._server).listen(SOCKET_PATH)
+					try {
+						server.close()
+						server.listen(SOCKET_PATH)
+					} catch (e) {
+						log.error("Socketeer: restart error: ", e)
+					}
 				}, 1000)
 			}
 		}).on('close', () => {
+			log.debug("Socketeer: server is closed")
 			this._server = null
 		})
 
@@ -65,33 +88,33 @@ export class Socketeer {
 		}
 	}
 
-	startClient(ondata: (string)=>void) {
+	startClient(ondata: (string)=>mixed) {
 		if (this._connection) {
 			return
 		}
-		this._connection = net
-			.createConnection(SOCKET_PATH)
-			.on('connect', () => {
-				console.log('socket connected')
-			})
-			.on('close', hadError => {
-				if (hadError) {
-					this._tryReconnect(ondata)
-				}
-			})
-			.on('end', () => {
-				console.log("socket disconnected")
-				this._tryReconnect(ondata)
-			})
-			.on('error', e => {
-				if (e.code !== 'ENOENT') {
-					console.error("Unexpected Socket Error:", e)
-				}
-			})
-			.on('data', ondata)
+		this._connection = this._net
+		                       .createConnection(SOCKET_PATH)
+		                       .on('connect', () => {
+			                       log.debug('socket connected')
+		                       })
+		                       .on('close', hadError => {
+			                       if (hadError) {
+				                       this._tryReconnect(ondata)
+			                       }
+		                       })
+		                       .on('end', () => {
+			                       log.debug("socket disconnected")
+			                       this._tryReconnect(ondata)
+		                       })
+		                       .on('error', e => {
+			                       if (e.code !== 'ENOENT') {
+				                       console.error("Unexpected Socket Error:", e)
+			                       }
+		                       })
+		                       .on('data', ondata)
 	}
 
-	_tryReconnect(ondata: (string)=>void): void {
+	_tryReconnect(ondata: (string)=>mixed): void {
 		this._connection = null
 		this._delayHandler(() => {
 			this.startClient(ondata)

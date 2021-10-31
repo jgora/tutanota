@@ -1,61 +1,46 @@
 // @flow
 import m from "mithril"
+import type {TranslationKey} from "../misc/LanguageViewModel"
 import {lang} from "../misc/LanguageViewModel"
-import {BookingItemFeatureType, Const, Keys} from "../api/common/TutanotaConstants"
+import {BookingItemFeatureType, Keys} from "../api/common/TutanotaConstants"
 import type {BuyOptionBoxAttr} from "./BuyOptionBox"
-import {BuyOptionBox, getActiveSubscriptionActionButtonReplacement} from "./BuyOptionBox"
-import {load, serviceRequestVoid} from "../api/main/Entity"
+import {BuyOptionBox, updateBuyOptionBoxPriceInformation} from "./BuyOptionBox"
+import {load} from "../api/main/Entity"
 import {worker} from "../api/main/WorkerClient"
-import {getCountFromPriceData, getPriceFromPriceData} from "./PriceUtils"
 import {neverNull} from "../api/common/utils/Utils"
-import {formatPrice} from "../subscription/SubscriptionUtils"
+import {buyStorage} from "./SubscriptionUtils"
 import {CustomerTypeRef} from "../api/entities/sys/Customer"
 import {CustomerInfoTypeRef} from "../api/entities/sys/CustomerInfo"
 import {logins} from "../api/main/LoginController"
 import {Dialog} from "../gui/base/Dialog"
-import {createBookingServiceData} from "../api/entities/sys/BookingServiceData"
-import {PreconditionFailedError} from "../api/common/error/RestError"
-import {SysService} from "../api/entities/sys/Services"
-import {HttpMethod} from "../api/common/EntityFunctions"
 import {ButtonN, ButtonType} from "../gui/base/ButtonN"
-import * as BuyDialog from "./BuyDialog"
 import type {DialogHeaderBarAttrs} from "../gui/base/DialogHeaderBar"
+import {showBuyDialog} from "./BuyDialog"
+import {ProgrammingError} from "../api/common/error/ProgrammingError"
 
-/**
- * @returns True if it failed, false otherwise
- */
-export function buyStorage(amount: number): Promise<boolean> {
-	const bookingData = createBookingServiceData()
-	bookingData.amount = amount.toString()
-	bookingData.featureType = BookingItemFeatureType.Storage
-	bookingData.date = Const.CURRENT_DATE
-	return serviceRequestVoid(SysService.BookingService, HttpMethod.POST, bookingData)
-		.return(false)
-		.catch(PreconditionFailedError, error => {
-			return Dialog.error("storageCapacityTooManyUsedForBooking_msg").return(true)
-		})
-}
-
-export function show(): Promise<void> {
-	return load(CustomerTypeRef, neverNull(logins.getUserController().user.customer))
+export function showStorageCapacityOptionsDialog(storageWarningTextId: ?TranslationKey): Promise<void> {
+	const userController = logins.getUserController()
+	if (userController.isFreeAccount() || !userController.isGlobalAdmin()) {
+		throw new ProgrammingError("changing storage options is only allowed for global admins of premium accounts")
+	}
+	return load(CustomerTypeRef, neverNull(userController.user.customer))
 		.then(customer => load(CustomerInfoTypeRef, customer.customerInfo))
 		.then(customerInfo => {
 			let freeStorageCapacity = Math.max(Number(customerInfo.includedStorageCapacity), Number(customerInfo.promotionStorageCapacity))
-			return Promise.fromCallback((callback) => {
+			return new Promise((resolve) => {
 				const changeStorageCapacityAction = (amount: number) => {
 					dialog.close()
-					BuyDialog.show(BookingItemFeatureType.Storage, amount, freeStorageCapacity, false).then(confirm => {
+					showBuyDialog(BookingItemFeatureType.Storage, amount, freeStorageCapacity, false).then(confirm => {
 						if (confirm) {
 							return buyStorage(amount)
 						}
 					}).then(() => {
-						callback(null)
+						resolve()
 					})
 				}
-
 				const cancelAction = () => {
 					dialog.close()
-					callback(null)
+					resolve()
 				}
 
 				const storageBuyOptionsAttrs = [
@@ -66,12 +51,12 @@ export function show(): Promise<void> {
 				].filter(scb => scb.amount === 0 || scb.amount > freeStorageCapacity).map(scb => scb.buyOptionBoxAttr) // filter needless buy options
 
 				const headerBarAttrs: DialogHeaderBarAttrs = {
-					left: [{label: "cancel_action", click: cancelAction, type: ButtonType.Secondary}],
-					middle: () => lang.get("storageCapacity_label")
+					middle: () => lang.get("storageCapacity_label"),
+					right: [{label: "close_alt", click: cancelAction, type: ButtonType.Primary}]
 				}
 				const dialog = Dialog.largeDialog(headerBarAttrs, {
 					view: () => [
-						m(".pt.center", lang.get("buyStorageCapacityInfo_msg")),
+						m(".pt-l.center.pb", storageWarningTextId ? m(".b", lang.get(storageWarningTextId)) : lang.get("buyStorageCapacityInfo_msg")),
 						m(".flex-center.flex-wrap", storageBuyOptionsAttrs.map(attr => m(BuyOptionBox, attr)))
 					]
 				}).addShortcut({
@@ -98,7 +83,6 @@ function createStorageCapacityBoxAttr(amount: number, freeAmount: number, buyAct
 			}
 		},
 		price: lang.get("emptyString_msg"),
-		originalPrice: lang.get("emptyString_msg"),
 		helpLabel: "emptyString_msg",
 		features: () => [],
 		width: 230,
@@ -106,17 +90,7 @@ function createStorageCapacityBoxAttr(amount: number, freeAmount: number, buyAct
 		paymentInterval: null,
 		showReferenceDiscount: false
 	}
-
-	worker.getPrice(BookingItemFeatureType.Storage, amount, false).then(newPrice => {
-		if (amount === getCountFromPriceData(newPrice.currentPriceNextPeriod, BookingItemFeatureType.Storage)) {
-			attrs.actionButton = getActiveSubscriptionActionButtonReplacement()
-		}
-		let price = formatPrice(getPriceFromPriceData(newPrice.futurePriceNextPeriod, BookingItemFeatureType.Storage), true)
-		attrs.price = price
-		attrs.originalPrice = price
-		attrs.helpLabel = (neverNull(newPrice.futurePriceNextPeriod).paymentInterval === "12") ? "pricing.perYear_label" : "pricing.perMonth_label"
-		m.redraw()
-	})
+	updateBuyOptionBoxPriceInformation(worker, BookingItemFeatureType.Storage, amount, attrs)
 	return {amount, buyOptionBoxAttr: attrs}
 }
 

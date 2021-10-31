@@ -1,4 +1,5 @@
 //@flow
+//@bundleInto:common-min
 import {TutanotaError} from "./TutanotaError"
 import type {Challenge} from "../../entities/sys/Challenge"
 

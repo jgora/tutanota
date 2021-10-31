@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const NotificationSessionKeyTypeRef: TypeRef<NotificationSessionKey> = new TypeRef("sys", "NotificationSessionKey")
@@ -14,18 +16,14 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 1554,
-			"since": 48,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"pushIdentifierSessionEncSessionKey": {
-			"name": "pushIdentifierSessionEncSessionKey",
 			"id": 1556,
-			"since": 48,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": false,
@@ -34,18 +32,15 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"pushIdentifier": {
-			"name": "pushIdentifier",
 			"id": 1555,
-			"since": 48,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "PushIdentifier",
 			"final": false,
-			"external": false
+			"refType": "PushIdentifier"
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createNotificationSessionKey(values?: $Shape<$Exact<NotificationSessionKey>>): NotificationSessionKey {

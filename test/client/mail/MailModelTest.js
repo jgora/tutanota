@@ -1,16 +1,18 @@
 //@flow
-import o from "ospec/ospec.js"
+import o from "ospec"
 import {Notifications} from "../../../src/gui/Notifications"
 import type {Spy} from "../../api/TestUtils"
 import {spy} from "../../api/TestUtils"
-import type {MailboxDetail} from "../../../src/mail/MailModel"
-import {MailModel} from "../../../src/mail/MailModel"
+import type {MailboxDetail} from "../../../src/mail/model/MailModel"
+import {MailModel} from "../../../src/mail/model/MailModel"
 import {downcast} from "../../../src/api/common/utils/Utils"
 import type {OperationTypeEnum} from "../../../src/api/common/TutanotaConstants"
 import {MailFolderType, OperationType} from "../../../src/api/common/TutanotaConstants"
 import {MailTypeRef} from "../../../src/api/entities/tutanota/Mail"
 import {createMailFolder} from "../../../src/api/entities/tutanota/MailFolder"
 import type {EntityUpdateData} from "../../../src/api/main/EventController"
+import {worker} from "../../../src/api/main/WorkerClient"
+import {EntityClient} from "../../../src/api/common/EntityClient"
 
 o.spec("MailModelTest", function () {
 	let notifications: $Shape<Notifications>
@@ -34,7 +36,7 @@ o.spec("MailModelTest", function () {
 	o.beforeEach(function () {
 		notifications = {}
 		showSpy = notifications.showNotification = spy()
-		model = new MailModel(downcast(notifications), downcast({}))
+		model = new MailModel(downcast(notifications), downcast({}), worker, new EntityClient(worker))
 		// not pretty, but works
 		model.mailboxDetails(mailboxDetails)
 	})
@@ -50,8 +52,8 @@ o.spec("MailModelTest", function () {
 	// 	o(showSpy.invocations.length).equals(1)
 	// })
 
-	o("doesn't send notification for another folder", function () {
-		model.entityEventsReceived([
+	o("doesn't send notification for another folder", async function () {
+		await model.entityEventsReceived([
 			makeUpdate({
 				instanceListId: anotherFolder.mails,
 				operation: OperationType.CREATE
@@ -60,8 +62,8 @@ o.spec("MailModelTest", function () {
 		o(showSpy.invocations.length).equals(0)
 	})
 
-	o("doesn't send notification for move operation", function () {
-		model.entityEventsReceived([
+	o("doesn't send notification for move operation", async function () {
+		await model.entityEventsReceived([
 			makeUpdate({
 				instanceListId: anotherFolder.mails,
 				operation: OperationType.DELETE

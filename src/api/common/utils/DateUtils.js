@@ -1,5 +1,11 @@
 // @flow
 
+/**
+ * @file DateUtils which do not use Luxon. Used in worker as well as in client parts.
+ * As functions here do not use Luxon it cannot be used for calculating things in different time zones, they
+ * are dependent on the system time zone.
+ */
+
 export const DAY_IN_MILLIS = 1000 * 60 * 60 * 24
 
 /**
@@ -63,20 +69,18 @@ export function getDayShifted(date: Date, days: number): Date {
 	return new Date(date.getTime() + days * DAY_IN_MILLIS)
 }
 
+/**
+ * Increment the date in place and return it
+ */
 export function incrementDate(date: Date, byValue: number): Date {
 	date.setDate(date.getDate() + byValue)
 	return date
 }
 
-
-export function getDateIndicator(day: Date, selectedDate: ?Date, currentDate: Date): string {
-	if (isSameDayOfDate(day, selectedDate)) {
-		return ".date-selected"
-	} else if (isSameDayOfDate(day, currentDate)) {
-		return ".date-current"
-	} else {
-		return ""
-	}
+export function incrementMonth(d: Date, byValue: number): Date {
+	const date = new Date(d)
+	date.setMonth(date.getMonth() + byValue)
+	return date
 }
 
 export function isSameDayOfDate(date1: ?Date, date2: ?Date): boolean {
@@ -98,11 +102,33 @@ export function formatSortableDate(date: Date): string {
 }
 
 /**
- * Formats as yyyy-mm-dd <hh>h-<mm>m-<ss>
+ * Formats as yyyy-mm-dd-<hh>h-<mm>m-<ss>
  */
 export function formatSortableDateTime(date: Date): string {
 	const hours = ("0" + date.getHours()).slice(-2)
 	const minutes = ("0" + date.getMinutes()).slice(-2)
 	const seconds = ("0" + date.getSeconds()).slice(-2)
-	return `${formatSortableDate(date)} ${hours}h${minutes}m${seconds}s`
+	return `${formatSortableDate(date)}-${hours}h${minutes}m${seconds}s`
+}
+
+/**
+ * @returns {string} sortableDateTime of the current time
+ */
+export function sortableTimestamp(): string {
+	return formatSortableDateTime(new Date())
+}
+
+export function isValidDate(date: Date): boolean {
+	return !isNaN(date.getTime())
+}
+
+/**
+ * not interested in any fancy calendar edge cases, only use this where approximation is ok
+ */
+export function millisToDays(millis: number): number {
+	return millis / DAY_IN_MILLIS
+}
+
+export function daysToMillis(days: number): number {
+	return days * DAY_IN_MILLIS
 }

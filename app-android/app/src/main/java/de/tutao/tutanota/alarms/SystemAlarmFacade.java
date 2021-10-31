@@ -4,7 +4,6 @@ import android.app.AlarmManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Build;
 import android.util.Log;
 
 import java.util.Date;
@@ -20,17 +19,13 @@ public class SystemAlarmFacade {
 	}
 
 	public void scheduleAlarmOccurrenceWithSystem(Date alarmTime, int occurrence,
-										   String identifier, String summary,
-										   Date eventDate, String user) {
-		Log.d(TAG, "Scheduled notification " + identifier + " at: " + alarmTime);
+												  String identifier, String summary,
+												  Date eventDate, String user) {
+		Log.d(TAG, "Scheduled notification " + identifier);
 		AlarmManager alarmManager = getAlarmManager();
 		PendingIntent pendingIntent = makeAlarmPendingIntent(occurrence, identifier, summary, eventDate, user);
 
-		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-			alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, alarmTime.getTime(), pendingIntent);
-		} else {
-			alarmManager.setExact(AlarmManager.RTC_WAKEUP, alarmTime.getTime(), pendingIntent);
-		}
+		alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, alarmTime.getTime(), pendingIntent);
 	}
 
 	public void cancelAlarm(String identifier, int occurrence) {

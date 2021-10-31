@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {MailAddress} from "./MailAddress"
 
@@ -15,9 +17,7 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1007,
-			"since": 38,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -26,35 +26,32 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"existingMailAddresses": {
-			"name": "existingMailAddresses",
 			"id": 1008,
-			"since": 38,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "MailAddress",
-			"final": false
+			"dependency": null
 		},
 		"invalidMailAddresses": {
-			"name": "invalidMailAddresses",
 			"id": 1009,
-			"since": 38,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "MailAddress",
-			"final": false
+			"dependency": null
 		},
 		"invitedMailAddresses": {
-			"name": "invitedMailAddresses",
 			"id": 1010,
-			"since": 38,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "MailAddress",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createGroupInvitationPostReturn(values?: $Shape<$Exact<GroupInvitationPostReturn>>): GroupInvitationPostReturn {

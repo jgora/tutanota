@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const GroupInvitationPutDataTypeRef: TypeRef<GroupInvitationPutData> = new TypeRef("tutanota", "GroupInvitationPutData")
@@ -14,27 +16,21 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1012,
-			"since": 38,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"sharedGroupEncInviteeGroupInfoKey": {
-			"name": "sharedGroupEncInviteeGroupInfoKey",
 			"id": 1014,
-			"since": 38,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"userGroupEncGroupKey": {
-			"name": "userGroupEncGroupKey",
 			"id": 1013,
-			"since": 38,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
@@ -43,18 +39,15 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"receivedInvitation": {
-			"name": "receivedInvitation",
 			"id": 1015,
-			"since": 38,
 			"type": "LIST_ELEMENT_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "ReceivedGroupInvitation",
 			"final": false,
-			"external": true
+			"refType": "ReceivedGroupInvitation"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createGroupInvitationPutData(values?: $Shape<$Exact<GroupInvitationPutData>>): GroupInvitationPutData {

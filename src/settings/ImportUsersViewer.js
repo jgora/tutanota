@@ -4,11 +4,12 @@ import {Dialog} from "../gui/base/Dialog"
 import {lang} from "../misc/LanguageViewModel"
 import {isMailAddress} from "../misc/FormatValidator"
 import {worker} from "../api/main/WorkerClient"
-import {showWorkerProgressDialog} from "../gui/base/ProgressDialog"
+import {showWorkerProgressDialog} from "../gui/dialogs/ProgressDialog"
 import {BookingItemFeatureType} from "../api/common/TutanotaConstants"
-import {CSV_USER_FORMAT} from "./UserViewer"
 import {contains} from "../api/common/utils/ArrayUtils"
-import {show as showBuyDialog} from "../subscription/BuyDialog"
+import {PreconditionFailedError} from "../api/common/error/RestError"
+import {showBuyDialog} from "../subscription/BuyDialog"
+import {delay, ofClass, promiseMap} from "../api/common/utils/PromiseUtils"
 
 const delayTime = 900
 
@@ -18,7 +19,9 @@ type UserImportDetails = {
 	password: string
 }
 
-export function checkAndImportUserData(userDetailsInputCsv: string, availableDomains: string[]) {
+export const CSV_USER_FORMAT = "username;user@domain.com;password"
+
+export function checkAndImportUserData(userDetailsInputCsv: string, availableDomains: string[]): boolean {
 	let userData = csvToUserDetails(userDetailsInputCsv)
 	if (!userData) {
 		Dialog.error(() => lang.get("wrongUserCsvFormat_msg", {
@@ -112,13 +115,15 @@ function checkAndGetErrorMessage(userData: UserImportDetails[], availableDomains
 function showBookingDialog(userDetailsArray: UserImportDetails[]): void {
 	let nbrOfCreatedUsers = 0
 	let notAvailableUsers = []
+	// There's a hacky progress solution where we send index to worker and then worker just simulates calculating progress based on the
+	// index
 	showBuyDialog(BookingItemFeatureType.Users, userDetailsArray.length, 0, false).then(accepted => {
 		if (accepted) {
-			return showWorkerProgressDialog(() => lang.get("createActionStatus_msg", {
+			return showWorkerProgressDialog(worker, () => lang.get("createActionStatus_msg", {
 				"{index}": nbrOfCreatedUsers,
 				"{count}": userDetailsArray.length
-			}), Promise.each(userDetailsArray, (user, index) => {
-				return createUserIfMailAddressAvailable(user, index, userDetailsArray.length).then(created => {
+			}), promiseMap(userDetailsArray, (user, userIndex) => {
+				return createUserIfMailAddressAvailable(user, userIndex, userDetailsArray.length).then(created => {
 					if (created) {
 						nbrOfCreatedUsers++
 						m.redraw()
@@ -126,15 +131,18 @@ function showBookingDialog(userDetailsArray: UserImportDetails[]): void {
 						notAvailableUsers.push(user)
 					}
 				})
-			})).then(() => {
-				let p = Promise.resolve()
-				if (notAvailableUsers.length > 0) {
-					p = Dialog.error(() => lang.get("addressesAlreadyInUse_msg") + " " + notAvailableUsers.map(u => u.mailAddress).join(", "))
-				}
-				p.then(() => {
-					Dialog.error(() => lang.get("createdUsersCount_msg", {"{1}": nbrOfCreatedUsers}))
+			}))
+				.catch(ofClass(PreconditionFailedError, () => Dialog.error("createUserFailed_msg")))
+				.then(() => {
+					let p = Promise.resolve()
+					if (notAvailableUsers.length > 0) {
+						p = Dialog.error(() => lang.get("addressesAlreadyInUse_msg") + " "
+							+ notAvailableUsers.map(u => u.mailAddress).join(", "))
+					}
+					p.then(() => {
+						Dialog.error(() => lang.get("createdUsersCount_msg", {"{1}": nbrOfCreatedUsers}))
+					})
 				})
-			})
 		}
 	})
 }
@@ -144,14 +152,14 @@ function showBookingDialog(userDetailsArray: UserImportDetails[]): void {
  */
 function createUserIfMailAddressAvailable(user: UserImportDetails, index: number, overallNumberOfUsers: number): Promise<boolean> {
 	let cleanMailAddress = user.mailAddress.trim().toLowerCase()
-	return worker.isMailAddressAvailable(cleanMailAddress).then(available => {
+	return worker.mailAddressFacade.isMailAddressAvailable(cleanMailAddress).then(available => {
 		if (available) {
-			return worker.createUser(user.username ? user.username : "", cleanMailAddress, user.password, index, overallNumberOfUsers).then(() => {
-				// Promise.delay is needed so that there are not too many requests from isMailAddressAvailable service if users ar not available (are not created)
-				return Promise.delay(delayTime).return(true)
+			return worker.userManagementFacade.createUser(user.username ? user.username : "", cleanMailAddress, user.password, index, overallNumberOfUsers).then(() => {
+				// delay is needed so that there are not too many requests from isMailAddressAvailable service if users ar not available (are not created)
+				return delay(delayTime).then(() => true)
 			})
 		} else {
-			return Promise.delay(delayTime).return(false)
+			return delay(delayTime).then(() => false)
 		}
 	})
 }

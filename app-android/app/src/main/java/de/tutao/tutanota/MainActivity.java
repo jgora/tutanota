@@ -14,15 +14,14 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.drawable.ColorDrawable;
 import android.net.MailTo;
 import android.net.Uri;
-import android.os.AsyncTask;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
 import android.preference.PreferenceManager;
 import android.provider.Settings;
-import android.text.TextUtils;
 import android.util.Log;
 import android.view.ContextMenu;
 import android.view.View;
@@ -32,12 +31,11 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
 
-import androidx.annotation.ColorRes;
+import androidx.activity.ComponentActivity;
+import androidx.annotation.ColorInt;
+import androidx.annotation.MainThread;
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.annotation.RequiresPermission;
-import androidx.core.app.ActivityCompat;
-import androidx.core.app.ComponentActivity;
 import androidx.core.content.ContextCompat;
 
 import org.jdeferred.Deferred;
@@ -47,33 +45,38 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
-import java.io.File;
-import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URLEncoder;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
+import de.tutao.tutanota.alarms.AlarmNotificationsManager;
+import de.tutao.tutanota.alarms.SystemAlarmFacade;
 import de.tutao.tutanota.data.AppDatabase;
 import de.tutao.tutanota.push.LocalNotificationsFacade;
 import de.tutao.tutanota.push.PushNotificationService;
 import de.tutao.tutanota.push.SseStorage;
 
+import static de.tutao.tutanota.Utils.parseColor;
+
 public class MainActivity extends ComponentActivity {
 
-	private static final String TAG = "MainActivity";
-	public static final String THEME_PREF = "theme";
 	public static final String INVALIDATE_SSE_ACTION = "de.tutao.tutanota.INVALIDATE_SSE";
-	private static Map<Integer, Deferred> requests = new ConcurrentHashMap<>();
-	private static int requestId = 0;
-	private static final String ASKED_BATTERY_OPTIMIZTAIONS_PREF = "askedBatteryOptimizations";
 	public static final String OPEN_USER_MAILBOX_ACTION = "de.tutao.tutanota.OPEN_USER_MAILBOX_ACTION";
 	public static final String OPEN_CALENDAR_ACTION = "de.tutao.tutanota.OPEN_CALENDAR_ACTION";
 	public static final String OPEN_USER_MAILBOX_MAILADDRESS_KEY = "mailAddress";
 	public static final String OPEN_USER_MAILBOX_USERID_KEY = "userId";
 	public static final String IS_SUMMARY_EXTRA = "isSummary";
+	private static final String ASKED_BATTERY_OPTIMIZTAIONS_PREF = "askedBatteryOptimizations";
+	private static final String TAG = "MainActivity";
+
+	private static int requestId = 0;
+	private final Map<Integer, Deferred> requests = new ConcurrentHashMap<>();
 
 	private WebView webView;
 	public SseStorage sseStorage;
@@ -84,20 +87,22 @@ public class MainActivity extends ComponentActivity {
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		Log.d(TAG, "App started");
-		doChangeTheme(PreferenceManager.getDefaultSharedPreferences(this)
-				.getString(THEME_PREF, "light"));
+		AndroidKeyStoreFacade keyStoreFacade = new AndroidKeyStoreFacade(this);
+		sseStorage = new SseStorage(AppDatabase.getDatabase(this, /*allowMainThreadAccess*/false),
+				keyStoreFacade);
+		AlarmNotificationsManager alarmNotificationsManager = new AlarmNotificationsManager(sseStorage,
+				new Crypto(this), new SystemAlarmFacade(this), new LocalNotificationsFacade(this));
+		nativeImpl = new Native(this, sseStorage, alarmNotificationsManager);
 
-		sseStorage = new SseStorage(this, AppDatabase.getDatabase(this, /*allowMainThreadAccess*/false), new AndroidKeyStoreFacade(this));
-		nativeImpl = new Native(this, sseStorage);
+		doApplyTheme(this.nativeImpl.themeManager.getCurrentThemeWithFallback());
 
 		super.onCreate(savedInstanceState);
 
 		this.setupPushNotifications();
 
 		webView = new WebView(this);
-		webView.setBackgroundColor(getResources().getColor(android.R.color.transparent));
+		webView.setBackgroundColor(Color.TRANSPARENT);
 		setContentView(webView);
-		final String appUrl = getUrl();
 		if (BuildConfig.DEBUG) {
 			WebView.setWebContentsDebuggingEnabled(true);
 		}
@@ -130,12 +135,6 @@ public class MainActivity extends ComponentActivity {
 		this.webView.setWebViewClient(new WebViewClient() {
 			@Override
 			public boolean shouldOverrideUrlLoading(WebView view, String url) {
-				if (url.startsWith(appUrl)) {
-					// Set JS interface on page reload
-					nativeImpl.setup();
-					return false;
-				}
-
 				Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
 				try {
 					startActivity(intent);
@@ -151,43 +150,15 @@ public class MainActivity extends ComponentActivity {
 		// Handle long click on links in the WebView
 		this.registerForContextMenu(this.webView);
 
-		List<String> queryParameters = new ArrayList<>();
-
+		Map<String, String> queryParameters = new HashMap<>();
 		// If opened from notifications, tell Web app to not login automatically, we will pass
 		// mailbox later when loaded (in handleIntent())
 		if (getIntent() != null
 				&& (OPEN_USER_MAILBOX_ACTION.equals(getIntent().getAction()) || OPEN_CALENDAR_ACTION.equals(getIntent().getAction()))) {
-			queryParameters.add("noAutoLogin=true");
+			queryParameters.put("noAutoLogin", "true");
 		}
 
-		// If the old credentials are present in the file system, pass them as an URL parameter
-		final File oldCredentialsFile = new File(getFilesDir(), "config/tutanota.json");
-		if (oldCredentialsFile.exists()) {
-			new AsyncTask<Void, Void, String>() {
-				@Override
-				@Nullable
-				protected String doInBackground(Void... voids) {
-					try {
-						String result = Utils.base64ToBase64Url(
-								Utils.bytesToBase64(Utils.readFile(oldCredentialsFile)));
-						oldCredentialsFile.delete();
-						return result;
-					} catch (IOException e) {
-						return null;
-					}
-				}
-
-				@Override
-				protected void onPostExecute(@Nullable String s) {
-					if (s != null) {
-						queryParameters.add("migrateCredentials=" + s);
-					}
-					startWebApp(queryParameters);
-				}
-			}.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
-		} else {
-			startWebApp(queryParameters);
-		}
+		startWebApp(queryParameters);
 
 		IntentFilter filter = new IntentFilter(INVALIDATE_SSE_ACTION);
 		this.registerReceiver(new BroadcastReceiver() {
@@ -216,9 +187,9 @@ public class MainActivity extends ComponentActivity {
 		super.onStop();
 	}
 
-	private void startWebApp(List<String> queryParams) {
-		webView.loadUrl(getUrl() +
-				(queryParams.isEmpty() ? "" : "?" + TextUtils.join("&", queryParams)));
+	@MainThread
+	private void startWebApp(Map<String, String> parameters) {
+		webView.loadUrl(getInitialUrl(parameters));
 		nativeImpl.setup();
 	}
 
@@ -228,6 +199,14 @@ public class MainActivity extends ComponentActivity {
 	}
 
 	private void handleIntent(Intent intent) {
+
+		// When we redirect to the app from outside, for example after doing payment verification,
+		// we don't want to do any kind of intent handling
+		Uri data = intent.getData();
+		if (data != null && data.toString().startsWith("tutanota://")) {
+			return;
+		}
+
 		if (intent.getAction() != null) {
 			switch (intent.getAction()) {
 				// See descriptions of actions in AndroidManifest.xml
@@ -249,25 +228,36 @@ public class MainActivity extends ComponentActivity {
 
 
 	@Override
-	protected void onSaveInstanceState(Bundle outState) {
+	protected void onSaveInstanceState(@NonNull Bundle outState) {
 		super.onSaveInstanceState(outState);
 		webView.saveState(outState);
 	}
 
-	public void changeTheme(String themeName) {
-		runOnUiThread(() -> doChangeTheme(themeName));
+	public void applyTheme() {
+		Map<String, String> theme = nativeImpl.themeManager.getCurrentThemeWithFallback();
+		runOnUiThread(() -> doApplyTheme(theme));
 	}
 
-	private void doChangeTheme(String themeName) {
-		boolean isDark = "dark".equals(themeName);
-		@ColorRes int backgroundRes = isDark ? R.color.darkDarkest : R.color.white;
-		getWindow().setBackgroundDrawableResource(backgroundRes);
+	private void doApplyTheme(@NonNull Map<String, String> theme) {
+		Log.d(TAG, "changeTheme: " + theme.get("themeId"));
+
+		@ColorInt
+		int backgroundColor = parseColor(Objects.requireNonNull(theme.get("content_bg")));
+		getWindow().setBackgroundDrawable(new ColorDrawable(backgroundColor));
 		View decorView = getWindow().getDecorView();
 
+		String headerBg = Objects.requireNonNull(theme.get("header_bg"));
+		@ColorInt
+		int statusBarColor = parseColor(headerBg);
+		boolean isStatusBarLight = Utils.isColorLight(headerBg);
+
+		int visibilityFlags = 0;
+
 		if (Utils.atLeastOreo()) {
-			int navbarColor = ContextCompat.getColor(this, isDark ? R.color.darkLighter : R.color.white);
-			getWindow().setNavigationBarColor(navbarColor);
-			decorView.setSystemUiVisibility(isDark ? 0 : View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+			getWindow().setNavigationBarColor(statusBarColor);
+			if (isStatusBarLight) {
+				visibilityFlags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+			}
 		}
 
 		// Changing status bar color
@@ -276,30 +266,19 @@ public class MainActivity extends ComponentActivity {
 		// should be white. So we cannot use white status bar color.
 		// So for Android M and above we alternate between white and dark status bar colors and
 		// we change lightStatusBar flag accordingly.
-		// For versions below M we alternate between red and black status bar colors. Green doesn't
-		// work well and it's not good for the dark theme anyway.
-		int statusBarColorInt;
-		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-			int uiFlags = isDark
-					? decorView.getSystemUiVisibility() & ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
-					: decorView.getSystemUiVisibility() | View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
-			decorView.setSystemUiVisibility(uiFlags);
-			statusBarColorInt = getResources().getColor(isDark ? R.color.darkLighter : R.color.white, null);
-		} else {
-			statusBarColorInt = getResources().getColor(isDark ? R.color.darkLighter : R.color.red);
+		getWindow().setStatusBarColor(statusBarColor);
+		if (isStatusBarLight) {
+			visibilityFlags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
 		}
-		getWindow().setStatusBarColor(statusBarColorInt);
-		PreferenceManager.getDefaultSharedPreferences(this)
-				.edit()
-				.putString(THEME_PREF, themeName)
-				.apply();
+
+		decorView.setSystemUiVisibility(visibilityFlags);
+
 	}
 
 	public void askBatteryOptinmizationsIfNeeded() {
 		PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
 		SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(this);
-		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
-				&& !preferences.getBoolean(ASKED_BATTERY_OPTIMIZTAIONS_PREF, false)
+		if (!preferences.getBoolean(ASKED_BATTERY_OPTIMIZTAIONS_PREF, false)
 				&& !powerManager.isIgnoringBatteryOptimizations(getPackageName())) {
 			nativeImpl.sendRequest(JsRequest.showAlertDialog, new Object[]{"allowPushNotification_msg"}).then((result) -> {
 				saveAskedBatteryOptimizations(preferences);
@@ -315,7 +294,34 @@ public class MainActivity extends ComponentActivity {
 		preferences.edit().putBoolean(ASKED_BATTERY_OPTIMIZTAIONS_PREF, true).apply();
 	}
 
-	private String getUrl() {
+	private String getInitialUrl(Map<String, String> parameters) {
+		Map<String, String> theme = this.nativeImpl.themeManager.getCurrentTheme();
+		if (theme != null) {
+			parameters.put("theme", Objects.requireNonNull(JSONObject.wrap(theme)).toString());
+		}
+
+		StringBuilder queryBuilder = new StringBuilder();
+		for (Map.Entry<String, String> entry : parameters.entrySet()) {
+			try {
+				String escapedValue = URLEncoder.encode(entry.getValue(), "UTF-8");
+				if (queryBuilder.length() == 0) {
+					queryBuilder.append("?");
+				} else {
+					queryBuilder.append("&");
+				}
+				queryBuilder.append(entry.getKey());
+				queryBuilder.append('=');
+				queryBuilder.append(escapedValue);
+			} catch (UnsupportedEncodingException e) {
+				throw new RuntimeException(e);
+			}
+		}
+		// additional path information like app.html/login are not handled properly by the webview
+		// when loaded from local file system. so we are just adding parameters to the Url e.g. ../app.html?noAutoLogin=true.
+		return getBaseUrl() + queryBuilder.toString();
+	}
+
+	private String getBaseUrl() {
 		return BuildConfig.RES_ADDRESS;
 	}
 
@@ -338,7 +344,7 @@ public class MainActivity extends ComponentActivity {
 		} else {
 			int requestCode = getRequestCode();
 			requests.put(requestCode, p);
-			ActivityCompat.requestPermissions(this, new String[]{permission}, requestCode);
+			requestPermissions(new String[]{permission}, requestCode);
 		}
 		return p;
 	}
@@ -347,8 +353,11 @@ public class MainActivity extends ComponentActivity {
 		return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED;
 	}
 
+	// deprecated but we need requestCode to identify the request which is not possible with new API
+	@SuppressWarnings("deprecation")
 	@Override
 	public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+		super.onRequestPermissionsResult(requestCode, permissions, grantResults);
 		Deferred deferred = requests.remove(requestCode);
 		if (deferred == null) {
 			Log.w(TAG, "No deferred for the permission request" + requestCode);
@@ -361,16 +370,21 @@ public class MainActivity extends ComponentActivity {
 		}
 	}
 
+	@SuppressWarnings("deprecation")
 	public Promise<ActivityResult, ?, ?> startActivityForResult(@RequiresPermission Intent intent) {
 		int requestCode = getRequestCode();
 		Deferred p = new DeferredObject();
 		requests.put(requestCode, p);
+		// deprecated but we need requestCode to identify the request which is not possible with new API
 		super.startActivityForResult(intent, requestCode);
 		return p;
 	}
 
+	// deprecated but we need requestCode to identify the request which is not possible with new API
+	@SuppressWarnings("deprecation")
 	@Override
 	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+		super.onActivityResult(requestCode, resultCode, data);
 		Deferred deferred = requests.remove(requestCode);
 		if (deferred != null) {
 			deferred.resolve(new ActivityResult(resultCode, data));
@@ -397,7 +411,6 @@ public class MainActivity extends ComponentActivity {
 	 */
 	void share(Intent intent) {
 		String action = intent.getAction();
-		String type = intent.getType();
 		ClipData clipData = intent.getClipData();
 
 		JSONArray files;
@@ -406,17 +419,16 @@ public class MainActivity extends ComponentActivity {
 		String subject = intent.getStringExtra(Intent.EXTRA_SUBJECT);
 
 		if (Intent.ACTION_SEND.equals(action)) {
-			if (clipData != null && clipData.getItemCount() > 0 && clipData.getDescription().getMimeType(0).startsWith("text")) {
-				text = clipData.getItemAt(0).getHtmlText();
+			// Try to read text from the clipboard before fall back on intent.getStringExtra
+			if (clipData != null && clipData.getItemCount() > 0) {
+				if (clipData.getDescription().getMimeType(0).startsWith("text")) {
+					text = clipData.getItemAt(0).getHtmlText();
+				}
 				if (text == null && clipData.getItemAt(0).getText() != null) {
 					text = clipData.getItemAt(0).getText().toString();
-				} else {
-					// e.g. text/x-vcard
-					Toast.makeText(this, "We don't support this kind of data yet",
-							Toast.LENGTH_SHORT).show();
-					Log.w(TAG, "Could not read text clipData with type " + type);
 				}
-			} else {
+			}
+			if (text == null) {
 				text = intent.getStringExtra(Intent.EXTRA_TEXT);
 			}
 			files = getFilesFromIntent(intent);
@@ -440,20 +452,12 @@ public class MainActivity extends ComponentActivity {
 				jsonAddresses.put(address);
 			}
 		}
-		Promise<Void, Exception, Void> permissionPromise;
-		if (files.length() > 0) {
-			permissionPromise = this.getPermission(Manifest.permission.READ_EXTERNAL_STORAGE);
-		} else {
-			permissionPromise = new DeferredObject<Void, Exception, Void>().resolve(null);
-		}
 
 		// Satisfy Java's lambda requirements
 		final String fText = text;
 		final JSONArray fJsonAddresses = jsonAddresses;
-		permissionPromise.then((__) -> {
-			nativeImpl.sendRequest(JsRequest.createMailEditor,
-					new Object[]{files, fText, fJsonAddresses, subject, mailToUrlString});
-		});
+		nativeImpl.sendRequest(JsRequest.createMailEditor,
+				new Object[]{files, fText, fJsonAddresses, subject, mailToUrlString});
 	}
 
 	@NonNull
@@ -473,7 +477,6 @@ public class MainActivity extends ComponentActivity {
 			// but we want to be sure
 			if (Intent.ACTION_SEND_MULTIPLE.equals(intent.getAction())) {
 				//noinspection unchecked
-				@SuppressWarnings("ConstantConditions")
 				ArrayList<Uri> uris = (ArrayList<Uri>) intent.getExtras().get(Intent.EXTRA_STREAM);
 				if (uris != null) {
 					for (Uri uri : uris) {
@@ -539,10 +542,8 @@ public class MainActivity extends ComponentActivity {
 		moveTaskToBack(false);
 	}
 
-	public void loadMainPage(String parameters) {
-		// additional path information like app.html/login are not handled properly by the webview
-		// when loaded from local file system. so we are just adding parameters to the Url e.g. ../app.html?noAutoLogin=true.
-		runOnUiThread(() -> this.webView.loadUrl(getUrl() + parameters));
+	public void reload(Map<String, String> parameters) {
+		runOnUiThread(() -> startWebApp(parameters));
 	}
 
 	@Override
@@ -550,29 +551,27 @@ public class MainActivity extends ComponentActivity {
 		super.onCreateContextMenu(menu, v, menuInfo);
 
 		final WebView.HitTestResult hitTestResult = this.webView.getHitTestResult();
-		switch (hitTestResult.getType()) {
-			case WebView.HitTestResult.SRC_ANCHOR_TYPE:
-				final String link = hitTestResult.getExtra();
-				if (link == null) {
-					return;
-				}
-				if (link.startsWith(getUrl())) {
-					return;
-				}
-				menu.setHeaderTitle(link);
-				menu.add(0, 0, 0, "Copy link").setOnMenuItemClickListener(item -> {
-					((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE))
-							.setPrimaryClip(ClipData.newPlainText(link, link));
-					return true;
-				});
-				menu.add(0, 2, 0, "Share").setOnMenuItemClickListener(item -> {
-					final Intent intent = new Intent(Intent.ACTION_SEND);
-					intent.putExtra(Intent.EXTRA_TEXT, link);
-					intent.setTypeAndNormalize("text/plain");
-					this.startActivity(Intent.createChooser(intent, "Share link"));
-					return true;
-				});
-				break;
+		if (hitTestResult.getType() == WebView.HitTestResult.SRC_ANCHOR_TYPE) {
+			final String link = hitTestResult.getExtra();
+			if (link == null) {
+				return;
+			}
+			if (link.startsWith(getBaseUrl())) {
+				return;
+			}
+			menu.setHeaderTitle(link);
+			menu.add(0, 0, 0, "Copy link").setOnMenuItemClickListener(item -> {
+				((ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE))
+						.setPrimaryClip(ClipData.newPlainText(link, link));
+				return true;
+			});
+			menu.add(0, 2, 0, "Share").setOnMenuItemClickListener(item -> {
+				final Intent intent = new Intent(Intent.ACTION_SEND);
+				intent.putExtra(Intent.EXTRA_TEXT, link);
+				intent.setTypeAndNormalize("text/plain");
+				this.startActivity(Intent.createChooser(intent, "Share link"));
+				return true;
+			});
 		}
 	}
 }

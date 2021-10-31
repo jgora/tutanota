@@ -1,25 +1,24 @@
 // @flow
 import m from "mithril"
-import {assertMainOrNode, isApp} from "../api/Env"
+import {assertMainOrNode, isApp} from "../api/common/Env"
 import {lang} from "../misc/LanguageViewModel"
-import {isSameId} from "../api/common/EntityFunctions"
+import type {TutanotaProperties} from "../api/entities/tutanota/TutanotaProperties"
 import {TutanotaPropertiesTypeRef} from "../api/entities/tutanota/TutanotaProperties"
-import {FeatureType, InboxRuleType, OperationType} from "../api/common/TutanotaConstants"
+import type {ReportMovedMailsTypeEnum} from "../api/common/TutanotaConstants"
+import {FeatureType, InboxRuleType, OperationType, ReportMovedMailsType} from "../api/common/TutanotaConstants"
 import {load, update} from "../api/main/Entity"
-import {getEnabledMailAddressesForGroupInfo, neverNull} from "../api/common/utils/Utils"
+import {neverNull, noOp} from "../api/common/utils/Utils"
 import {MailFolderTypeRef} from "../api/entities/tutanota/MailFolder"
-import {getInboxRuleTypeName} from "../mail/InboxRuleHandler"
-import * as EditSignatureDialog from "./EditSignatureDialog"
+import {getInboxRuleTypeName} from "../mail/model/InboxRuleHandler"
 import {EditAliasesFormN} from "./EditAliasesFormN.js"
 import {Dialog} from "../gui/base/Dialog"
 import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
 import {logins} from "../api/main/LoginController"
-import {getDefaultSenderFromUser, getFolderName} from "../mail/MailUtils"
+import {getDefaultSenderFromUser, getFolderName} from "../mail/model/MailUtils"
 import {Icons} from "../gui/base/icons/Icons"
 import {worker} from "../api/main/WorkerClient"
-import {showProgressDialog} from "../gui/base/ProgressDialog"
-import type {MailboxDetail} from "../mail/MailModel"
-import {mailModel} from "../mail/MailModel"
+import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
+import type {MailboxDetail} from "../mail/model/MailModel"
 import {locator} from "../api/main/MainLocator"
 import stream from "mithril/stream/stream.js"
 import type {EntityUpdateData} from "../api/main/EventController"
@@ -34,16 +33,33 @@ import type {TableAttrs, TableLineAttrs} from "../gui/base/TableN"
 import {ColumnWidth, createRowActions, TableN} from "../gui/base/TableN"
 import * as AddInboxRuleDialog from "./AddInboxRuleDialog"
 import {createInboxRuleTemplate} from "./AddInboxRuleDialog"
-import {ExpanderButtonN, ExpanderPanelN} from "../gui/base/ExpanderN"
+import {ExpanderButtonN, ExpanderPanelN} from "../gui/base/Expander"
 import {IdentifierListViewer} from "./IdentifierListViewer"
 import {IndexingNotSupportedError} from "../api/common/error/IndexingNotSupportedError"
-import type {TutanotaProperties} from "../api/entities/tutanota/TutanotaProperties"
+import {LockedError} from "../api/common/error/RestError"
+import type {EditAliasesFormAttrs} from "./EditAliasesFormN"
+import {createEditAliasFormAttrs, updateNbrOfAliases} from "./EditAliasesFormN"
+import {getEnabledMailAddressesForGroupInfo} from "../api/common/utils/GroupUtils";
+import {isSameId} from "../api/common/utils/EntityUtils";
+import {showEditOutOfOfficeNotificationDialog} from "./EditOutOfOfficeNotificationDialog"
+import type {OutOfOfficeNotification} from "../api/entities/tutanota/OutOfOfficeNotification"
+import {OutOfOfficeNotificationTypeRef} from "../api/entities/tutanota/OutOfOfficeNotification"
+import {LazyLoaded} from "../api/common/utils/LazyLoaded"
+import {formatActivateState, loadOutOfOfficeNotification} from "../misc/OutOfOfficeNotificationUtils"
+import {getSignatureType, show as showEditSignatureDialog} from "./EditSignatureDialog"
+import type {UpdatableSettingsViewer} from "./SettingsView"
+import {ofClass, promiseMap} from "../api/common/utils/PromiseUtils"
+import type {MailboxProperties} from "../api/entities/tutanota/MailboxProperties"
+import {MailboxPropertiesTypeRef} from "../api/entities/tutanota/MailboxProperties"
+import {getReportMovedMailsType, loadMailboxProperties, saveReportMovedMails} from "../misc/MailboxPropertiesUtils"
 
 assertMainOrNode()
 
 export class MailSettingsViewer implements UpdatableSettingsViewer {
 	_senderName: Stream<string>;
 	_signature: Stream<string>;
+	_mailboxProperties: LazyLoaded<?MailboxProperties>;
+	_reportMovedMails: Stream<ReportMovedMailsTypeEnum>
 	_defaultSender: Stream<?string>;
 	_defaultUnconfidential: Stream<?boolean>;
 	_sendPlaintext: Stream<?boolean>;
@@ -53,27 +69,48 @@ export class MailSettingsViewer implements UpdatableSettingsViewer {
 	_inboxRulesExpanded: Stream<boolean>;
 	_indexStateWatch: ?Stream<any>;
 	_identifierListViewer: IdentifierListViewer;
+	_editAliasFormAttrs: EditAliasesFormAttrs;
+	_outOfOfficeNotification: LazyLoaded<?OutOfOfficeNotification>;
+	_outOfOfficeStatus: Stream<string>; // stores the status label, based on whether the notification is/ or will really be activated (checking start time/ end time)
 
 	constructor() {
-		this._defaultSender = stream(getDefaultSenderFromUser())
+		this._defaultSender = stream(getDefaultSenderFromUser(logins.getUserController()))
 		this._senderName = stream(logins.getUserController().userGroupInfo.name)
-		this._signature = stream(EditSignatureDialog.getSignatureType(logins.getUserController().props).name)
+		this._signature = stream(getSignatureType(logins.getUserController().props).name)
+		this._reportMovedMails = stream(getReportMovedMailsType(null)) // loaded later
 		this._defaultUnconfidential = stream(logins.getUserController().props.defaultUnconfidential)
 		this._sendPlaintext = stream(logins.getUserController().props.sendPlaintextOnly)
 		this._noAutomaticContacts = stream(logins.getUserController().props.noAutomaticContacts)
 		this._enableMailIndexing = stream(locator.search.indexState().mailIndexEnabled)
 		this._inboxRulesExpanded = stream(false)
 		this._inboxRulesTableLines = stream([])
+		this._outOfOfficeStatus = stream(lang.get("deactivated_label"))
 		this._indexStateWatch = null
 		this._identifierListViewer = new IdentifierListViewer(logins.getUserController().user)
-
 		this._updateInboxRules(logins.getUserController().props)
+
+		this._editAliasFormAttrs = createEditAliasFormAttrs(logins.getUserController().userGroupInfo)
+
+		if (logins.getUserController().isGlobalAdmin()) {
+			updateNbrOfAliases(this._editAliasFormAttrs)
+		}
+
+		this._mailboxProperties = new LazyLoaded(() => {
+			return loadMailboxProperties()
+		}, null)
+		this._mailboxProperties.getAsync().then(() => this._updateMailboxPropertiesSettings())
+
+		this._outOfOfficeNotification = new LazyLoaded(() => {
+			return loadOutOfOfficeNotification()
+		}, null)
+		this._outOfOfficeNotification.getAsync().then(() => this._updateOutOfOfficeNotification())
 	}
 
-	view() {
+	view(): Children {
 		const defaultSenderAttrs: DropDownSelectorAttrs<string> = {
 			label: "defaultSenderMailAddress_label",
 			items: getEnabledMailAddressesForGroupInfo(logins.getUserController().userGroupInfo)
+				.sort()
 				.map(a => {
 					return {name: a, value: a}
 				}),
@@ -108,7 +145,7 @@ export class MailSettingsViewer implements UpdatableSettingsViewer {
 
 		const changeSignatureButtonAttrs: ButtonAttrs = {
 			label: "userEmailSignature_label",
-			click: () => EditSignatureDialog.show(logins.getUserController().props),
+			click: () => showEditSignatureDialog(logins.getUserController().props),
 			icon: () => Icons.Edit
 		}
 
@@ -117,6 +154,21 @@ export class MailSettingsViewer implements UpdatableSettingsViewer {
 			value: this._signature,
 			disabled: true,
 			injectionsRight: () => [m(ButtonN, changeSignatureButtonAttrs)]
+		}
+
+		const outOfOfficeAttrs: TextFieldAttrs = {
+			label: "outOfOfficeNotification_title",
+			value: this._outOfOfficeStatus,
+			disabled: true,
+			injectionsRight: () => [m(ButtonN, editOutOfOfficeNotificationButtonAttrs)]
+		}
+
+		const editOutOfOfficeNotificationButtonAttrs: ButtonAttrs = {
+			label: "outOfOfficeNotification_title",
+			click: () => {
+				this._outOfOfficeNotification.getAsync().then(notification => showEditOutOfOfficeNotificationDialog(notification))
+			},
+			icon: () => Icons.Edit
 		}
 
 		const defaultUnconfidentialAttrs: DropDownSelectorAttrs<boolean> = {
@@ -174,25 +226,25 @@ export class MailSettingsViewer implements UpdatableSettingsViewer {
 			selectedValue: this._enableMailIndexing,
 			selectionChangedHandler: mailIndexEnabled => {
 				if (mailIndexEnabled) {
-					showProgressDialog("pleaseWait_msg", worker.enableMailIndexing())
-						.catch(IndexingNotSupportedError, () => {
+					showProgressDialog("pleaseWait_msg", worker.indexerFacade.enableMailIndexing())
+						.catch(ofClass(IndexingNotSupportedError, () => {
 							Dialog.error(isApp() ? "searchDisabledApp_msg" : "searchDisabled_msg")
-						})
+						}))
 				} else {
-					showProgressDialog("pleaseWait_msg", worker.disableMailIndexing())
+					showProgressDialog("pleaseWait_msg", worker.indexerFacade.disableMailIndexing("Disabled by user"))
 				}
 			},
 			dropdownWidth: 250
 		}
 
+		const reportMovedMailsAttrs = makeReportMovedMailsDropdownAttrs(this._reportMovedMails, this._mailboxProperties)
 		const templateRule = createInboxRuleTemplate(InboxRuleType.RECIPIENT_TO_EQUALS, "")
 		const addInboxRuleButtonAttrs: ButtonAttrs = {
 			label: "addInboxRule_action",
-			click: () => mailModel.getUserMailboxDetails().then((mailboxDetails) => AddInboxRuleDialog.show(mailboxDetails, templateRule)),
+			click: () => locator.mailModel.getUserMailboxDetails().then((mailboxDetails) => AddInboxRuleDialog.show(mailboxDetails, templateRule)),
 			icon: () => Icons.Add
 
 		}
-
 		const inboxRulesTableAttrs: TableAttrs = {
 			columnHeading: ["inboxRuleField_label", "inboxRuleValue_label", "inboxRuleTargetFolder_label"],
 			columnWidths: [ColumnWidth.Small, ColumnWidth.Largest, ColumnWidth.Small],
@@ -224,7 +276,9 @@ export class MailSettingsViewer implements UpdatableSettingsViewer {
 				logins.isEnabled(FeatureType.InternalCommunication) ? null : m(DropDownSelectorN, sendPlaintextAttrs),
 				logins.isEnabled(FeatureType.DisableContacts) ? null : m(DropDownSelectorN, noAutomaticContactsAttrs),
 				m(DropDownSelectorN, enableMailIndexingAttrs),
-				(logins.getUserController().isGlobalAdmin()) ? m(EditAliasesFormN, {userGroupInfo: logins.getUserController().userGroupInfo}) : null,
+				m(DropDownSelectorN, reportMovedMailsAttrs),
+				m(TextFieldN, outOfOfficeAttrs),
+				(logins.getUserController().isGlobalAdmin()) ? m(EditAliasesFormN, this._editAliasFormAttrs) : null,
 				logins.isEnabled(FeatureType.InternalCommunication) ? null : [
 					m(".flex-space-between.items-center.mt-l.mb-s", [
 						m(".h4", lang.get('inboxRulesSettings_action')),
@@ -233,30 +287,38 @@ export class MailSettingsViewer implements UpdatableSettingsViewer {
 					m(ExpanderPanelN, {expanded: this._inboxRulesExpanded}, m(TableN, inboxRulesTableAttrs)),
 					m(".small", lang.get("nbrOfInboxRules_msg", {"{1}": logins.getUserController().props.inboxRules.length})),
 				],
-				m(this._identifierListViewer)
+				m(this._identifierListViewer),
+
 			])
 		]
 	}
 
 
-	_updatePropertiesSettings(props: TutanotaProperties) {
+	_updateTutanotaPropertiesSettings(props: TutanotaProperties) {
 		if (props.defaultSender) {
 			this._defaultSender(props.defaultSender)
 		}
 		this._defaultUnconfidential(props.defaultUnconfidential)
 		this._noAutomaticContacts(props.noAutomaticContacts)
 		this._sendPlaintext(props.sendPlaintextOnly)
-		this._signature(EditSignatureDialog.getSignatureType(props).name)
+		this._signature(getSignatureType(props).name)
+	}
+
+	_updateMailboxPropertiesSettings() {
+		this._mailboxProperties.getAsync().then(props => {
+			this._reportMovedMails(getReportMovedMailsType(props))
+			m.redraw()
+		})
 	}
 
 	_updateInboxRules(props: TutanotaProperties): void {
-		mailModel.getUserMailboxDetails().then((mailboxDetails) => {
+		locator.mailModel.getUserMailboxDetails().then((mailboxDetails) => {
 			this._inboxRulesTableLines(props.inboxRules.map((rule, index) => {
 				return {
 					cells: [getInboxRuleTypeName(rule.type), rule.value, this._getTextForTarget(mailboxDetails, rule.targetFolder)],
 					actionButtonAttrs: createRowActions({
 						getArray: () => props.inboxRules,
-						updateInstance: () => update(props)
+						updateInstance: () => update(props).catch(ofClass(LockedError, noOp))
 					}, rule, index, [
 						{
 							label: "edit_action",
@@ -270,7 +332,13 @@ export class MailSettingsViewer implements UpdatableSettingsViewer {
 		})
 	}
 
-	_getTextForTarget(mailboxDetails: MailboxDetail, targetFolderId: IdTuple) {
+	_updateOutOfOfficeNotification(): void {
+		const notification = this._outOfOfficeNotification.getLoaded()
+		this._outOfOfficeStatus(formatActivateState(notification))
+		m.redraw()
+	}
+
+	_getTextForTarget(mailboxDetails: MailboxDetail, targetFolderId: IdTuple): string {
 		let folder = mailboxDetails.folders.find(folder => isSameId(folder._id, targetFolderId))
 		if (folder) {
 			return getFolderName(folder)
@@ -279,26 +347,49 @@ export class MailSettingsViewer implements UpdatableSettingsViewer {
 		}
 	}
 
-	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>): void {
-		for (let update of updates) {
+	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>): Promise<void> {
+		return promiseMap(updates, update => {
+			let p = Promise.resolve()
 			const {instanceListId, instanceId, operation} = update
 			if (isUpdateForTypeRef(TutanotaPropertiesTypeRef, update) && operation === OperationType.UPDATE) {
-				load(TutanotaPropertiesTypeRef, logins.getUserController().props._id).then(props => {
-					this._updatePropertiesSettings(props)
+				p = load(TutanotaPropertiesTypeRef, logins.getUserController().props._id).then(props => {
+					this._updateTutanotaPropertiesSettings(props)
 					this._updateInboxRules(props)
 				})
 			} else if (isUpdateForTypeRef(MailFolderTypeRef, update)) {
 				this._updateInboxRules(logins.getUserController().props)
 			} else if (isUpdateForTypeRef(GroupInfoTypeRef, update) && operation === OperationType.UPDATE
 				&& isSameId(logins.getUserController().userGroupInfo._id, [neverNull(instanceListId), instanceId])) {
-				load(GroupInfoTypeRef, [neverNull(instanceListId), instanceId]).then(groupInfo => {
+				p = load(GroupInfoTypeRef, [neverNull(instanceListId), instanceId]).then(groupInfo => {
 					this._senderName(groupInfo.name)
+					this._editAliasFormAttrs.userGroupInfo = groupInfo
 					m.redraw()
 				})
+			} else if (isUpdateForTypeRef(OutOfOfficeNotificationTypeRef, update)) {
+				this._outOfOfficeNotification.reload().then(() => this._updateOutOfOfficeNotification())
+			} else if (isUpdateForTypeRef(MailboxPropertiesTypeRef, update)) {
+				this._mailboxProperties.reload().then(() => this._updateMailboxPropertiesSettings())
 			}
+			return p.then(() => {
+				this._identifierListViewer.entityEventReceived(update)
+			})
+		}).then(() => m.redraw())
+	}
+}
 
-			this._identifierListViewer.entityEventReceived(update)
-		}
-		m.redraw()
+function makeReportMovedMailsDropdownAttrs(reportMovedMailsSetting: Stream<ReportMovedMailsTypeEnum>, mailboxProperties: LazyLoaded<?MailboxProperties>): DropDownSelectorAttrs<ReportMovedMailsTypeEnum> {
+	return {
+		label: "spamReports_label",
+		helpLabel: () => lang.get("unencryptedTransmission_msg"),
+		items: [
+			{name: lang.get("alwaysAsk_action"), value: ReportMovedMailsType.ALWAYS_ASK},
+			{name: lang.get("alwaysReport_action"), value: ReportMovedMailsType.AUTOMATICALLY_ONLY_SPAM},
+			{name: lang.get("neverReport_action"), value: ReportMovedMailsType.NEVER}
+		],
+		selectedValue: reportMovedMailsSetting,
+		selectionChangedHandler: (reportMovedMails) => {
+			mailboxProperties.getAsync().then(props => saveReportMovedMails(props, reportMovedMails))
+		},
+		dropdownWidth: 250
 	}
 }

@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {PasswordChannelPhoneNumber} from "./PasswordChannelPhoneNumber"
 
@@ -15,9 +17,7 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 328,
-			"since": 1,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -26,17 +26,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"phoneNumberChannels": {
-			"name": "phoneNumberChannels",
 			"id": 329,
-			"since": 1,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": true,
 			"refType": "PasswordChannelPhoneNumber",
-			"final": true
+			"dependency": null
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createPasswordChannelReturn(values?: $Shape<$Exact<PasswordChannelReturn>>): PasswordChannelReturn {

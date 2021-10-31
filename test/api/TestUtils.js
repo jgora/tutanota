@@ -1,13 +1,15 @@
 // @flow
-import o from "ospec/ospec.js"
+import o from "ospec"
 import type {BrowserData} from "../../src/misc/ClientConstants"
 import type {Db} from "../../src/api/worker/search/SearchTypes"
 import {aes256RandomKey} from "../../src/api/worker/crypto/Aes"
 import {IndexerCore} from "../../src/api/worker/search/IndexerCore"
 import {EventQueue} from "../../src/api/worker/search/EventQueue"
 import {DbTransaction} from "../../src/api/worker/search/DbFacade"
-import {fixedIv} from "../../src/api/worker/crypto/CryptoUtils"
-import {defer} from "../../src/api/common/utils/Utils"
+import {fixedIv, uint8ArrayToKey} from "../../src/api/worker/crypto/CryptoUtils"
+import {assertNotNull, downcast, neverNull} from "../../src/api/common/utils/Utils"
+import type {DeviceKeyProvider} from "../../src/desktop/DeviceKeyProviderImpl"
+import {delay} from "../../src/api/common/utils/PromiseUtils"
 
 /**
  * Mocks an attribute (function or object) on an object and makes sure that it can be restored to the original attribute by calling unmockAttribute() later.
@@ -111,21 +113,86 @@ export function makeCore(args?: {
 	return core
 }
 
-export function makeTimeoutMock() {
-	let deferred = defer()
-	let timeoutId = 1
-	const timeoutMock = function (fn: () => any) {
-		deferred.promise.finally(() => {
-			deferred = defer()
-			fn()
-		})
-		timeoutId++
-		return timeoutId
-	}
+export interface TimeoutMock {
+	(fn: () => mixed, time: number): TimeoutID,
 
-	timeoutMock.next = function () {
-		return deferred.resolve()
-	}
-	return timeoutMock
+	next(): void
+
 }
 
+export function makeTimeoutMock(): TimeoutMock {
+	let timeoutId = 1
+	let scheduledFn
+	const timeoutMock = function (fn: () => mixed) {
+		scheduledFn = fn
+		timeoutId++
+		return downcast(timeoutId)
+	}
+	const spiedMock = o.spy(timeoutMock)
+
+	spiedMock.next = function () {
+		scheduledFn && scheduledFn()
+	}
+	return spiedMock
+}
+
+/** Catch error and return either value or error */
+export async function asResult<T>(p: Promise<T>): Promise<T | Error> {
+	return p.catch((e) => e)
+}
+
+export async function assertThrows<T: Error>(expected: Class<T>, fn: () => Promise<mixed>): Promise<T> {
+	try {
+		await fn()
+	} catch (e) {
+		o(e instanceof expected).equals(true)("AssertThrows failed: Expected a " + downcast(expected) + " to be thrown, but got a "
+			+ e.constructor)
+		return e
+	}
+	throw new Error("AssertThrows failed: Expected a " + downcast(expected) + " to be thrown, but nothing was")
+}
+
+export function preTest() {
+	browser(() => {
+		const p = document.createElement("p")
+		p.id = "report"
+		p.style.fontWeight = "bold"
+		p.style.fontSize = "30px"
+		p.style.fontFamily = "sans-serif"
+		p.textContent = "Running tests..."
+		neverNull(document.body).appendChild(p)
+	})()
+}
+
+export function reportTest(results: mixed, stats: mixed) {
+	const errCount = o.report(results, stats)
+	if (typeof process != "undefined" && errCount !== 0) process.exit(1) // eslint-disable-line no-process-exit
+	browser(() => {
+		const p = assertNotNull(document.getElementById("report"))
+		// errCount includes bailCount
+		p.textContent = errCount === 0 ? "No errors" : `${errCount} error(s) (see console)`
+		p.style.color = errCount === 0 ? "green" : "red"
+	})()
+}
+
+export function makeDeviceKeyProvider(uint8ArrayKey: Uint8Array): DeviceKeyProvider {
+	return {
+		getDeviceKey() {
+			return Promise.resolve(uint8ArrayToKey(uint8ArrayKey))
+		}
+	}
+}
+
+export async function assertResolvedIn(ms: number, ...promises: $ReadOnlyArray<Promise<*>>): Promise<*> {
+	const allP = [delay(ms).then(() => "timeout")]
+		.concat(promises.map((p, i) => p.then(() => `promise ${i} is resolved`)))
+	const result = await Promise.race(allP)
+	o(result).notEquals("timeout")
+}
+
+export async function assertNotResolvedIn(ms: number, ...promises: $ReadOnlyArray<Promise<*>>): Promise<*> {
+	const allP = [delay(ms).then(() => "timeout")]
+		.concat(promises.map((p, i) => p.then(() => `promise ${i} is resolved`)))
+	const result = await Promise.race(allP)
+	o(result).equals("timeout")
+}

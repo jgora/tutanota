@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {GroupSettings} from "./GroupSettings"
 
@@ -15,63 +17,49 @@ export const _TypeModel: TypeModel = {
 	"encrypted": true,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 976,
-			"since": 34,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"_id": {
-			"name": "_id",
 			"id": 974,
-			"since": 34,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerEncSessionKey": {
-			"name": "_ownerEncSessionKey",
 			"id": 978,
-			"since": 34,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerGroup": {
-			"name": "_ownerGroup",
 			"id": 977,
-			"since": 34,
 			"type": "GeneratedId",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_permissions": {
-			"name": "_permissions",
 			"id": 975,
-			"since": 34,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"startOfTheWeek": {
-			"name": "startOfTheWeek",
 			"id": 981,
-			"since": 34,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": true
 		},
 		"timeFormat": {
-			"name": "timeFormat",
 			"id": 980,
-			"since": 34,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
@@ -80,17 +68,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"groupSettings": {
-			"name": "groupSettings",
 			"id": 979,
-			"since": 34,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "GroupSettings",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createUserSettingsGroupRoot(values?: $Shape<$Exact<UserSettingsGroupRoot>>): UserSettingsGroupRoot {

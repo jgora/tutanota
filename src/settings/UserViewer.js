@@ -1,28 +1,24 @@
 // @flow
 import m from "mithril"
-import {assertMainOrNode} from "../api/Env"
-import {TextField} from "../gui/base/TextField"
+import {assertMainOrNode} from "../api/common/Env"
 import {Button} from "../gui/base/Button"
 import {Dialog} from "../gui/base/Dialog"
 import {load, loadAll, loadMultiple, loadRange, update} from "../api/main/Entity"
 import {formatDateWithMonth, formatStorageSize} from "../misc/Formatter"
 import {lang} from "../misc/LanguageViewModel"
 import {PasswordForm} from "./PasswordForm"
-import {CUSTOM_MIN_ID, isSameId} from "../api/common/EntityFunctions"
 import {worker} from "../api/main/WorkerClient"
 import {DropDownSelector} from "../gui/base/DropDownSelector"
 import type {User} from "../api/entities/sys/User"
 import {UserTypeRef} from "../api/entities/sys/User"
-import {compareGroupInfos, getGroupInfoDisplayName, neverNull} from "../api/common/utils/Utils"
+import {neverNull} from "../api/common/utils/Utils"
 import {GroupTypeRef} from "../api/entities/sys/Group"
 import {BookingItemFeatureType, GroupType, OperationType} from "../api/common/TutanotaConstants"
 import type {GroupInfo} from "../api/entities/sys/GroupInfo"
 import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
 import {LazyLoaded} from "../api/common/utils/LazyLoaded"
 import {BadRequestError, NotAuthorizedError, PreconditionFailedError} from "../api/common/error/RestError"
-import * as BuyDialog from "../subscription/BuyDialog"
 import {logins} from "../api/main/LoginController"
-import {MailboxServerPropertiesTypeRef} from "../api/entities/tutanota/MailboxServerProperties"
 import {MailboxGroupRootTypeRef} from "../api/entities/tutanota/MailboxGroupRoot"
 import {Table} from "../gui/base/Table"
 import {ColumnWidth} from "../gui/base/TableN"
@@ -36,19 +32,26 @@ import type {ContactForm} from "../api/entities/tutanota/ContactForm"
 import {ContactFormTypeRef} from "../api/entities/tutanota/ContactForm"
 import {remove} from "../api/common/utils/ArrayUtils"
 import {CustomerContactFormGroupRootTypeRef} from "../api/entities/tutanota/CustomerContactFormGroupRoot"
-import {showProgressDialog} from "../gui/base/ProgressDialog"
+import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
 import stream from "mithril/stream/stream.js"
 import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
-import {showNotAvailableForFreeDialog} from "../misc/ErrorHandlerImpl"
-import {HtmlEditor as Editor, Mode} from "../gui/base/HtmlEditor"
+import {HtmlEditor as Editor, Mode} from "../gui/editor/HtmlEditor"
 import {filterContactFormsForLocalAdmin} from "./ContactFormListView"
-import {checkAndImportUserData} from "./ImportUsersViewer"
-import {EditAliasesFormN} from "./EditAliasesFormN"
+import {checkAndImportUserData, CSV_USER_FORMAT} from "./ImportUsersViewer"
+import type {EditAliasesFormAttrs} from "./EditAliasesFormN"
+import {createEditAliasFormAttrs, EditAliasesFormN, updateNbrOfAliases} from "./EditAliasesFormN"
 import type {GroupMembership} from "../api/entities/sys/GroupMembership"
+import {compareGroupInfos, getGroupInfoDisplayName} from "../api/common/utils/GroupUtils";
+import {CUSTOM_MIN_ID, isSameId} from "../api/common/utils/EntityUtils";
+import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
+import {showBuyDialog} from "../subscription/BuyDialog"
+import type {ButtonAttrs} from "../gui/base/ButtonN"
+import {ButtonN} from "../gui/base/ButtonN"
+import {TextFieldN} from "../gui/base/TextFieldN"
+import {ofClass, promiseMap} from "../api/common/utils/PromiseUtils"
 
 assertMainOrNode()
-export const CSV_USER_FORMAT = "username;user@domain.com;password"
 
 export class UserViewer {
 	view: Function;
@@ -56,18 +59,23 @@ export class UserViewer {
 	_user: LazyLoaded<User>;
 	_customer: LazyLoaded<Customer>;
 	_teamGroupInfos: LazyLoaded<GroupInfo[]>;
-	_senderName: TextField;
+	_senderName: string
 	_groupsTable: ?Table;
 	_contactFormsTable: ?Table;
-	_usedStorage: TextField;
-	_admin: DropDownSelector<boolean>;
+	_adminStatusSelector: DropDownSelector<boolean>;
 	_administratedBy: DropDownSelector<?Id>;
-	_deactivated: DropDownSelector<boolean>;
+	_userStatusSelector: DropDownSelector<boolean>;
 	_whitelistProtection: ?DropDownSelector<boolean>;
 	_secondFactorsForm: EditSecondFactorsForm;
+	_editAliasFormAttrs: EditAliasesFormAttrs;
+	_usedStorage: number | null
+
 
 	constructor(userGroupInfo: GroupInfo, isAdmin: boolean) {
+		// used storage is unknown initially
+		this._usedStorage = null
 		this.userGroupInfo = userGroupInfo
+		this._senderName = this.userGroupInfo.name || ""
 		this._user = new LazyLoaded(() => {
 			return load(GroupTypeRef, this.userGroupInfo.group).then(userGroup => {
 				return load(UserTypeRef, neverNull(userGroup.user))
@@ -76,22 +84,8 @@ export class UserViewer {
 		this._customer = new LazyLoaded(() => load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)))
 		this._teamGroupInfos = new LazyLoaded(() => this._customer.getAsync()
 		                                                .then(customer => loadAll(GroupInfoTypeRef, customer.teamGroups)))
-		this._senderName = new TextField("mailName_label").setValue(this.userGroupInfo.name).setDisabled()
-		let editSenderNameButton = new Button("edit_action", () => {
-			Dialog.showTextInputDialog("edit_action", "mailName_label", null, this._senderName.value())
-			      .then(newName => {
-				      this.userGroupInfo.name = newName
-				      update(this.userGroupInfo)
-			      })
-		}, () => Icons.Edit)
-		this._senderName._injectionsRight = () => [m(editSenderNameButton)]
 
-		let mailAddress = new TextField("mailAddress_label").setValue(this.userGroupInfo.mailAddress).setDisabled()
-		let created = new TextField("created_label").setValue(formatDateWithMonth(this.userGroupInfo.created))
-		                                            .setDisabled()
-		this._usedStorage = new TextField("storageCapacityUsed_label").setValue(lang.get("loading_msg")).setDisabled()
-
-		this._admin = new DropDownSelector("globalAdmin_label", null, [
+		this._adminStatusSelector = new DropDownSelector("globalAdmin_label", null, [
 			{name: lang.get("no_label"), value: false},
 			{name: lang.get("yes_label"), value: true}
 		], stream(isAdmin)).setSelectionChangedHandler(makeAdmin => {
@@ -103,25 +97,20 @@ export class UserViewer {
 				Dialog.error("assignAdminRightsToLocallyAdministratedUserError_msg")
 			} else {
 				showProgressDialog("pleaseWait_msg", this._user.getAsync()
-				                                         .then(user => worker.changeAdminFlag(user, makeAdmin)))
+				                                         .then(user => worker.userManagementFacade.changeAdminFlag(user, makeAdmin)))
 			}
 		})
 
-
-		this._deactivated = new DropDownSelector("state_label", null, [
+		this._userStatusSelector = new DropDownSelector("state_label", null, [
 			{name: lang.get("activated_label"), value: false},
 			{name: lang.get("deactivated_label"), value: true}
 		], stream(this.userGroupInfo.deleted != null)).setSelectionChangedHandler(deactivate => {
-			if (this._admin.selectedValue()) {
+			if (this._adminStatusSelector.selectedValue()) {
 				Dialog.error("deactivateOwnAccountInfo_msg")
 			} else {
 				this._deleteUser(!deactivate)
 			}
 		})
-
-		let password = new TextField("password_label").setValue("***").setDisabled()
-		let changePasswordButton = new Button("changePassword_label", () => this._changePassword(), () => Icons.Edit)
-		password._injectionsRight = () => [m(changePasswordButton)]
 
 		this._secondFactorsForm = new EditSecondFactorsForm(this._user);
 
@@ -159,7 +148,7 @@ export class UserViewer {
 								                                                                    .memberships
 								                                                                    .find(gm => gm.groupType
 									                                                                    === GroupType.Admin)).group
-								return worker.updateAdminship(this.userGroupInfo.group, newAdminGroupId)
+								return worker.userManagementFacade.updateAdminship(this.userGroupInfo.group, newAdminGroupId)
 							}))
 						}
 					})
@@ -170,84 +159,107 @@ export class UserViewer {
 
 		this._customer.getAsync().then(customer => {
 			return load(CustomerContactFormGroupRootTypeRef, customer.customerGroup).then(contactFormGroupRoot => {
-				loadRange(ContactFormTypeRef, contactFormGroupRoot.contactForms, CUSTOM_MIN_ID, 1, false).then(cf => {
+				return loadRange(ContactFormTypeRef, contactFormGroupRoot.contactForms, CUSTOM_MIN_ID, 1, false).then(cf => {
 					if (cf.length > 0) {
 						let contactFormsAddButton = new Button("addResponsiblePerson_label", () => this._showAddUserToContactFormDialog(), () => Icons.Add)
 						this._contactFormsTable = new Table(["contactForms_label"], [
 							ColumnWidth.Largest, ColumnWidth.Small
 						], true, contactFormsAddButton)
-						this._updateContactForms()
+						return this._updateContactForms()
 					}
 				})
 			})
 		})
 
-		this.view = () => {
-			const whitelistProtestciton = this._whitelistProtection
-			return [
-				m("#user-viewer.fill-absolute.scroll.plr-l.pb-floating", [
-					m(".h4.mt-l", lang.get('userSettings_label')),
-					m("", [
-						m(mailAddress),
-						m(created),
-						m(this._usedStorage),
-					]),
-					m("", [
-						m(this._senderName),
-						m(password),
-						!logins.getUserController().isGlobalAdmin() ? null : [
-							m(this._admin),
-							this._administratedBy ? m(this._administratedBy) : null,
-						],
-						m(this._deactivated)
-					]),
-					(logins.getUserController().isPremiumAccount() || logins.getUserController()
-					                                                        .isFreeAccount()) ? m(this._secondFactorsForm) : null,
-					(this._groupsTable) ? m(".h4.mt-l.mb-s", lang.get('groups_label')) : null,
-					(this._groupsTable) ? m(this._groupsTable) : null,
-					(this._contactFormsTable) ? m(".h4.mt-l.mb-s", lang.get('contactForms_label')) : null,
-					(this._contactFormsTable) ? m(this._contactFormsTable) : null,
-					m(EditAliasesFormN, {userGroupInfo: this.userGroupInfo}),
-					logins.getUserController().isPremiumAccount() && whitelistProtestciton
-						? [
-							m(".h4.mt-l", lang.get('mailSettings_label')),
-							m(whitelistProtestciton)
-						]
-						: null
-				]),
-			]
+		this._editAliasFormAttrs = createEditAliasFormAttrs(this.userGroupInfo)
+
+		if (logins.getUserController().isGlobalAdmin()) {
+			updateNbrOfAliases(this._editAliasFormAttrs)
 		}
 
-		this._createOrUpdateWhitelistProtectionField()
 		this._updateUsedStorageAndAdminFlag()
 	}
 
-	_createOrUpdateWhitelistProtectionField() {
-		// currently not available
-		// if (!logins.getUserController().isGlobalAdmin()) {
-		// 	return
-		// }
-		// this._user.getAsync().then(user => {
-		// 	let userMailGroupId = neverNull(user.memberships.find(m => m.groupType === GroupType.Mail)).group
-		// 	return load(MailboxGroupRootTypeRef, userMailGroupId).then(mailboxGroupRoot => {
-		// 		return load(MailboxServerPropertiesTypeRef, mailboxGroupRoot.serverProperties).then(props => {
-		// 			if (!this._whitelistProtection) {
-		// 				this._whitelistProtection = new DropDownSelector("whitelistProtection_label", () => lang.get("whitelistProtectionInfo_label"), [
-		// 					{name: lang.get("activated_label"), value: true},
-		// 					{name: lang.get("deactivated_label"), value: false}
-		// 				], props.whitelistProtectionEnabled).setSelectionChangedHandler(v => {
-		// 					props.whitelistProtectionEnabled = v
-		// 					update(props)
-		// 				})
-		// 				m.redraw()
-		// 			} else {
-		// 				this._whitelistProtection.selectedValue(props.whitelistProtectionEnabled)
-		// 			}
-		// 		})
-		// 	}).catch(NotFoundError, e => {
-		// 		// not migrated yet
-		// 	})
-		// })
+	view(vnode: Vnode<any>): Children {
+		const editSenderNameButtonAttrs: ButtonAttrs = {
+			label: "edit_action",
+			click: () => {
+				Dialog.showTextInputDialog("edit_action", "mailName_label", null, this._senderName)
+				      .then(newName => {
+					      this.userGroupInfo.name = newName
+					      update(this.userGroupInfo)
+				      })
+			},
+			icon: () => Icons.Edit,
+		}
+		const senderNameFieldAttrs = {
+			label: "mailName_label",
+			value: stream(this._senderName),
+			disabled: true,
+			injectionsRight: () => [m(ButtonN, editSenderNameButtonAttrs)]
+		}
+
+		const mailAddressFieldAttrs = {
+			label: "mailAddress_label",
+			value: stream(this.userGroupInfo.mailAddress ?? ""),
+			disabled: true,
+		}
+
+		const createdFieldAttrs = {
+			label: "created_label",
+			value: stream(formatDateWithMonth(this.userGroupInfo.created)),
+			disabled: true
+		}
+
+		const usedStorageFieldAttrs = {
+			label: "storageCapacityUsed_label",
+			value: this._usedStorage ? stream(formatStorageSize(this._usedStorage)) : stream(lang.get("loading_msg")),
+			disabled: true,
+		}
+
+		const changePasswordButtonAttrs: ButtonAttrs = {
+			label: "changePassword_label",
+			click: () => this._changePassword(),
+			icon: () => Icons.Edit,
+
+		}
+		const passwordFieldAttrs = {
+			label: "password_label",
+			value: stream("***"),
+			injectionsRight: () => [m(ButtonN, changePasswordButtonAttrs)],
+			disabled: true
+		}
+
+		const whitelistProtection = this._whitelistProtection
+		return m("#user-viewer.fill-absolute.scroll.plr-l.pb-floating", [
+			m(".h4.mt-l", lang.get('userSettings_label')),
+			m("", [
+				m(TextFieldN, mailAddressFieldAttrs),
+				m(TextFieldN, createdFieldAttrs),
+				m(TextFieldN, usedStorageFieldAttrs),
+			]),
+			m("", [
+				m(TextFieldN, senderNameFieldAttrs),
+				m(TextFieldN, passwordFieldAttrs),
+				!logins.getUserController().isGlobalAdmin() ? null : [
+					m(this._adminStatusSelector),
+					this._administratedBy ? m(this._administratedBy) : null,
+				],
+				m(this._userStatusSelector)
+			]),
+			m(this._secondFactorsForm),
+			(this._groupsTable) ? m(".h4.mt-l.mb-s", lang.get('groups_label')) : null,
+			(this._groupsTable) ? m(this._groupsTable) : null,
+			(this._contactFormsTable) ? m(".h4.mt-l.mb-s", lang.get('contactForms_label')) : null,
+			(this._contactFormsTable) ? m(this._contactFormsTable) : null,
+			m(EditAliasesFormN, this._editAliasFormAttrs),
+			logins.getUserController().isPremiumAccount() && whitelistProtection
+				? [
+					m(".h4.mt-l", lang.get('mailSettings_label')),
+					m(whitelistProtection)
+				]
+				: null
+		])
 	}
 
 	_isItMe(): boolean {
@@ -257,7 +269,7 @@ export class UserViewer {
 	_changePassword(): void {
 		if (this._isItMe()) {
 			PasswordForm.showChangeOwnPasswordDialog()
-		} else if (this._admin.selectedValue()) {
+		} else if (this._adminStatusSelector.selectedValue()) {
 			Dialog.error("changeAdminPassword_msg")
 		} else {
 			this._user.getAsync().then(user => {
@@ -266,57 +278,63 @@ export class UserViewer {
 		}
 	}
 
-	_updateGroups(): void {
+	_updateGroups(): Promise<void> {
 		if (this._groupsTable) {
-			this._user.getAsync().then(user => {
-				this._customer.getAsync().then(customer => {
-					Promise.map(this._getTeamMemberships(user, customer), m => {
+			return this._user.getAsync().then(user => {
+				return this._customer.getAsync().then(customer => {
+					return promiseMap(this._getTeamMemberships(user, customer), m => {
 						return load(GroupInfoTypeRef, m.groupInfo).then(groupInfo => {
 							let removeButton
 							removeButton = new Button("remove_action", () => {
-								showProgressDialog("pleaseWait_msg", worker.removeUserFromGroup(user._id, groupInfo.group))
-									.catch(NotAuthorizedError, e => {
+								showProgressDialog("pleaseWait_msg", worker.groupManagementFacade.removeUserFromGroup(user._id, groupInfo.group))
+									.catch(ofClass(NotAuthorizedError, e => {
 										Dialog.error("removeUserFromGroupNotAdministratedUserError_msg")
-									})
+									}))
 							}, () => Icons.Cancel)
 							return new TableLine([
 								getGroupInfoDisplayName(groupInfo), getGroupTypeName(neverNull(m.groupType))
 							], removeButton)
 						})
-					}).then(tableLines => {
+					}, {concurrency: 5}).then(tableLines => {
 						if (this._groupsTable) {
 							this._groupsTable.updateEntries(tableLines)
 						}
 					})
 				})
 			})
+		} else {
+			return Promise.resolve()
 		}
 	}
 
-	_updateContactForms(): void {
+	_updateContactForms(): Promise<void> {
 		if (this._contactFormsTable) {
-			this._user.getAsync().then(user => {
+			return this._user.getAsync().then(user => {
 				let userMailGroupMembership = neverNull(user.memberships.find(m => m.groupType === GroupType.Mail))
 				return load(MailboxGroupRootTypeRef, userMailGroupMembership.group).then(mailboxGroupRoot => {
 					if (mailboxGroupRoot.participatingContactForms.length > 0) {
 						return loadMultiple(ContactFormTypeRef, mailboxGroupRoot.participatingContactForms[0][0], mailboxGroupRoot.participatingContactForms.map(idTuple => idTuple[1]))
 					}
 					return []
-				}).map((cf: ContactForm) => {
-					let removeButton = new Button("remove_action", () => {
-						let match = cf.participantGroupInfos.find(id => isSameId(id, user.userGroup.groupInfo))
-						if (match) {
-							remove(cf.participantGroupInfos, match)
-						}
-						showProgressDialog("pleaseWait_msg", update(cf))
-					}, () => Icons.Cancel)
-					return new TableLine([cf.path], removeButton)
-				}).then(tableLines => {
+				}).then((forms) => {
+					const tableLines = forms.map((cf) => {
+						let removeButton = new Button("remove_action", () => {
+							let match = cf.participantGroupInfos.find(id => isSameId(id, user.userGroup.groupInfo))
+							if (match) {
+								remove(cf.participantGroupInfos, match)
+							}
+							showProgressDialog("pleaseWait_msg", update(cf))
+						}, () => Icons.Cancel)
+						return new TableLine([cf.path], removeButton)
+					})
+
 					if (this._contactFormsTable) {
 						this._contactFormsTable.updateEntries(tableLines)
 					}
 				})
 			})
+		} else {
+			return Promise.resolve()
 		}
 	}
 
@@ -344,7 +362,7 @@ export class UserViewer {
 					}), stream(availableGroupInfos[0]), 250)
 
 					let addUserToGroupOkAction = (dialog) => {
-						showProgressDialog("pleaseWait_msg", worker.addUserToGroup(user, dropdown.selectedValue().group))
+						showProgressDialog("pleaseWait_msg", worker.groupManagementFacade.addUserToGroup(user, dropdown.selectedValue().group))
 						dialog.close()
 					}
 
@@ -392,17 +410,17 @@ export class UserViewer {
 		})
 	}
 
-	_updateUsedStorageAndAdminFlag(): void {
-		this._user.getAsync().then(user => {
+	_updateUsedStorageAndAdminFlag(): Promise<void> {
+		return this._user.getAsync().then(user => {
 			let isAdmin = this._isAdmin(user)
-			this._admin.selectedValue(isAdmin)
+			this._adminStatusSelector.selectedValue(isAdmin)
 
-			worker.readUsedUserStorage(user).then(usedStorage => {
-				this._usedStorage.setValue(formatStorageSize(usedStorage))
+			return worker.userManagementFacade.readUsedUserStorage(user).then(usedStorage => {
+				this._usedStorage = usedStorage
 				m.redraw()
-			}).catch(BadRequestError, e => {
+			}).catch(ofClass(BadRequestError, e => {
 				// may happen if the user gets the admin flag removed
-			})
+			}))
 		})
 	}
 
@@ -416,50 +434,53 @@ export class UserViewer {
 
 	_deleteUser(restore: boolean): Promise<void> {
 		return showProgressDialog("pleaseWait_msg",
-			BuyDialog.show(BookingItemFeatureType.Users, (restore) ? 1 : -1, 0, restore).then(confirmed => {
+			showBuyDialog(BookingItemFeatureType.Users, (restore) ? 1 : -1, 0, restore).then(confirmed => {
 				if (confirmed) {
 					return this._user.getAsync().then(user => {
-						return worker.deleteUser(user, restore)
+						return worker.userManagementFacade.deleteUser(user, restore)
 					})
 				}
 			})
-		).catch(PreconditionFailedError, e => {
+		).catch(ofClass(PreconditionFailedError, e => {
 			if (restore) {
 				Dialog.error("emailAddressInUse_msg")
 			} else {
 				Dialog.error("stillReferencedFromContactForm_msg")
 			}
-		})
+		}))
 	}
 
-	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>): void {
-		for (let update of updates) {
+	entityEventsReceived(updates: $ReadOnlyArray<EntityUpdateData>): Promise<void> {
+		return promiseMap(updates, update => {
+			let promise = Promise.resolve()
 			const {instanceListId, instanceId, operation} = update
 			if (isUpdateForTypeRef(GroupInfoTypeRef, update) && operation === OperationType.UPDATE
 				&& isSameId(this.userGroupInfo._id, [neverNull(instanceListId), instanceId])) {
-				load(GroupInfoTypeRef, this.userGroupInfo._id).then(updatedUserGroupInfo => {
+				promise = load(GroupInfoTypeRef, this.userGroupInfo._id).then(updatedUserGroupInfo => {
 					this.userGroupInfo = updatedUserGroupInfo
-					this._senderName.setValue(updatedUserGroupInfo.name)
-					this._deactivated.selectedValue(updatedUserGroupInfo.deleted != null)
-					this._updateUsedStorageAndAdminFlag()
-					if (this._administratedBy) {
-						this._administratedBy.selectedValue(this.userGroupInfo.localAdmin)
-					}
-					m.redraw()
+					this._senderName = updatedUserGroupInfo.name
+					this._userStatusSelector.selectedValue(updatedUserGroupInfo.deleted != null)
+					return this._updateUsedStorageAndAdminFlag().then(() => {
+						if (this._administratedBy) {
+							this._administratedBy.selectedValue(this.userGroupInfo.localAdmin)
+						}
+						this._editAliasFormAttrs.userGroupInfo = this.userGroupInfo
+						m.redraw()
+					})
 				})
 			} else if (isUpdateForTypeRef(UserTypeRef, update) && operation === OperationType.UPDATE && this._user.isLoaded()
 				&& isSameId(this._user.getLoaded()._id, instanceId)) {
 				this._user.reset()
-				this._updateUsedStorageAndAdminFlag()
-				this._updateGroups()
-			} else if (isUpdateForTypeRef(MailboxServerPropertiesTypeRef, update)) {
-				this._createOrUpdateWhitelistProtectionField()
+				promise = this._updateUsedStorageAndAdminFlag().then(() => {
+					return this._updateGroups()
+				})
 			} else if (isUpdateForTypeRef(MailboxGroupRootTypeRef, update)) {
-				this._updateContactForms()
+				promise = this._updateContactForms()
 			}
-			this._secondFactorsForm.entityEventReceived(update)
-		}
-		m.redraw()
+			return promise.then(() => {
+				return this._secondFactorsForm.entityEventReceived(update)
+			})
+		}).then(() => m.redraw())
 	}
 }
 

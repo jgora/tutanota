@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {DeleteContactFormConversationIndex} from "./DeleteContactFormConversationIndex"
 import type {UnencryptedStatisticLogRef} from "./UnencryptedStatisticLogRef"
@@ -16,36 +18,28 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 787,
-			"since": 19,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"_id": {
-			"name": "_id",
 			"id": 785,
-			"since": 19,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"_ownerGroup": {
-			"name": "_ownerGroup",
 			"id": 788,
-			"since": 19,
 			"type": "GeneratedId",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"_permissions": {
-			"name": "_permissions",
 			"id": 786,
-			"since": 19,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": true,
@@ -54,46 +48,38 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"contactFormConversations": {
-			"name": "contactFormConversations",
 			"id": 841,
-			"since": 22,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "DeleteContactFormConversationIndex",
-			"final": true
+			"dependency": null
 		},
 		"statisticsLog": {
-			"name": "statisticsLog",
 			"id": 890,
-			"since": 25,
 			"type": "AGGREGATION",
 			"cardinality": "ZeroOrOne",
+			"final": true,
 			"refType": "UnencryptedStatisticLogRef",
-			"final": true
+			"dependency": null
 		},
 		"contactForms": {
-			"name": "contactForms",
 			"id": 789,
-			"since": 19,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "ContactForm",
 			"final": true,
-			"external": false
+			"refType": "ContactForm"
 		},
 		"statisticsLog_encrypted_removed": {
-			"name": "statisticsLog_encrypted_removed",
 			"id": 790,
-			"since": 19,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "StatisticLogEntry",
 			"final": true,
-			"external": false
+			"refType": "StatisticLogEntry"
 		}
 	},
 	"app": "tutanota",
-	"version": "41"
+	"version": "48"
 }
 
 export function createCustomerContactFormGroupRoot(values?: $Shape<$Exact<CustomerContactFormGroupRoot>>): CustomerContactFormGroupRoot {

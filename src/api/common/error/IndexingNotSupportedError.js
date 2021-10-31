@@ -1,4 +1,5 @@
 // @flow
+//@bundleInto:common-min
 import {DbError} from "./DbError"
 
 export class IndexingNotSupportedError extends DbError {

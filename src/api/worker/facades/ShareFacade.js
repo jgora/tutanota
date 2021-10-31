@@ -1,8 +1,9 @@
 //@flow
-import {assertWorkerOrNode} from "../../Env"
+import {assertWorkerOrNode} from "../../common/Env"
 import {serviceRequest, serviceRequestVoid} from "../EntityWorker"
 import {TutanotaService} from "../../entities/tutanota/Services"
 import {encryptBytes, encryptKey, encryptString, resolveSessionKey} from "../crypto/CryptoFacade"
+import type {GroupInfo} from "../../entities/sys/GroupInfo"
 import {_TypeModel as GroupInfoTypeModel} from "../../entities/sys/GroupInfo"
 import {aes128RandomKey} from "../crypto/Aes"
 import type {ShareCapabilityEnum} from "../../common/TutanotaConstants"
@@ -11,63 +12,64 @@ import {HttpMethod} from "../../common/EntityFunctions"
 import {neverNull} from "../../common/utils/Utils"
 import {encryptBucketKeyForInternalRecipient} from "./ReceipientKeyDataUtils"
 import {RecipientsNotFoundError} from "../../common/error/RecipientsNotFoundError"
-import {LoginFacade} from "./LoginFacade"
+import {LoginFacade, LoginFacadeImpl} from "./LoginFacade"
 import {bitArrayToUint8Array, uint8ArrayToBitArray} from "../crypto/CryptoUtils"
 import {createGroupInvitationPostData} from "../../entities/tutanota/GroupInvitationPostData"
 import {createGroupInvitationPutData} from "../../entities/tutanota/GroupInvitationPutData"
 import {createGroupInvitationDeleteData} from "../../entities/tutanota/GroupInvitationDeleteData"
-import {GroupInvitationPostReturnTypeRef} from "../../entities/tutanota/GroupInvitationPostReturn"
-import type {GroupInfo} from "../../entities/sys/GroupInfo"
 import type {GroupInvitationPostReturn} from "../../entities/tutanota/GroupInvitationPostReturn"
+import {GroupInvitationPostReturnTypeRef} from "../../entities/tutanota/GroupInvitationPostReturn"
 import type {ReceivedGroupInvitation} from "../../entities/sys/ReceivedGroupInvitation"
+import {promiseMap} from "../../common/utils/PromiseUtils"
 
 assertWorkerOrNode()
 
 
 export class ShareFacade {
 
-	_loginFacade: LoginFacade;
+	_loginFacade: LoginFacadeImpl;
 
-	constructor(loginFacade: LoginFacade) {
+	constructor(loginFacade: LoginFacadeImpl) {
 		this._loginFacade = loginFacade
 	}
 
 
-	sendGroupInvitation(sharedGroupInfo: GroupInfo, sharedGroupName: string, recipients: Array<RecipientInfo>, shareCapability: ShareCapabilityEnum): Promise<GroupInvitationPostReturn> {
+	async sendGroupInvitation(sharedGroupInfo: GroupInfo, sharedGroupName: string, recipientMailAddresses: Array<string>, shareCapability: ShareCapabilityEnum): Promise<GroupInvitationPostReturn> {
 		const sharedGroupKey = this._loginFacade.getGroupKey(sharedGroupInfo.group)
-		return resolveSessionKey(GroupInfoTypeModel, this._loginFacade.getUserGroupInfo()).then(userGroupInfoSessionKey => {
-			return resolveSessionKey(GroupInfoTypeModel, sharedGroupInfo).then(sharedGroupInfoSessionKey => {
-				const bucketKey = aes128RandomKey()
-				const invitationSessionKey = aes128RandomKey()
-				const sharedGroupData = createSharedGroupData({
-					sessionEncInviterName: encryptString(invitationSessionKey, this._loginFacade.getUserGroupInfo().name),
-					sessionEncSharedGroupKey: encryptBytes(invitationSessionKey, bitArrayToUint8Array(sharedGroupKey)),
-					sessionEncSharedGroupName: encryptString(invitationSessionKey, sharedGroupName),
-					bucketEncInvitationSessionKey: encryptKey(bucketKey, invitationSessionKey),
-					sharedGroupEncInviterGroupInfoKey: encryptKey(sharedGroupKey, neverNull(userGroupInfoSessionKey)),
-					sharedGroupEncSharedGroupInfoKey: encryptKey(sharedGroupKey, neverNull(sharedGroupInfoSessionKey)),
-					capability: shareCapability,
-					sharedGroup: sharedGroupInfo.group
-				})
 
-				const invitationData = createGroupInvitationPostData({
-					sharedGroupData,
-					internalKeyData: []
-				})
-
-				const notFoundRecipients: Array<string> = []
-				return Promise.each(recipients, (recipient) => {
-					return encryptBucketKeyForInternalRecipient(bucketKey, recipient, notFoundRecipients).then(keyData => {
-						if (keyData) {
-							invitationData.internalKeyData.push(keyData)
-						}
-					})
-				}).then(() => {
-					if (notFoundRecipients.length > 0) throw new RecipientsNotFoundError(notFoundRecipients)
-					return serviceRequest(TutanotaService.GroupInvitationService, HttpMethod.POST, invitationData, GroupInvitationPostReturnTypeRef)
-				})
-			})
+		const userGroupInfoSessionKey = await resolveSessionKey(GroupInfoTypeModel, this._loginFacade.getUserGroupInfo())
+		const sharedGroupInfoSessionKey = await resolveSessionKey(GroupInfoTypeModel, sharedGroupInfo)
+		const bucketKey = aes128RandomKey()
+		const invitationSessionKey = aes128RandomKey()
+		const sharedGroupData = createSharedGroupData({
+			sessionEncInviterName: encryptString(invitationSessionKey, this._loginFacade.getUserGroupInfo().name),
+			sessionEncSharedGroupKey: encryptBytes(invitationSessionKey, bitArrayToUint8Array(sharedGroupKey)),
+			sessionEncSharedGroupName: encryptString(invitationSessionKey, sharedGroupName),
+			bucketEncInvitationSessionKey: encryptKey(bucketKey, invitationSessionKey),
+			sharedGroupEncInviterGroupInfoKey: encryptKey(sharedGroupKey, neverNull(userGroupInfoSessionKey)),
+			sharedGroupEncSharedGroupInfoKey: encryptKey(sharedGroupKey, neverNull(sharedGroupInfoSessionKey)),
+			capability: shareCapability,
+			sharedGroup: sharedGroupInfo.group
 		})
+
+		const invitationData = createGroupInvitationPostData({
+			sharedGroupData,
+			internalKeyData: []
+		})
+
+		const notFoundRecipients: Array<string> = []
+		for (let mailAddress of recipientMailAddresses) {
+			const keyData = await encryptBucketKeyForInternalRecipient(bucketKey, mailAddress, notFoundRecipients)
+			if (keyData) {
+				invitationData.internalKeyData.push(keyData)
+			}
+		}
+
+		if (notFoundRecipients.length > 0) {
+			throw new RecipientsNotFoundError(notFoundRecipients.join("\n"))
+		}
+
+		return serviceRequest(TutanotaService.GroupInvitationService, HttpMethod.POST, invitationData, GroupInvitationPostReturnTypeRef)
 	}
 
 

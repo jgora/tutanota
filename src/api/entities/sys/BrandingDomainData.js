@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const BrandingDomainDataTypeRef: TypeRef<BrandingDomainData> = new TypeRef("sys", "BrandingDomainData")
@@ -14,45 +16,35 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1150,
-			"since": 22,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"domain": {
-			"name": "domain",
 			"id": 1151,
-			"since": 22,
 			"type": "String",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"sessionEncPemCertificateChain": {
-			"name": "sessionEncPemCertificateChain",
 			"id": 1152,
-			"since": 22,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"sessionEncPemPrivateKey": {
-			"name": "sessionEncPemPrivateKey",
 			"id": 1153,
-			"since": 22,
 			"type": "Bytes",
 			"cardinality": "ZeroOrOne",
 			"final": true,
 			"encrypted": false
 		},
 		"systemAdminPubEncSessionKey": {
-			"name": "systemAdminPubEncSessionKey",
 			"id": 1154,
-			"since": 22,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
@@ -61,7 +53,7 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createBrandingDomainData(values?: $Shape<$Exact<BrandingDomainData>>): BrandingDomainData {

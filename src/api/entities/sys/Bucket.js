@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 
 export const BucketTypeRef: TypeRef<Bucket> = new TypeRef("sys", "Bucket")
@@ -14,9 +16,7 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 130,
-			"since": 1,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
@@ -25,18 +25,15 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"bucketPermissions": {
-			"name": "bucketPermissions",
 			"id": 131,
-			"since": 1,
 			"type": "LIST_ASSOCIATION",
 			"cardinality": "One",
-			"refType": "BucketPermission",
 			"final": true,
-			"external": false
+			"refType": "BucketPermission"
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createBucket(values?: $Shape<$Exact<Bucket>>): Bucket {

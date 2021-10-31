@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {U2fKey} from "./U2fKey"
 
@@ -15,18 +17,14 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_id": {
-			"name": "_id",
 			"id": 1184,
-			"since": 23,
 			"type": "CustomId",
 			"cardinality": "One",
 			"final": true,
 			"encrypted": false
 		},
 		"challenge": {
-			"name": "challenge",
 			"id": 1185,
-			"since": 23,
 			"type": "Bytes",
 			"cardinality": "One",
 			"final": true,
@@ -35,17 +33,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"keys": {
-			"name": "keys",
 			"id": 1186,
-			"since": 23,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": true,
 			"refType": "U2fKey",
-			"final": true
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createU2fChallenge(values?: $Shape<$Exact<U2fChallenge>>): U2fChallenge {

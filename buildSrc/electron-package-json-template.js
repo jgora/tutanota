@@ -1,17 +1,26 @@
-const path = require('path')
-const pj = require('../package.json')
+import path, {dirname} from "path"
+import {readFileSync} from "fs"
+import {fileURLToPath} from "url"
+
 /**
  * This is used for launching electron:
  * 1. copied to app-desktop/build from make.js
  * 2. copied to app-desktop/build/dist from dist.js (DesktopBuilder)
  */
 
-module.exports = function (opts) {
-	const {nameSuffix, version, updateUrl, iconPath, sign, notarize, unpacked} = opts
+export default function generateTemplate({nameSuffix, version, updateUrl, iconPath, sign, notarize, unpacked}) {
+	const __dirname = dirname(fileURLToPath(import.meta.url))
 
+	const pj = JSON.parse(readFileSync(path.resolve(__dirname, "../package.json"), "utf-8"))
+	const appName = "tutanota-desktop" + nameSuffix
+	const appId = "de.tutao.tutanota" + nameSuffix
+	if(process.env.JENKINS && process.env.DEBUG_SIGN) throw new Error("Tried to DEBUG_SIGN in CI!")
+	const debugkey = process.env.DEBUG_SIGN
+		? readFileSync(path.join(process.env.DEBUG_SIGN, "test.pubkey"), {encoding: 'utf8'})
+		: undefined
 	return {
-		"name": "tutanota-desktop" + nameSuffix,
-		"main": "./src/desktop/DesktopMain.js",
+		"name": appName,
+		"main": "./desktop/DesktopMain.js",
 		"version": version,
 		"author": "Tutao GmbH",
 		"description": "The desktop client for Tutanota, the secure e-mail service.",
@@ -37,19 +46,20 @@ module.exports = function (opts) {
 				+ "IXmzihQyc8Q0VmAfCqEwUtx6RY6BGkqKiDoMh4Qs5ZwFxhoSfgrJiwBmv0HcX1yv\n"
 				+ "QGNSdxrpLuMA/afCPdf49x3iwy+p+paXHKirgM5z6rnikk10Lko7dNXV0735PsZd\n"
 				+ "dQIDAQAB\n"
-				+ "-----END PUBLIC KEY-----"
+				+ "-----END PUBLIC KEY-----",
+				debugkey
 			],
 			"pollingInterval": 1000 * 60 * 60 * 3, // 3 hours
-			"preloadjs": "./src/desktop/preload.js",
-			"desktophtml": "./desktop.html",
+			"desktophtml": "./index-desktop.html",
 			"iconName": "logo-solo-red.png",
 			"fileManagerTimeout": 30000,
 			// true if this version checks its updates. use to prevent local builds from checking sigs.
-			"checkUpdateSignature": sign || !!process.env.JENKINS,
-			"appUserModelId": "de.tutao.tutanota" + nameSuffix,
+			"checkUpdateSignature": sign,
+			"appUserModelId": appId,
 			"initialSseConnectTimeoutInSeconds": 60,
 			"maxSseConnectTimeoutInSeconds": 2400,
 			"configMigrationFunction": "migrateClient",
+			updateUrl,
 			"defaultDesktopConfig": {
 				/**
 				 * do not change defaultDesktopConfig
@@ -63,23 +73,16 @@ module.exports = function (opts) {
 		},
 		"dependencies": {
 			"electron-updater": pj.devDependencies["electron-updater"],
-			"chalk": pj.devDependencies.chalk,
-			"electron-localshortcut": pj.devDependencies["electron-localshortcut"],
-			"fs-extra": pj.devDependencies["fs-extra"],
-			"bluebird": pj.dependencies.bluebird,
-			"node-forge": pj.devDependencies["node-forge"],
-			"winreg": pj.devDependencies.winreg,
-			"keytar": pj.dependencies.keytar
 		},
 		"build": {
 			"electronVersion": pj.devDependencies.electron,
 			"icon": iconPath,
-			"appId": "de.tutao.tutanota" + nameSuffix,
+			"appId": appId,
 			"productName": nameSuffix.length > 0
 				? nameSuffix.slice(1) + " Tutanota Desktop"
 				: "Tutanota Desktop",
 			"artifactName": "${name}-${os}.${ext}",
-			"afterSign": notarize ? "buildSrc/notarize.js" : undefined,
+			"afterSign": notarize ? "buildSrc/notarize.cjs" : undefined,
 			"protocols": [
 				{
 					"name": "Mailto Links",
@@ -89,13 +92,14 @@ module.exports = function (opts) {
 					"role": "Editor"
 				}
 			],
-			"forceCodeSigning": sign || !!process.env.JENKINS,
+			"forceCodeSigning": sign,
 			"publish": updateUrl
 				? {
 					"provider": "generic",
 					"url": updateUrl,
 					"channel": "latest",
-					"publishAutoUpdate": true
+					"publishAutoUpdate": true,
+					"useMultipleRangeRequest": false
 				}
 				: undefined,
 			"directories": {
@@ -106,10 +110,14 @@ module.exports = function (opts) {
 				"to": "./icons/"
 			},
 			"win": {
+				// relative to the project dirm which is ./build/dist/
+				"extraFiles": [
+					"mapirs.dll"
+				],
 				"verifyUpdateCodeSignature": sign,
 				"publisherName": "Tutao GmbH",
 				"sign": sign
-					? "./buildSrc/winsigner.js"
+					? "./buildSrc/winsigner.cjs"
 					: undefined,
 				"signingHashAlgorithms": sign
 					? ["sha256"]
@@ -127,10 +135,12 @@ module.exports = function (opts) {
 				"createStartMenuShortcut": true,
 				"allowElevation": true,
 				"allowToChangeInstallationDirectory": true,
-				"include": path.join("..", "..", "buildSrc", "fix-old-uuid.nsh")
+				"include": path.join("..", "..", "buildSrc", "windows-installer.nsh"),
+				"warningsAsErrors": true
 			},
 			"mac": {
 				"hardenedRuntime": true,
+				"type": "distribution",
 				"gatekeeperAssess": false,
 				"entitlements": "buildSrc/mac-entitlements.plist",
 				"entitlementsInherit": "buildSrc/mac-entitlements.plist",
@@ -156,7 +166,7 @@ module.exports = function (opts) {
 				"synopsis": "Tutanota Desktop Client",
 				"category": "Network",
 				"desktop": {
-					"StartupWMClass": "tutanota-desktop" + nameSuffix
+					"StartupWMClass": appName
 				},
 				"target": [
 					{

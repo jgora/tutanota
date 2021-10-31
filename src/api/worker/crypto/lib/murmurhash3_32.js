@@ -10,7 +10,7 @@
  * This implementation should handle non-ascii characters.
  */
 
-const {stringToUtf8Uint8Array} = require("../../../common/utils/Encoding")
+import {stringToUtf8Uint8Array} from "../../../common/utils/Encoding"
 
 function x86fmix32(h) {
 	h ^= h >>> 16;
@@ -47,7 +47,7 @@ function rol32(n, r) {
 	return (n << r) | (n >>> (32 - r));
 }
 
-module.exports = function x86hash32(value) {
+export default function x86hash32(value) {
 	let state = 0
 	const buf = stringToUtf8Uint8Array(value)
 

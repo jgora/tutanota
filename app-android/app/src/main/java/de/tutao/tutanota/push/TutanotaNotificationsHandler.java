@@ -1,6 +1,5 @@
 package de.tutao.tutanota.push;
 
-import android.text.TextUtils;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -29,7 +28,6 @@ import de.tutao.tutanota.data.SseInfo;
 
 public class TutanotaNotificationsHandler {
 	private static final String TAG = "TutanotaNotifications";
-	// TODO: change back
 	private static final long MISSED_NOTIFICATION_TTL = TimeUnit.DAYS.toMillis(30);
 
 	private final LocalNotificationsFacade localNotificationsFacade;
@@ -77,10 +75,16 @@ public class TutanotaNotificationsHandler {
 	private MissedNotification downloadMissedNotification(@NonNull SseInfo sseInfo) {
 		int triesLeft = 3;
 		// We try to download limited number of times. If it fails then  we are probably offline
+		String userId;
 		while (triesLeft > 0) {
+			if (sseInfo.getUserIds().isEmpty()) {
+				Log.i(TAG, "No users to download missed notification with");
+				return null;
+			}
+			userId = sseInfo.getUserIds().iterator().next();
 			try {
-				Log.d(TAG, "Downloading missed notification");
-				return executeMissedNotificationDownload(sseInfo);
+				Log.d(TAG, "Downloading missed notification with user id " + userId);
+				return executeMissedNotificationDownload(sseInfo, userId);
 			} catch (FileNotFoundException e) {
 				Log.i(TAG, "MissedNotification is not found, ignoring: " + e.getMessage());
 				return null;
@@ -91,9 +95,34 @@ public class TutanotaNotificationsHandler {
 				Log.w(TAG, e);
 				localNotificationsFacade.showErrorNotification(R.string.scheduleAlarmError_msg, e);
 				return null;
+			} catch (ServiceUnavailableException e) {
+				Log.d(TAG, "ServiceUnavailable when downloading missed notification, waiting " +
+						e.getSuspensionSeconds() + "s");
+				try {
+					Thread.sleep(TimeUnit.SECONDS.toMillis(e.getSuspensionSeconds()));
+				} catch (InterruptedException ignored) {
+				}
+				// tries are not decremented and we don't return, we just wait and try again.
+			} catch (TooManyRequestsException e) {
+				Log.d(TAG, "TooManyRequestsException when downloading missed notification, waiting " +
+						e.getRetryAfterSeconds() + "s");
+				try {
+					Thread.sleep(TimeUnit.SECONDS.toMillis(e.getRetryAfterSeconds()));
+				} catch (InterruptedException ignored) {
+				}
+				// tries are not decremented and we don't return, we just wait and try again.
 			} catch (ServerResponseException e) {
 				triesLeft--;
 				Log.w(TAG, e);
+			} catch (ClientRequestException e) {
+				if (e.code == ResponseCodes.NOT_AUTHENTICATED) {
+					Log.i(TAG, "Not authenticated to download missed notification with user " + userId, e);
+					// This will initiate reconnect so we don't have to try again here
+					this.onNotAuthorized(userId);
+				} else {
+					Log.w(TAG, e);
+				}
+				return null;
 			} catch (HttpException e) { // other HTTP exceptions, client ones
 				Log.w(TAG, e);
 				return null;
@@ -102,7 +131,7 @@ public class TutanotaNotificationsHandler {
 		return null;
 	}
 
-	private MissedNotification executeMissedNotificationDownload(@NonNull SseInfo sseInfo) throws IllegalArgumentException, IOException, HttpException {
+	private MissedNotification executeMissedNotificationDownload(@NonNull SseInfo sseInfo, String userId) throws IllegalArgumentException, IOException, HttpException {
 		try {
 			URL url = makeAlarmNotificationUrl(sseInfo);
 			HttpURLConnection urlConnection = (HttpURLConnection) url.openConnection();
@@ -110,7 +139,7 @@ public class TutanotaNotificationsHandler {
 			urlConnection.setConnectTimeout(30 * 1000);
 			urlConnection.setReadTimeout(20 * 1000);
 
-			urlConnection.setRequestProperty("userIds", TextUtils.join(",", sseInfo.getUserIds()));
+			urlConnection.setRequestProperty("userIds", userId);
 			NetworkUtils.addCommonHeaders(urlConnection);
 			String lastProcessedNotificationId = sseStorage.getLastProcessedNotificationId();
 			if (lastProcessedNotificationId != null) {
@@ -120,13 +149,7 @@ public class TutanotaNotificationsHandler {
 			int responseCode = urlConnection.getResponseCode();
 			Log.d(TAG, "MissedNotification response code " + responseCode);
 
-			if (responseCode == 404) {
-				throw new FileNotFoundException("Missed notification not found: " + 404);
-			} else if (400 <= responseCode && responseCode < 500) {
-				throw new ClientRequestException(responseCode);
-			} else if (500 <= responseCode && responseCode <= 600) {
-				throw new ServerResponseException(responseCode);
-			}
+			handleResponseCode(urlConnection, responseCode);
 
 			try (InputStream inputStream = urlConnection.getInputStream()) {
 				String responseString = IOUtils.toString(inputStream, StandardCharsets.UTF_8);
@@ -138,6 +161,38 @@ public class TutanotaNotificationsHandler {
 		}
 	}
 
+	private void handleResponseCode(HttpURLConnection urlConnection, int responseCode)
+			throws FileNotFoundException, ServerResponseException, ClientRequestException, ServiceUnavailableException,
+			TooManyRequestsException {
+		if (responseCode == 404) {
+			throw new FileNotFoundException("Missed notification not found: " + 404);
+		} else if (responseCode == ServiceUnavailableException.CODE) {
+			int suspensionTime = extractSuspectionTime(urlConnection);
+			throw new ServiceUnavailableException(suspensionTime);
+		} else if (responseCode == TooManyRequestsException.CODE) {
+			int suspensionTime = extractSuspectionTime(urlConnection);
+			throw new TooManyRequestsException(suspensionTime);
+		} else if (400 <= responseCode && responseCode < 500) {
+			throw new ClientRequestException(responseCode);
+		} else if (500 <= responseCode && responseCode <= 600) {
+			throw new ServerResponseException(responseCode);
+		}
+	}
+
+	private int extractSuspectionTime(HttpURLConnection urlConnection) {
+		String retryAfterHeader = urlConnection.getHeaderField("Retry-After");
+		if (retryAfterHeader == null) {
+			retryAfterHeader = urlConnection.getHeaderField("Suspension-Time");
+		}
+		int suspensionTime;
+		try {
+			suspensionTime = Integer.parseInt(retryAfterHeader);
+		} catch (NumberFormatException e) {
+			suspensionTime = 0;
+		}
+		return suspensionTime;
+	}
+
 	private URL makeAlarmNotificationUrl(SseInfo sseInfo) throws MalformedURLException {
 		String customId = Utils.base64ToBase64Url(Utils.bytesToBase64(sseInfo.getPushIdentifier().getBytes(StandardCharsets.UTF_8)));
 		return new URL(sseInfo.getSseOrigin() + "/rest/sys/missednotification/" + customId);
@@ -145,7 +200,7 @@ public class TutanotaNotificationsHandler {
 
 	private void handleNotificationInfos(List<PushMessage.NotificationInfo> notificationInfos) {
 		// TODO: translate
-		localNotificationsFacade.sendEmailNotifications("New email received", notificationInfos);
+		localNotificationsFacade.sendEmailNotifications(notificationInfos);
 	}
 
 
@@ -164,9 +219,16 @@ public class TutanotaNotificationsHandler {
 		return lastMissedNotificationCheckTime != null && (System.currentTimeMillis() - lastMissedNotificationCheckTime.getTime()) > MISSED_NOTIFICATION_TTL;
 	}
 
-	public void onNotAuthorized() {
-		alarmNotificationsManager.unscheduleAlarms(null);
-		sseStorage.clear();
+	public void onNotAuthorized(String userId) {
+		// If we get notAuthorized, then user removed push identifier and we should try the next one.
+		// It will be done automatically when we remove the user from DB because there's already an observer for users
+		// in PushNotificationService which restarts the connection.
+		this.sseStorage.removeUser(userId);
+		alarmNotificationsManager.unscheduleAlarms(userId);
+		if (this.sseStorage.getUsers().isEmpty()) {
+			alarmNotificationsManager.unscheduleAlarms(null);
+			sseStorage.clear();
+		}
 	}
 
 	static class ClientRequestException extends HttpException {
@@ -178,6 +240,34 @@ public class TutanotaNotificationsHandler {
 	static class ServerResponseException extends HttpException {
 		ServerResponseException(int code) {
 			super(code);
+		}
+	}
+
+	static class TooManyRequestsException extends HttpException {
+		static final int CODE = 429;
+		private final int retryAfterSeconds;
+
+		public TooManyRequestsException(int retryAfterSeconds) {
+			super(CODE);
+			this.retryAfterSeconds = retryAfterSeconds;
+		}
+
+		public int getRetryAfterSeconds() {
+			return retryAfterSeconds;
+		}
+	}
+
+	static class ServiceUnavailableException extends HttpException {
+		static final int CODE = 503;
+		private final int suspensionSeconds;
+
+		ServiceUnavailableException(int suspensionSeconds) {
+			super(CODE);
+			this.suspensionSeconds = suspensionSeconds;
+		}
+
+		public int getSuspensionSeconds() {
+			return suspensionSeconds;
 		}
 	}
 

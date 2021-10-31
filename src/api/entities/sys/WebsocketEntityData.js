@@ -1,6 +1,8 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
 import type {EntityUpdate} from "./EntityUpdate"
 
@@ -15,27 +17,21 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 1484,
-			"since": 41,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"eventBatchId": {
-			"name": "eventBatchId",
 			"id": 1485,
-			"since": 41,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"eventBatchOwner": {
-			"name": "eventBatchOwner",
 			"id": 1486,
-			"since": 41,
 			"type": "GeneratedId",
 			"cardinality": "One",
 			"final": false,
@@ -44,17 +40,16 @@ export const _TypeModel: TypeModel = {
 	},
 	"associations": {
 		"eventBatch": {
-			"name": "eventBatch",
 			"id": 1487,
-			"since": 41,
 			"type": "AGGREGATION",
 			"cardinality": "Any",
+			"final": false,
 			"refType": "EntityUpdate",
-			"final": false
+			"dependency": null
 		}
 	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createWebsocketEntityData(values?: $Shape<$Exact<WebsocketEntityData>>): WebsocketEntityData {

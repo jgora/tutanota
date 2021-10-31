@@ -1,7 +1,10 @@
 // @flow
 
-import {create, TypeRef} from "../../common/EntityFunctions"
+import {create} from "../../common/utils/EntityUtils"
+import {TypeRef} from "../../common/utils/TypeRef"
+import type {TypeModel} from "../../common/EntityTypes"
 
+import type {Braintree3ds2Request} from "./Braintree3ds2Request"
 
 export const PaymentDataServicePutReturnTypeRef: TypeRef<PaymentDataServicePutReturn> = new TypeRef("sys", "PaymentDataServicePutReturn")
 export const _TypeModel: TypeModel = {
@@ -14,27 +17,32 @@ export const _TypeModel: TypeModel = {
 	"encrypted": false,
 	"values": {
 		"_format": {
-			"name": "_format",
 			"id": 806,
-			"since": 9,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		},
 		"result": {
-			"name": "result",
 			"id": 807,
-			"since": 9,
 			"type": "Number",
 			"cardinality": "One",
 			"final": false,
 			"encrypted": false
 		}
 	},
-	"associations": {},
+	"associations": {
+		"braintree3dsRequest": {
+			"id": 1840,
+			"type": "AGGREGATION",
+			"cardinality": "ZeroOrOne",
+			"final": false,
+			"refType": "Braintree3ds2Request",
+			"dependency": null
+		}
+	},
 	"app": "sys",
-	"version": "59"
+	"version": "69"
 }
 
 export function createPaymentDataServicePutReturn(values?: $Shape<$Exact<PaymentDataServicePutReturn>>): PaymentDataServicePutReturn {
@@ -46,4 +54,6 @@ export type PaymentDataServicePutReturn = {
 
 	_format: NumberString;
 	result: NumberString;
+
+	braintree3dsRequest: ?Braintree3ds2Request;
 }

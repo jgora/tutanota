@@ -1,16 +1,59 @@
 // @flow
-import type {GroupTypeEnum, OperationTypeEnum} from "../TutanotaConstants"
-import {GroupType} from "../TutanotaConstants"
-import {TypeRef} from "../EntityFunctions"
+//@bundleInto:common-min
+import type {FeatureTypeEnum, OperationTypeEnum} from "../TutanotaConstants"
 import type {EntityUpdateData} from "../../main/EventController"
-import type {GroupInfo} from "../../entities/sys/GroupInfo"
-import type {User} from "../../entities/sys/User"
-import type {GroupMembership} from "../../entities/sys/GroupMembership"
 import type {CustomerInfo} from "../../entities/sys/CustomerInfo"
 import type {EntityUpdate} from "../../entities/sys/EntityUpdate"
 import type {MailBody} from "../../entities/tutanota/MailBody"
 import type {MailHeaders} from "../../entities/tutanota/MailHeaders"
 import type {DomainInfo} from "../../entities/sys/DomainInfo"
+import {TypeRef} from "./TypeRef"
+import {
+	AccessBlockedError,
+	AccessDeactivatedError,
+	AccessExpiredError,
+	BadGatewayError,
+	BadRequestError,
+	ConnectionError,
+	InsufficientStorageError,
+	InternalServerError,
+	InvalidDataError,
+	InvalidSoftwareVersionError,
+	LimitReachedError,
+	LockedError,
+	MethodNotAllowedError,
+	NotAuthenticatedError,
+	NotAuthorizedError,
+	NotFoundError,
+	PayloadTooLargeError,
+	PreconditionFailedError,
+	ResourceError,
+	ServiceUnavailableError,
+	SessionExpiredError,
+	TooManyRequestsError
+} from "../error/RestError"
+import {CryptoError} from "../error/CryptoError"
+import {SessionKeyNotFoundError} from "../error/SessionKeyNotFoundError"
+import {SseError} from "../error/SseError"
+import {ProgrammingError} from "../error/ProgrammingError"
+import {RecipientsNotFoundError} from "../error/RecipientsNotFoundError"
+import {RecipientNotResolvedError} from "../error/RecipientNotResolvedError"
+import {OutOfSyncError} from "../error/OutOfSyncError"
+import {SecondFactorPendingError} from "../error/SecondFactorPendingError"
+import {DbError} from "../error/DbError"
+import {IndexingNotSupportedError} from "../error/IndexingNotSupportedError"
+import {QuotaExceededError} from "../error/QuotaExceededError"
+import {CancelledError} from "../error/CancelledError"
+import {FileOpenError} from "../error/FileOpenError"
+import {PermissionError} from "../error/PermissionError"
+import {FileNotFoundError} from "../error/FileNotFoundError"
+import type {Customer} from "../../entities/sys/Customer"
+import {DeviceStorageUnavailableError} from "../error/DeviceStorageUnavailableError"
+import {MailBodyTooLargeError} from "../error/MailBodyTooLargeError"
+
+export type lazy<T> = () => T;
+export type lazyAsync<T> = () => Promise<T>;
+export type Thunk = () => mixed
 
 export type DeferredObject<T> = {
 	resolve: (T) => void,
@@ -27,30 +70,31 @@ export function defer<T>(): DeferredObject<T> {
 	return ret
 }
 
-export function asyncFind<T>(array: T[], finder: (item: T, index: number, arrayLength: number) => Promise<boolean>): Promise<?T> {
-	return Promise.reduce(array, (foundItem, item, index, length) => {
-		if (foundItem) {
-			// the item has been found already, so skip all remaining items in the array
-			return foundItem
-		} else {
-			return finder(item, index, length).then(found => {
-				return (found) ? item : null
-			})
+export async function asyncFind<T>(
+	array: $ReadOnlyArray<T>,
+	finder: (item: T, index: number, arrayLength: number) => Promise<boolean>
+): Promise<?T> {
+	for (let i = 0; i < array.length; i++) {
+		const item = array[i]
+		if (await finder(item, i, array.length)) {
+			return item
 		}
-	}, null)
+	}
+	return null
 }
 
-export function asyncFindAndMap<T, R>(array: T[], finder: (item: T, index: number, arrayLength: number) => Promise<?R>): Promise<?R> {
-	return Promise.reduce(array, (result, item, index, length) => {
-		if (result) {
-			// the item has been found already, so skip all remaining items in the array
-			return result
-		} else {
-			return finder(item, index, length).then(currentResult => {
-				return (currentResult) ? currentResult : null
-			})
+export async function asyncFindAndMap<T, R>(
+	array: $ReadOnlyArray<T>,
+	finder: (item: T, index: number, arrayLength: number) => Promise<?R>
+): Promise<?R> {
+	for (let i = 0; i < array.length; i++) {
+		const item = array[i]
+		const mapped = await finder(item, i, array.length)
+		if (mapped) {
+			return mapped
 		}
-	}, null)
+	}
+	return null
 }
 
 /**
@@ -73,15 +117,28 @@ export function neverNull<T>(object: ?T): T {
 	return (object: any)
 }
 
+export function assertNotNull<T>(object: ?T, message: string = "null"): T {
+	if (object == null) {
+		throw new Error("AssertNotNull failed : " + message)
+	}
+	return object
+}
+
+export function assert(assertion: MaybeLazy<boolean>, message: string) {
+	if (!resolveMaybeLazy(assertion)) {
+		throw new Error(`Assertion failed: ${message}`)
+	}
+}
+
 export function downcast<R>(object: *): R {
 	return (object: any)
 }
 
 export function clone<T>(instance: T): T {
 	if (instance instanceof Uint8Array) {
-		return instance.slice()
+		return downcast<T>(instance.slice())
 	} else if (instance instanceof Array) {
-		return instance.map(i => clone(i))
+		return downcast<T>(instance.map(i => clone(i)))
 	} else if (instance instanceof Date) {
 		return (new Date(instance.getTime()): any)
 	} else if (instance instanceof TypeRef) {
@@ -97,61 +154,6 @@ export function clone<T>(instance: T): T {
 	} else {
 		return instance
 	}
-}
-
-/**
- * Imports a module using System.import and sets up the depencency map (needed for hmr)
- * => Hot reloading is currently not capable of tracking dynamic imports => We add the metadata for the dynamic import manually
- * @see https://github.com/alexisvincent/systemjs-hot-reloader/issues/129
- * @param importer The name of the importing module
- * @param moduleName The module to import
- * @returns resolves to the imported module
- */
-export function asyncImport(importer: string, moduleName: string): Promise<*> {
-	return System.import(moduleName)
-	             .then(module => {
-		             if (System.loads) {
-			             if (!System.loads[System.resolveSync(importer)].depMap[moduleName]) {
-				             System.loads[System.resolveSync(importer)].deps.push(moduleName)
-				             System.loads[System.resolveSync(importer)].depMap[moduleName] = System.resolveSync(moduleName)
-			             }
-		             }
-		             return module
-	             })
-}
-
-export function getEnabledMailAddressesForGroupInfo(groupInfo: GroupInfo): string[] {
-	let aliases = groupInfo.mailAddressAliases.filter(alias => alias.enabled).map(alias => alias.mailAddress)
-	if (groupInfo.mailAddress) aliases.unshift(groupInfo.mailAddress)
-	return aliases
-}
-
-/**
- * Provides the memberships of the user with the given type. In case of area groups all groups are returned.
- */
-export function getUserGroupMemberships(user: User, groupType: GroupTypeEnum): GroupMembership[] {
-	if (groupType === GroupType.User) {
-		return [user.userGroup]
-	} else {
-		return user.memberships.filter(m => m.groupType === groupType)
-	}
-}
-
-/**
- * Provides the name if available, otherwise the email address if available, otherwise an empty string.
- */
-export function getGroupInfoDisplayName(groupInfo: GroupInfo): string {
-	if (groupInfo.name) {
-		return groupInfo.name
-	} else if (groupInfo.mailAddress) {
-		return groupInfo.mailAddress
-	} else {
-		return ""
-	}
-}
-
-export function compareGroupInfos(a: GroupInfo, b: GroupInfo): number {
-	return getGroupInfoDisplayName(a).localeCompare(getGroupInfoDisplayName(b))
 }
 
 export function getWhitelabelDomain(customerInfo: CustomerInfo, domainName: ?string): ?DomainInfo {
@@ -181,6 +183,12 @@ export function lazyMemoized<T>(source: () => T): () => T {
 	}
 }
 
+/**
+ * Returns a cached version of {@param fn}.
+ * Cached function checks that argument is the same (with ===) and if it is then it returns the cached result.
+ * If the cached argument has changed then {@param fn} will be called with new argument and result will be cached again.
+ * Only remembers the last argument.
+ */
 export function memoized<T, R>(fn: (T) => R): (T) => R {
 	let lastArg: T
 	let lastResult: R
@@ -259,25 +267,6 @@ export function debounceStart<F: (...args: any) => void>(timeout: number, toThro
 export function randomIntFromInterval(min: number, max: number): number {
 	return Math.floor(Math.random() * (max - min + 1) + min);
 }
-
-export class ProgressMonitor {
-	totalWork: number
-	workCompleted: number
-	updater: (percentageCompleted: number) => mixed
-
-	constructor(totalWork: number, updater: (percentageCompleted: number) => mixed) {
-		this.updater = updater
-		this.totalWork = totalWork
-		this.workCompleted = 0
-	}
-
-	workDone(amount: number) {
-		this.workCompleted += amount
-		const result = Math.round(100 * (this.workCompleted) / this.totalWork)
-		this.updater(Math.min(100, result))
-	}
-}
-
 
 export function getMailBodyText(body: MailBody): string {
 	return body.compressedText || body.text || ""
@@ -401,6 +390,157 @@ export function freezeMap<K, V>(myMap: Map<K, V>): Map<K, V> {
 	return anyMap
 }
 
-export function addressDomain(senderAddress: string) {
+export function addressDomain(senderAddress: string): string {
 	return senderAddress.slice(senderAddress.lastIndexOf("@") + 1)
 }
+
+/**
+ * Ignores the fact that Object.keys returns also not owned properties.
+ */
+export function typedKeys<K: string, V>(obj: {[K]: V}): Array<K> {
+	return downcast(Object.keys(obj))
+}
+
+/**
+ * Ignores the fact that Object.keys returns also not owned properties.
+ */
+export function typedEntries<K: string, V>(obj: {[K]: V}): Array<[K, V]> {
+	return downcast(Object.entries(obj))
+}
+
+/**
+ * Ignores the fact that Object.keys returns also not owned properties.
+ */
+export function typedValues<K: string, V>(obj: {[K]: V}): Array<V> {
+	return downcast(Object.values(obj))
+}
+
+export type MaybeLazy<T> = T | lazy<T>;
+
+export function resolveMaybeLazy<T>(maybe: MaybeLazy<T>): T {
+	return (typeof maybe === "function" ? downcast(maybe)() : maybe)
+}
+
+export function getAsLazy<T>(maybe: MaybeLazy<T>): lazy<T> {
+	return (typeof maybe === "function" ? downcast(maybe) : () => maybe)
+}
+
+export function mapLazily<T, U>(maybe: MaybeLazy<T>, mapping: (T) => U): lazy<U> {
+	return () => mapping(resolveMaybeLazy(maybe))
+}
+
+/**
+ * Stricter version of parseInt() from MDN. parseInt() allows some arbitrary characters at the end of the string.
+ * Returns NaN in case there's anything non-number in the string.
+ */
+export function filterInt(value: string): number {
+	if (/^\d+$/.test(value)) {
+		return parseInt(value, 10);
+	} else {
+		return NaN;
+	}
+}
+
+interface Positioned {
+	x: number,
+	y: number,
+}
+
+interface Sized {
+	top: number,
+	left: number,
+	bottom: number,
+	right: number,
+}
+
+export function insideRect(point: Positioned, rect: Sized): boolean {
+	return point.x >= rect.left && point.x < rect.right
+		&& point.y >= rect.top && point.y < rect.bottom
+}
+
+export function objToError(o: Object): Error {
+	let errorType = ErrorNameToType[o.name]
+	let e = (errorType != null ? new errorType(o.message) : new Error(o.message): any)
+	e.name = o.name
+	e.stack = o.stack || e.stack
+	e.data = o.data
+	return e
+}
+
+const ErrorNameToType = {
+	ConnectionError,
+	BadRequestError,
+	NotAuthenticatedError,
+	SessionExpiredError,
+	NotAuthorizedError,
+	NotFoundError,
+	MethodNotAllowedError,
+	PreconditionFailedError,
+	LockedError,
+	TooManyRequestsError,
+	AccessDeactivatedError,
+	AccessExpiredError,
+	AccessBlockedError,
+	InvalidDataError,
+	InvalidSoftwareVersionError,
+	LimitReachedError,
+	InternalServerError,
+	BadGatewayError,
+	ResourceError,
+	InsufficientStorageError,
+	CryptoError,
+	SessionKeyNotFoundError,
+	SseError,
+	ProgrammingError,
+	RecipientsNotFoundError,
+	RecipientNotResolvedError,
+	OutOfSyncError,
+	SecondFactorPendingError,
+	ServiceUnavailableError,
+	DbError,
+	IndexingNotSupportedError,
+	QuotaExceededError,
+	CancelledError,
+	FileOpenError,
+	PayloadTooLargeError,
+	DeviceStorageUnavailableError,
+	MailBodyTooLargeError,
+	Error,
+	"java.net.SocketTimeoutException": ConnectionError,
+	"java.net.ConnectException": ConnectionError,
+	"javax.net.ssl.SSLException": ConnectionError,
+	"javax.net.ssl.SSLHandshakeException": ConnectionError,
+	"java.io.EOFException": ConnectionError,
+	"java.net.UnknownHostException": ConnectionError,
+	"java.lang.SecurityException": PermissionError,
+	"java.io.FileNotFoundException": FileNotFoundError,
+	"de.tutao.tutanota.CryptoError": CryptoError, // Android app exception class name
+	"de.tutao.tutanota.TutCrypto": CryptoError, // iOS app crypto error domain
+	"android.content.ActivityNotFoundException": FileOpenError,
+	"de.tutao.tutanota.TutFileViewer": FileOpenError,
+	"NSURLErrorDomain": ConnectionError
+}
+
+export function isCustomizationEnabledForCustomer(customer: Customer, feature: FeatureTypeEnum): boolean {
+	return !!customer.customizations.find(customization => customization.feature === feature)
+}
+
+/**
+ * If val is non null, returns the result of val passed to action, else null
+ */
+export function mapNullable<T, U>(val: ?T, action: T => ?U): U | null  {
+	if (val != null) {
+		const result = action(val)
+		if (result != null) {
+			return result
+		}
+	}
+	return null
+}
+
+export function isSecurityError(e: any): boolean {
+	return e instanceof DOMException && (e.name === "SecurityError" || e.code === e.SECURITY_ERR)
+}
+
+/** Helper to take instead of `typeof setTimeout` which is hellish to reproduce */
+export type TimeoutSetter = (fn: () => mixed, number) => TimeoutID
