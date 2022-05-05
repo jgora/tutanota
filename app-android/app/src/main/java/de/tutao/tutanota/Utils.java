@@ -9,6 +9,7 @@ import android.provider.OpenableColumns;
 import android.util.Base64;
 
 import androidx.annotation.ColorInt;
+import androidx.annotation.RequiresApi;
 
 import org.apache.commons.io.IOUtils;
 import org.jdeferred.Deferred;
@@ -21,6 +22,7 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -42,7 +44,6 @@ public class Utils {
 				.replaceAll("/", "_")
 				.replaceAll("=", "");
 	}
-
 
 	public static byte[] readFile(File file) throws IOException {
 		try (FileInputStream in = new FileInputStream(file)) {

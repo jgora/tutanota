@@ -27,7 +27,6 @@ import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.NoSuchProviderException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.SecureRandom;
@@ -54,7 +53,8 @@ import javax.crypto.spec.SecretKeySpec;
 public class Crypto {
 	public static final String TEMP_DIR_ENCRYPTED = "temp/encrypted";
 	public static final String TEMP_DIR_DECRYPTED = "temp/decrypted";
-	public static final byte[] FIXED_IV = new byte[16];
+	public static final int AES_BLOCK_SIZE_BYTES = 16;
+	public static final byte[] FIXED_IV = new byte[AES_BLOCK_SIZE_BYTES];
 
 	private final static int RSA_KEY_LENGTH_IN_BITS = 2048;
 	public static final String RSA_ALGORITHM = "RSA/ECB/OAEPWithSHA-256AndMGF1Padding";
@@ -101,7 +101,7 @@ public class Crypto {
 	}
 
 
-	protected synchronized JSONObject generateRsaKey(byte[] seed) throws JSONException, NoSuchProviderException, NoSuchAlgorithmException {
+	protected synchronized JSONObject generateRsaKey(byte[] seed) throws JSONException, NoSuchAlgorithmException {
 		this.randomizer.setSeed(seed);
 		KeyPairGenerator generator = KeyPairGenerator.getInstance("RSA");
 		generator.initialize(RSA_KEY_LENGTH_IN_BITS, randomizer);

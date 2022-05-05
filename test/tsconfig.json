@@ -1,0 +1,19 @@
+{
+  "extends": "../tsconfig_common.json",
+  "compilerOptions": {
+	"declaration": false,
+	"noEmit": true,
+	"noImplicitAny": false,
+	"noImplicitThis": false,
+	"strictPropertyInitialization": false,
+	"strictBindCallApply": false
+  },
+  "include": [
+	"../src/*d.ts",
+	"../libs/*d.ts",
+	"../types/*d.ts",
+	"api/**/*.ts",
+	"client/**/*.ts",
+	"types/*.d.ts"
+  ]
+}

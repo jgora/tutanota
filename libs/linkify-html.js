@@ -1,6 +1,4 @@
-'use strict';
-
-var linkify = require('./linkify');
+import * as linkify from 'linkifyjs';
 
 /**
  * generated from https://raw.githubusercontent.com/w3c/html/26b5126f96f736f796b9e29718138919dd513744/entities.json
@@ -87,7 +85,7 @@ function () {
     this.index = -1;
     this.tagNameBuffer = '';
     this.states = {
-      beforeData: function () {
+      beforeData: function beforeData() {
         var char = this.peek();
 
         if (char === '<' && !this.isIgnoredEndTag()) {
@@ -111,7 +109,7 @@ function () {
           this.delegate.beginData();
         }
       },
-      data: function () {
+      data: function data() {
         var char = this.peek();
         var tag = this.tagNameBuffer;
 
@@ -130,7 +128,7 @@ function () {
           this.delegate.appendToData(char);
         }
       },
-      tagOpen: function () {
+      tagOpen: function tagOpen() {
         var char = this.consume();
 
         if (char === '!') {
@@ -150,7 +148,7 @@ function () {
           this.appendToTagName(char);
         }
       },
-      markupDeclarationOpen: function () {
+      markupDeclarationOpen: function markupDeclarationOpen() {
         var char = this.consume();
 
         if (char === '-' && this.peek() === '-') {
@@ -176,7 +174,7 @@ function () {
           }
         }
       },
-      doctype: function () {
+      doctype: function doctype() {
         var char = this.consume();
 
         if (isSpace(char)) {
@@ -185,7 +183,7 @@ function () {
           );
         }
       },
-      beforeDoctypeName: function () {
+      beforeDoctypeName: function beforeDoctypeName() {
         var char = this.consume();
 
         if (isSpace(char)) {
@@ -197,7 +195,7 @@ function () {
           if (this.delegate.appendToDoctypeName) this.delegate.appendToDoctypeName(char.toLowerCase());
         }
       },
-      doctypeName: function () {
+      doctypeName: function doctypeName() {
         var char = this.consume();
 
         if (isSpace(char)) {
@@ -213,7 +211,7 @@ function () {
           if (this.delegate.appendToDoctypeName) this.delegate.appendToDoctypeName(char.toLowerCase());
         }
       },
-      afterDoctypeName: function () {
+      afterDoctypeName: function afterDoctypeName() {
         var char = this.consume();
 
         if (isSpace(char)) {
@@ -248,7 +246,7 @@ function () {
           }
         }
       },
-      afterDoctypePublicKeyword: function () {
+      afterDoctypePublicKeyword: function afterDoctypePublicKeyword() {
         var char = this.peek();
 
         if (isSpace(char)) {
@@ -274,7 +272,7 @@ function () {
           );
         }
       },
-      doctypePublicIdentifierDoubleQuoted: function () {
+      doctypePublicIdentifierDoubleQuoted: function doctypePublicIdentifierDoubleQuoted() {
         var char = this.consume();
 
         if (char === '"') {
@@ -290,7 +288,7 @@ function () {
           if (this.delegate.appendToDoctypePublicIdentifier) this.delegate.appendToDoctypePublicIdentifier(char);
         }
       },
-      doctypePublicIdentifierSingleQuoted: function () {
+      doctypePublicIdentifierSingleQuoted: function doctypePublicIdentifierSingleQuoted() {
         var char = this.consume();
 
         if (char === "'") {
@@ -306,7 +304,7 @@ function () {
           if (this.delegate.appendToDoctypePublicIdentifier) this.delegate.appendToDoctypePublicIdentifier(char);
         }
       },
-      afterDoctypePublicIdentifier: function () {
+      afterDoctypePublicIdentifier: function afterDoctypePublicIdentifier() {
         var char = this.consume();
 
         if (isSpace(char)) {
@@ -328,7 +326,7 @@ function () {
           );
         }
       },
-      betweenDoctypePublicAndSystemIdentifiers: function () {
+      betweenDoctypePublicAndSystemIdentifiers: function betweenDoctypePublicAndSystemIdentifiers() {
         var char = this.consume();
 
         if (isSpace(char)) {
@@ -348,7 +346,7 @@ function () {
           );
         }
       },
-      doctypeSystemIdentifierDoubleQuoted: function () {
+      doctypeSystemIdentifierDoubleQuoted: function doctypeSystemIdentifierDoubleQuoted() {
         var char = this.consume();
 
         if (char === '"') {
@@ -364,7 +362,7 @@ function () {
           if (this.delegate.appendToDoctypeSystemIdentifier) this.delegate.appendToDoctypeSystemIdentifier(char);
         }
       },
-      doctypeSystemIdentifierSingleQuoted: function () {
+      doctypeSystemIdentifierSingleQuoted: function doctypeSystemIdentifierSingleQuoted() {
         var char = this.consume();
 
         if (char === "'") {
@@ -380,7 +378,7 @@ function () {
           if (this.delegate.appendToDoctypeSystemIdentifier) this.delegate.appendToDoctypeSystemIdentifier(char);
         }
       },
-      afterDoctypeSystemIdentifier: function () {
+      afterDoctypeSystemIdentifier: function afterDoctypeSystemIdentifier() {
         var char = this.consume();
 
         if (isSpace(char)) {
@@ -392,7 +390,7 @@ function () {
           );
         }
       },
-      commentStart: function () {
+      commentStart: function commentStart() {
         var char = this.consume();
 
         if (char === '-') {
@@ -411,7 +409,7 @@ function () {
           );
         }
       },
-      commentStartDash: function () {
+      commentStartDash: function commentStartDash() {
         var char = this.consume();
 
         if (char === '-') {
@@ -430,7 +428,7 @@ function () {
           );
         }
       },
-      comment: function () {
+      comment: function comment() {
         var char = this.consume();
 
         if (char === '-') {
@@ -441,7 +439,7 @@ function () {
           this.delegate.appendToCommentData(char);
         }
       },
-      commentEndDash: function () {
+      commentEndDash: function commentEndDash() {
         var char = this.consume();
 
         if (char === '-') {
@@ -455,7 +453,7 @@ function () {
           );
         }
       },
-      commentEnd: function () {
+      commentEnd: function commentEnd() {
         var char = this.consume();
 
         if (char === '>') {
@@ -470,7 +468,7 @@ function () {
           );
         }
       },
-      tagName: function () {
+      tagName: function tagName() {
         var char = this.consume();
 
         if (isSpace(char)) {
@@ -490,7 +488,7 @@ function () {
           this.appendToTagName(char);
         }
       },
-      endTagName: function () {
+      endTagName: function endTagName() {
         var char = this.consume();
 
         if (isSpace(char)) {
@@ -513,7 +511,7 @@ function () {
           this.appendToTagName(char);
         }
       },
-      beforeAttributeName: function () {
+      beforeAttributeName: function beforeAttributeName() {
         var char = this.peek();
 
         if (isSpace(char)) {
@@ -545,7 +543,7 @@ function () {
           this.delegate.beginAttribute();
         }
       },
-      attributeName: function () {
+      attributeName: function attributeName() {
         var char = this.peek();
 
         if (isSpace(char)) {
@@ -582,7 +580,7 @@ function () {
           this.delegate.appendToAttributeName(char);
         }
       },
-      afterAttributeName: function () {
+      afterAttributeName: function afterAttributeName() {
         var char = this.peek();
 
         if (isSpace(char)) {
@@ -619,7 +617,7 @@ function () {
           this.delegate.appendToAttributeName(char);
         }
       },
-      beforeAttributeValue: function () {
+      beforeAttributeValue: function beforeAttributeValue() {
         var char = this.peek();
 
         if (isSpace(char)) {
@@ -653,7 +651,7 @@ function () {
           this.delegate.appendToAttributeValue(char);
         }
       },
-      attributeValueDoubleQuoted: function () {
+      attributeValueDoubleQuoted: function attributeValueDoubleQuoted() {
         var char = this.consume();
 
         if (char === '"') {
@@ -667,7 +665,7 @@ function () {
           this.delegate.appendToAttributeValue(char);
         }
       },
-      attributeValueSingleQuoted: function () {
+      attributeValueSingleQuoted: function attributeValueSingleQuoted() {
         var char = this.consume();
 
         if (char === "'") {
@@ -681,7 +679,7 @@ function () {
           this.delegate.appendToAttributeValue(char);
         }
       },
-      attributeValueUnquoted: function () {
+      attributeValueUnquoted: function attributeValueUnquoted() {
         var char = this.peek();
 
         if (isSpace(char)) {
@@ -711,7 +709,7 @@ function () {
           this.delegate.appendToAttributeValue(char);
         }
       },
-      afterAttributeValueQuoted: function () {
+      afterAttributeValueQuoted: function afterAttributeValueQuoted() {
         var char = this.peek();
 
         if (isSpace(char)) {
@@ -736,7 +734,7 @@ function () {
           );
         }
       },
-      selfClosingStartTag: function () {
+      selfClosingStartTag: function selfClosingStartTag() {
         var char = this.peek();
 
         if (char === '>') {
@@ -752,7 +750,7 @@ function () {
           );
         }
       },
-      endTagOpen: function () {
+      endTagOpen: function endTagOpen() {
         var char = this.consume();
 
         if (char === '@' || char === ':' || isAlpha(char)) {
@@ -1124,7 +1122,7 @@ function tokenize(input, options) {
   return tokenizer.tokenize(input);
 }
 
-var Options = linkify.options.Options;
+var Options = linkify.Options;
 var StartTag = 'StartTag';
 var EndTag = 'EndTag';
 var Chars = 'Chars';
@@ -1365,4 +1363,4 @@ function attrsToStrings(attrs) {
   return attrStrs;
 }
 
-module.exports = linkifyHtml;
+export { linkifyHtml as default };

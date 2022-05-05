@@ -5,15 +5,20 @@ import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.util.Log;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebMessage;
+import android.webkit.WebMessagePort;
+import android.webkit.WebView;
 
 import androidx.annotation.Nullable;
+import androidx.annotation.RequiresApi;
 import androidx.core.content.FileProvider;
 
 import org.jdeferred.Deferred;
+import org.jdeferred.DonePipe;
 import org.jdeferred.Promise;
 import org.jdeferred.impl.DeferredObject;
 import org.json.JSONArray;
@@ -34,6 +39,9 @@ import java.util.Objects;
 
 import de.tutao.tutanota.alarms.AlarmNotification;
 import de.tutao.tutanota.alarms.AlarmNotificationsManager;
+import de.tutao.tutanota.credentials.CredentialEncryptionMode;
+import de.tutao.tutanota.credentials.CredentialsEncryptionFactory;
+import de.tutao.tutanota.credentials.ICredentialsEncryption;
 import de.tutao.tutanota.push.LocalNotificationsFacade;
 import de.tutao.tutanota.push.SseStorage;
 
@@ -44,6 +52,7 @@ public final class Native {
 	private static final String JS_NAME = "nativeApp";
 	private final static String TAG = "Native";
 
+
 	private static int requestId = 0;
 	private final Crypto crypto;
 	private final FileUtil files;
@@ -53,8 +62,10 @@ public final class Native {
 	private final MainActivity activity;
 	private final AlarmNotificationsManager alarmNotificationsManager;
 	public final ThemeManager themeManager;
+	private final ICredentialsEncryption credentialsEncryption;
 	private volatile DeferredObject<Void, Throwable, Void> webAppInitialized = new DeferredObject<>();
-
+	@Nullable
+	private WebMessagePort webMessagePort;
 
 	Native(MainActivity activity, SseStorage sseStorage, AlarmNotificationsManager alarmNotificationsManager) {
 		this.activity = activity;
@@ -64,10 +75,42 @@ public final class Native {
 		this.alarmNotificationsManager = alarmNotificationsManager;
 		this.sseStorage = sseStorage;
 		this.themeManager = new ThemeManager(activity);
+		this.credentialsEncryption = CredentialsEncryptionFactory.create(activity);
 	}
 
 	public void setup() {
 		activity.getWebView().addJavascriptInterface(this, JS_NAME);
+	}
+
+	@SuppressWarnings("unused")
+	@JavascriptInterface
+	public void startWebMessageChannel() {
+		// WebView.post ensures that webview methods are called on the correct thread
+		activity.getWebView().post(this::initMessageChannel);
+	}
+
+	void initMessageChannel() {
+		WebView webView = activity.getWebView();
+
+		WebMessagePort[] channel = webView.createWebMessageChannel();
+
+		WebMessagePort outgoingPort = channel[0];
+		this.webMessagePort = outgoingPort;
+
+		WebMessagePort incomingPort = channel[1];
+
+		outgoingPort.setWebMessageCallback(new WebMessagePort.WebMessageCallback() {
+			@Override
+			public void onMessage(WebMessagePort port, WebMessage message) {
+				handleMessageFromWeb(message.getData());
+			}
+		});
+
+		// We send the port to the web side, this message gets handled by window.onmessage
+		webView.postWebMessage(
+				new WebMessage("", new WebMessagePort[]{incomingPort}),
+				Uri.EMPTY
+		);
 	}
 
 	/**
@@ -75,8 +118,7 @@ public final class Native {
 	 *
 	 * @param msg A request (see WorkerProtocol)
 	 */
-	@JavascriptInterface
-	public void invoke(final String msg) {
+	public void handleMessageFromWeb(final String msg) {
 		new Thread(() -> {
 			try {
 				final JSONObject request = new JSONObject(msg);
@@ -89,7 +131,7 @@ public final class Native {
 					}
 					promise.resolve(request);
 				} else {
-					invokeMethod(request.getString("type"), request.getJSONArray("args"))
+					invokeMethod(request.getString("requestType"), request.getJSONArray("args"))
 							.then(result -> {
 								sendResponse(request, result);
 							})
@@ -102,23 +144,26 @@ public final class Native {
 	}
 
 	Promise<Object, Exception, ?> sendRequest(JsRequest type, Object[] args) {
-		JSONObject request = new JSONObject();
-		String requestId = createRequestId();
-		try {
-			JSONArray arguments = new JSONArray();
-			for (Object arg : args) {
-				arguments.put(arg);
+		return this.webAppInitialized.then((DonePipe<Void, Object, Exception, Void>) (v) -> {
+			JSONObject request = new JSONObject();
+			String requestId = createRequestId();
+			try {
+				JSONArray arguments = new JSONArray();
+				for (Object arg : args) {
+					arguments.put(arg);
+				}
+				request.put("id", requestId);
+				request.put("type", "request");
+				request.put("requestType", type.toString());
+				request.put("args", arguments);
+				this.postMessage(request);
+				DeferredObject<Object, Exception, Void> d = new DeferredObject<>();
+				this.queue.put(requestId, d);
+				return d.promise();
+			} catch (JSONException e) {
+				throw new RuntimeException(e);
 			}
-			request.put("id", requestId);
-			request.put("type", type.toString());
-			request.put("args", arguments);
-			this.postMessage(request);
-			DeferredObject<Object, Exception, Void> d = new DeferredObject<>();
-			this.queue.put(requestId, d);
-			return d.promise();
-		} catch (JSONException e) {
-			throw new RuntimeException(e);
-		}
+		});
 	}
 
 	private static String createRequestId() {
@@ -150,15 +195,10 @@ public final class Native {
 	}
 
 	private void postMessage(final JSONObject json) {
-		evaluateJs("tutao.nativeApp.handleMessageFromNative('" + escape(json.toString()) + "')");
-	}
-
-	private void evaluateJs(final String js) {
-		activity.getWebView().post(() -> {
-			activity.getWebView().evaluateJavascript(js, value -> {
-				// no response expected
-			});
-		});
+		if (this.webMessagePort == null) {
+			throw new IllegalStateException("Web bridge is not initialized yet!");
+		}
+		webMessagePort.postMessage(new WebMessage(json.toString()));
 	}
 
 	private Promise<Object, Exception, Void> invokeMethod(String method, JSONArray args) {
@@ -169,7 +209,7 @@ public final class Native {
 					if (!webAppInitialized.isResolved()) {
 						webAppInitialized.resolve(null);
 					}
-					promise.resolve("android");
+					promise.resolve(null);
 					break;
 				case "reload":
 					webAppInitialized = new DeferredObject<>();
@@ -216,12 +256,33 @@ public final class Native {
 				case "getSize":
 					promise.resolve(files.getSize(args.getString(0)) + "");
 					break;
-				case "upload":
-					promise.resolve(files.upload(args.getString(0), args.getString(1), args.getJSONObject(2)));
+				case "upload": {
+					String fileUri = args.getString(0);
+					String targetUrl = args.getString(1);
+					String httpMethod = args.getString(2);
+					JSONObject headers = args.getJSONObject(3);
+					promise.resolve(files.upload(fileUri, targetUrl, httpMethod, headers));
 					break;
-				case "download":
-					promise.resolve(files.download(args.getString(0), args.getString(1), args.getJSONObject(2)));
+				}
+				case "download": {
+					String url = args.getString(0);
+					String filename = args.getString(1);
+					JSONObject headers = args.getJSONObject(2);
+					promise.resolve(files.download(url, filename, headers));
 					break;
+				}
+				case "joinFiles": {
+					String filename = args.getString(0);
+					List<String> filesTojoin = jsonArrayToTypedList(args.getJSONArray(1));
+					promise.resolve(files.joinFiles(filename, filesTojoin));
+					break;
+				}
+				case "splitFile": {
+					String fileUri = args.getString(0);
+					int maxChunkSize = args.getInt(1);
+					promise.resolve(files.splitFile(fileUri, maxChunkSize));
+					break;
+				}
 				case "clearFileData":
 					files.clearFileData();
 					promise.resolve(null);
@@ -239,11 +300,11 @@ public final class Native {
 					break;
 				case "storePushIdentifierLocally":
 
-					String deviceIdentififer = args.getString(0);
+					String deviceIdentifier = args.getString(0);
 					String userId = args.getString(1);
 					String sseOrigin = args.getString(2);
 					Log.d(TAG, "storePushIdentifierLocally");
-					sseStorage.storePushIdentifier(deviceIdentififer, sseOrigin);
+					sseStorage.storePushIdentifier(deviceIdentifier, sseOrigin);
 
 					String pushIdentifierId = args.getString(3);
 					String pushIdentifierSessionKeyB64 = args.getString(4);
@@ -290,8 +351,10 @@ public final class Native {
 					promise.resolve(null);
 					break;
 				}
-				case "saveBlob":
-					return files.saveBlob(args.getString(0), args.getString(1));
+				case "saveDataFile":
+					String fileUri = files.saveDataFile(args.getString(0), args.getString(1));
+					promise.resolve(fileUri);
+					break;
 				case "putFileIntoDownloads":
 					final String path = args.getString(0);
 					return files.putToDownloadFolder(path);
@@ -304,6 +367,35 @@ public final class Native {
 					scheduleAlarms(args.getJSONArray(0));
 					promise.resolve(null);
 					break;
+				case "encryptUsingKeychain": {
+					String encryptionMode = args.getString(0);
+					String dataToEncrypt = args.getString(1);
+					CredentialEncryptionMode mode = CredentialEncryptionMode.fromName(encryptionMode);
+					String encryptedData = credentialsEncryption.encryptUsingKeychain(dataToEncrypt, mode);
+					promise.resolve(encryptedData);
+					break;
+				}
+				case "decryptUsingKeychain": {
+					String encryptionMode = args.getString(0);
+					String dataToDecrypt = args.getString(1);
+					CredentialEncryptionMode mode = CredentialEncryptionMode.fromName(encryptionMode);
+					String decryptedData = credentialsEncryption.decryptUsingKeychain(dataToDecrypt, mode);
+					promise.resolve(decryptedData);
+					break;
+				}
+				case "getSupportedEncryptionModes": {
+					List<CredentialEncryptionMode> modes = credentialsEncryption.getSupportedEncryptionModes();
+					JSONArray jsonArray = new JSONArray();
+					for (CredentialEncryptionMode mode : modes) {
+						jsonArray.put(mode.name);
+					}
+					promise.resolve(jsonArray);
+					break;
+				}
+				case "hashFile": {
+					String file = args.getString(0);
+					return promise.resolve(files.hashFile(file));
+				}
 				default:
 					throw new Exception("unsupported method: " + method);
 			}
@@ -319,18 +411,25 @@ public final class Native {
 				(NotificationManager) activity.getSystemService(Context.NOTIFICATION_SERVICE);
 		Objects.requireNonNull(notificationManager);
 
-		ArrayList<String> emailAddesses = new ArrayList<>(addressesArray.length());
+		ArrayList<String> emailAddresses = new ArrayList<>(addressesArray.length());
 		for (int i = 0; i < addressesArray.length(); i++) {
 			notificationManager.cancel(Math.abs(addressesArray.getString(i).hashCode()));
-			emailAddesses.add(addressesArray.getString(i));
+			emailAddresses.add(addressesArray.getString(i));
 		}
 		activity.startService(LocalNotificationsFacade.notificationDismissedIntent(activity,
-				emailAddesses, "Native", false));
+				emailAddresses, "Native", false));
+	}
+
+	private <T> List<T> jsonArrayToTypedList(JSONArray jsonArray) throws JSONException {
+		List<T> l = new ArrayList<>(jsonArray.length());
+		for (int i = 0; i < jsonArray.length(); i++) {
+			l.add((T) jsonArray.get(i));
+		}
+		return l;
 	}
 
 	private boolean openLink(@Nullable String uri) {
 		Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(uri));
-		PackageManager pm = activity.getPackageManager();
 		try {
 			activity.startActivity(intent);
 		} catch (ActivityNotFoundException e) {
@@ -356,7 +455,8 @@ public final class Native {
 		String imageName = "logo-solo-red.png";
 		try {
 			InputStream logoInputStream = activity.getAssets().open("tutanota/images/" + imageName);
-			File logoFile = this.files.writeFileToUnencryptedDir(imageName, logoInputStream);
+			File logoFile = this.files.getTempDecryptedFile(imageName);
+			this.files.writeFile(logoFile, logoInputStream);
 			Uri logoUri = FileProvider.getUriForFile(activity, BuildConfig.FILE_PROVIDER_AUTHORITY, logoFile);
 			ClipData thumbnail = ClipData.newUri(
 					activity.getContentResolver(),
@@ -405,10 +505,6 @@ public final class Native {
 		StringWriter errors = new StringWriter();
 		e.printStackTrace(new PrintWriter(errors));
 		return errors.toString();
-	}
-
-	private static String escape(String s) {
-		return Utils.bytesToBase64(s.getBytes());
 	}
 
 	DeferredObject<Void, Throwable, Void> getWebAppInitialized() {

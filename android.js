@@ -1,44 +1,76 @@
-import options from "commander"
-
-import {execFileSync} from "child_process"
-import fs from "fs"
-import path from "path"
-import {prepareMobileBuild} from "./buildSrc/prepareMobileBuild.js"
-
-
 /**
- * Besides options below this script may require signing parameters passed as environment variables:
- * 'APK_SIGN_ALIAS'
- * 'APK_SIGN_STORE_PASS'
- * 'APK_SIGN_KEY_PASS'
- * 'APK_SIGN_STORE'
- * 'ANDROID_HOME'
+ * Build script for android app.
+ *
+ *  Besides options below this script may require signing parameters passed as environment variables:
+ *  'APK_SIGN_ALIAS'
+ *  'APK_SIGN_STORE_PASS'
+ *  'APK_SIGN_KEY_PASS'
+ *  'APK_SIGN_STORE'
+ *  'ANDROID_HOME'
  */
-
-options
-	.usage('[options] [test|prod|local] ')
-	.arguments('<target>')
-	.option('-b, --buildtype <type>', 'gradle build type', /^(debugDist|debug|release|releaseTest)$/i, 'release')
-	.option('-w --webclient <client>', 'choose web client build', /^(make|dist)$/i, 'dist')
-	.parse(process.argv)
+import options from "commander"
+import fs from "fs"
+import {execFileSync} from "child_process"
+import {runDevBuild} from "./buildSrc/DevBuild.js"
+import {prepareMobileBuild} from "./buildSrc/prepareMobileBuild.js"
+import {buildWebapp} from "./buildSrc/buildWebapp.js"
+import {getTutanotaAppVersion, measure} from "./buildSrc/buildUtils.js"
+import path from "path"
 
 const log = (...messages) => console.log("\nBUILD:", ...messages, "\n")
 
-buildAndroid({
-	host: options.args[0] || 'prod',
-	webClient: options.webclient,
-	buildType: options.buildtype,
-}).catch(e => {
-	console.error(e)
-	process.exit(1)
-})
 
-async function buildAndroid({host, buildType, webClient}) {
+options
+	.usage('[options] [test|prod|local|host <url>] ')
+	.arguments('[stage] [host]')
+	.option('-b, --buildtype <type>', 'gradle build type', /^(debugDist|debug|release|releaseTest)$/i, 'release')
+	.option('-w --webclient <client>', 'choose web client build', /^(make|dist)$/i, 'dist')
+	.action((stage, host, options) => {
+		if (!["test", "prod", "local", "host", undefined].includes(stage)
+			|| (stage !== "host" && host)
+			|| (stage === "host" && !host)) {
+			options.outputHelp()
+			process.exit(1)
+		}
+
+		const {webclient, buildtype} = options
+
+		buildAndroid({
+			stage: stage ?? 'prod',
+			host: host,
+			webClient: webclient,
+			buildType: buildtype,
+		})
+	})
+
+options.parse(process.argv)
+
+
+async function buildAndroid({stage, host, buildType, webClient}) {
 	log(`Starting build with build type: ${buildType}, webclient: ${webClient}, host: ${host}`)
 
-	runCommand('node', [webClient, `${host}`], {
-		stdio: [null, process.stdout, process.stderr]
-	})
+	if (webClient === "make") {
+		await runDevBuild({
+			stage,
+			host,
+			desktop: false,
+			clean: false,
+			watch: false,
+			serve: false
+		})
+	} else {
+		const version = getTutanotaAppVersion()
+		await buildWebapp(
+			{
+				version,
+				stage,
+				host,
+				minify: true,
+				projectDir: path.resolve("."),
+				measure
+			}
+		)
+	}
 
 	await prepareMobileBuild(webClient)
 
@@ -65,6 +97,10 @@ async function buildAndroid({host, buildType, webClient}) {
 	await fs.promises.rename(apkPath, outPath)
 
 	log(`Build complete. The APK is located at: ${outPath}`)
+
+	// runDevBuild spawns some child processes from the BuildServerClient,
+	// ideally we would detach from them inside as needed but for now we just hard exit
+	process.exit(0)
 }
 
 function runCommand(command, args, options) {

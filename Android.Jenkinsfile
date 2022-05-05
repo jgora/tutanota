@@ -6,6 +6,7 @@ pipeline {
 		PATH="${env.NODE_PATH}:${env.PATH}"
 		ANDROID_SDK_ROOT="/opt/android-sdk-linux"
 		ANDROID_HOME="/opt/android-sdk-linux"
+		GITHUB_RELEASE_PAGE="https://github.com/tutao/tutanota/releases/tag/tutanota-android-release-${VERSION}"
 	}
 
 	agent {
@@ -40,6 +41,7 @@ pipeline {
 			steps {
 				echo "Building ${VERSION}"
 				sh 'npm ci'
+				sh 'npm run build-packages'
 				withCredentials([
 					string(credentialsId: 'apk-sign-store-pass', variable: "APK_SIGN_STORE_PASS"),
 					string(credentialsId: 'apk-sign-key-pass', variable: "APK_SIGN_KEY_PASS")
@@ -62,6 +64,7 @@ pipeline {
 			}
 			steps {
 				sh 'npm ci'
+				sh 'npm run build-packages'
 				withCredentials([
 					string(credentialsId: 'apk-sign-store-pass', variable: "APK_SIGN_STORE_PASS"),
 					string(credentialsId: 'apk-sign-key-pass', variable: "APK_SIGN_KEY_PASS")
@@ -87,30 +90,41 @@ pipeline {
 					def tag = "tutanota-android-release-${VERSION}"
 					def util = load "jenkins-lib/util.groovy"
 
-					util.publishToNexus(groupId: "app",
-								   artifactId: "android",
-								   version: "${VERSION}",
-								   assetFilePath: "${WORKSPACE}/${filePath}",
-								   fileExtension: 'apk'
+					util.publishToNexus(
+						groupId: "app",
+					    artifactId: "android",
+						version: "${VERSION}",
+						assetFilePath: "${WORKSPACE}/${filePath}",
+						fileExtension: 'apk'
 				   )
 
-					androidApkUpload(googleCredentialsId: 'android-app-publisher-credentials',
-									 apkFilesPattern: "${filePath}",
-									 trackName: 'production',
-									 rolloutPercentage: '100%')
+					androidApkUpload(
+						googleCredentialsId: 'android-app-publisher-credentials',
+						apkFilesPattern: "${filePath}",
+						trackName: 'production',
+						rolloutPercentage: '100%',
+						recentChangeList: [
+							[
+								language: "en-US",
+								text: "see: ${GITHUB_RELEASE_PAGE}"
+							]
+						]
+					)
 
 					sh "git tag ${tag}"
 					sh "git push --tags"
 
 					def checksum = sh(returnStdout: true, script: "sha256sum ${WORKSPACE}/${filePath}")
 
-					withCredentials([string(credentialsId: 'github-access-token', variable: 'GITHUB_TOKEN')]) {
-						sh """node buildSrc/createGithubReleasePage.js --name '${VERSION} (Android)' \
-																	   --milestone '${VERSION}' \
-																	   --tag '${tag}' \
-																	   --uploadFile '${WORKSPACE}/${filePath}' \
-																	   --platform android \
-							 										   --apkChecksum ${checksum}"""
+					catchError(stageResult: 'UNSTABLE', buildResult: 'SUCCESS',  message: 'Failed to create github release page') {
+						withCredentials([string(credentialsId: 'github-access-token', variable: 'GITHUB_TOKEN')]) {
+							sh """node buildSrc/createGithubReleasePage.js --name '${VERSION} (Android)' \
+																		   --milestone '${VERSION}' \
+																		   --tag '${tag}' \
+																		   --uploadFile '${WORKSPACE}/${filePath}' \
+																		   --platform android \
+																		   --apkChecksum ${checksum}"""
+						}
 					}
 				}
 			}
@@ -127,21 +141,30 @@ pipeline {
 
 					unstash 'apk'
 
-					util.publishToNexus(groupId: "app",
-							artifactId: "android-test",
-							version: "${VERSION}",
-							assetFilePath: "${WORKSPACE}/build/app-android/tutanota-tutao-releaseTest-${VERSION}.apk",
-							fileExtension: 'apk'
+					util.publishToNexus(
+						groupId: "app",
+						artifactId: "android-test",
+						version: "${VERSION}",
+						assetFilePath: "${WORKSPACE}/build/app-android/tutanota-tutao-releaseTest-${VERSION}.apk",
+						fileExtension: 'apk'
 					)
 
 					// This doesn't publish to the main app on play store,
 					// instead it get's published to the hidden "tutanota-test" app
 					// this happens because the AppId is set to de.tutao.tutanota.test by the android build
 					// and play store knows which app to publish just based on the id
-					androidApkUpload(googleCredentialsId: 'android-app-publisher-credentials',
-							apkFilesPattern: "build/app-android/tutanota-tutao-releaseTest-${VERSION}.apk",
-							trackName: 'internal',
-							rolloutPercentage: '100%')
+					androidApkUpload(
+						googleCredentialsId: 'android-app-publisher-credentials',
+						apkFilesPattern: "build/app-android/tutanota-tutao-releaseTest-${VERSION}.apk",
+						trackName: 'internal',
+						rolloutPercentage: '100%',
+						recentChangeList: [
+							[
+								language: "en-US",
+								text: "see: ${GITHUB_RELEASE_PAGE}"
+							]
+						]
+					)
 				}
 			}
 		}

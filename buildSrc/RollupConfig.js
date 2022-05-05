@@ -3,14 +3,15 @@ import path from "path"
 // These are the dependencies that must be provided for the module loader systemjs
 export const dependencyMap = {
 	"mithril": path.normalize("./libs/mithril.js"),
-	"mithril/stream/stream.js": path.normalize("./libs/stream.js"),
+	"mithril/stream": path.normalize("./libs/stream.js"),
 	"squire-rte": path.normalize("./libs/squire-raw.js"),
 	"dompurify": path.normalize("./libs/purify.js"),
-	"qrcode": path.normalize("./libs/qrcode.js"),
+	"qrcode-svg": path.normalize("./libs/qrcode.js"),
 	"jszip": path.normalize("./libs/jszip.js"),
 	"luxon": path.normalize("./libs/luxon.js"),
-	"linkify": path.normalize("./libs/linkify.js"),
-	"linkify/html": path.normalize("./libs/linkify-html.js"),
+	"linkifyjs": path.normalize("./libs/linkify.js"),
+	"linkifyjs/html": path.normalize("./libs/linkify-html.js"),
+	"cborg": path.normalize("./libs/cborg.js")
 }
 
 /**
@@ -67,12 +68,20 @@ export function resolveLibs(baseDir = ".") {
  */
 export function getChunkName(moduleId, {getModuleInfo}) {
 	// See HACKING.md for rules
-	const code = getModuleInfo(moduleId).code
-	if (code.includes("@bundleInto:common-min") || moduleId.includes(path.normalize("libs/stream"))) {
+	const moduleInfo = getModuleInfo(moduleId)
+	const code = moduleInfo.code
+	if (code == null) {
+		console.log("SYNTHETIC MODULE??", moduleId)
+	}
+	if (
+		code.includes("@bundleInto:common-min")
+		|| moduleId.includes(path.normalize("libs/stream"))
+		|| moduleId.includes(path.normalize("packages/tutanota-utils"))
+	) {
 		return "common-min"
 	} else if (code.includes("assertMainOrNodeBoot") ||
 		moduleId.includes(path.normalize("libs/mithril")) ||
-		moduleId.includes(path.normalize("src/app.js")) ||
+		moduleId.includes(path.normalize("src/app.ts")) ||
 		code.includes("@bundleInto:boot")
 	) {
 		// everything marked as assertMainOrNodeBoot goes into boot bundle right now
@@ -112,7 +121,8 @@ export function getChunkName(moduleId, {getModuleInfo}) {
 		moduleId.includes(path.normalize("src/misc/ErrorHandlerImpl")) ||
 		moduleId.includes(path.normalize("src/misc")) ||
 		moduleId.includes(path.normalize("src/file")) ||
-		moduleId.includes(path.normalize("src/gui"))
+		moduleId.includes(path.normalize("src/gui")) ||
+		moduleId.includes(path.normalize("packages/tutanota-usagetests"))
 	) {
 		// Things which we always need for main thread anyway, at least currently
 		return "main"
@@ -122,8 +132,7 @@ export function getChunkName(moduleId, {getModuleInfo}) {
 		|| moduleId.includes(path.normalize("libs/linkify"))
 		|| moduleId.includes(path.normalize("libs/linkify-html"))) {
 		return "worker"
-	} else if (moduleId.includes(path.normalize("src/native/common"))
-		|| moduleId.includes(path.normalize("src/desktop/config/ConfigKeys.js"))) {
+	} else if (moduleId.includes(path.normalize("src/native/common"))) {
 		return "native-common"
 	} else if (moduleId.includes(path.normalize("src/search"))) {
 		return "search"
@@ -140,11 +149,16 @@ export function getChunkName(moduleId, {getModuleInfo}) {
 		return "ui-extra"
 	} else if (moduleId.includes(path.normalize("src/login"))) {
 		return "login"
-	} else if (moduleId.includes(path.normalize("src/api/common")) || moduleId.includes(path.normalize("src/api/entities"))) {
+	} else if (moduleId.includes(path.normalize("src/api/common"))
+		|| moduleId.includes(path.normalize("src/api/entities"))
+		|| moduleId.includes(path.normalize("src/desktop/config/ConfigKeys"))
+		|| moduleId.includes("cborg")
+		|| moduleId.includes(path.normalize("src/offline"))
+	) {
 		// things that are used in both worker and client
 		// entities could be separate in theory but in practice they are anyway
 		return "common"
-	} else if (moduleId.includes("rollupPluginBabelHelpers") || moduleId.includes("commonjsHelpers")) {
+	} else if (moduleId.includes("rollupPluginBabelHelpers") || moduleId.includes("commonjsHelpers") || moduleId.includes("tslib")) {
 		return "polyfill-helpers"
 	} else if (moduleId.includes(path.normalize("src/settings")) ||
 		moduleId.includes(path.normalize("src/subscription")) ||
@@ -154,7 +168,8 @@ export function getChunkName(moduleId, {getModuleInfo}) {
 		return "settings"
 	} else if (moduleId.includes(path.normalize("src/sharing"))) {
 		return "sharing"
-	} else if (moduleId.includes(path.normalize("src/api/worker"))) {
+	} else if (moduleId.includes(path.normalize("src/api/worker"))
+		|| moduleId.includes(path.normalize("packages/tutanota-crypto"))) {
 		return "worker" // avoid that crypto stuff is only put into native
 	} else if (moduleId.includes(path.normalize("libs/jszip"))) {
 		return "jszip"
@@ -162,7 +177,7 @@ export function getChunkName(moduleId, {getModuleInfo}) {
 		// Put all translations into "translation-code"
 		// Almost like in Rollup example: https://rollupjs.org/guide/en/#outputmanualchunks
 		// This groups chunks but does not rename them for some reason so we do chunkFileNames below
-		const match = /.*[\\|\/]translations[\\|\/](\w+)+\.js/.exec(moduleId)
+		const match = /.*[\\|\/]translations[\\|\/](\w+)+\.ts/.exec(moduleId)
 		if (match) {
 			const language = match[1]
 			return "translation-" + language
@@ -181,6 +196,9 @@ export function bundleDependencyCheckPlugin() {
 			const getModuleInfo = this.getModuleInfo.bind(this)
 
 			for (const chunk of Object.values(bundle)) {
+				if (!chunk || !chunk.modules) {
+					continue
+				}
 				for (const moduleId of Object.keys(chunk.modules)) {
 					// Its a translation file and they are in their own chunks. We can skip further checks.
 					if (moduleId.includes(path.normalize("src/translations"))) {
@@ -209,18 +227,3 @@ export function bundleDependencyCheckPlugin() {
 		}
 	}
 }
-
-export const babelPlugins = [
-	// Using Flow plugin and not preset to run before class-properties and avoid generating strange property code
-	"@babel/plugin-transform-flow-strip-types",
-	"@babel/plugin-proposal-class-properties",
-	"@babel/plugin-syntax-dynamic-import",
-	"@babel/plugin-proposal-optional-chaining",
-	"@babel/plugin-proposal-nullish-coalescing-operator",
-]
-export const babelDesktopPlugins = [
-	// Using Flow plugin and not preset to run before class-properties and avoid generating strange property code
-	"@babel/plugin-transform-flow-strip-types",
-	"@babel/plugin-proposal-class-properties",
-	"@babel/plugin-syntax-dynamic-import",
-]

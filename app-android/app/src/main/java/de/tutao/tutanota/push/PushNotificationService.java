@@ -8,9 +8,11 @@ import android.util.Log;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 
 import de.tutao.tutanota.AndroidKeyStoreFacade;
+import de.tutao.tutanota.AndroidKeyStoreFacadeFactory;
 import de.tutao.tutanota.Crypto;
 import de.tutao.tutanota.LifecycleJobService;
 import de.tutao.tutanota.MainActivity;
@@ -41,7 +43,7 @@ public final class PushNotificationService extends LifecycleJobService {
 		super.onCreate();
 		AppDatabase appDatabase = AppDatabase.getDatabase(this, /*allowMainThreadAccess*/true);
 
-		AndroidKeyStoreFacade keyStoreFacade = new AndroidKeyStoreFacade(this);
+		AndroidKeyStoreFacade keyStoreFacade = AndroidKeyStoreFacadeFactory.create(this);;
 		SseStorage sseStorage = new SseStorage(appDatabase, keyStoreFacade);
 
 		localNotificationsFacade = new LocalNotificationsFacade(this);
@@ -97,7 +99,13 @@ public final class PushNotificationService extends LifecycleJobService {
 				removeBackgroundServiceNotification();
 				finishJobIfNeeded();
 			} else {
-				sseClient.restartConnectionIfNeeded(new SseInfo(sseStorage.getPushIdentifier(), userIds, sseStorage.getSseOrigin()));
+				sseClient.restartConnectionIfNeeded(
+						new SseInfo(
+								Objects.requireNonNull(sseStorage.getPushIdentifier()),
+								userIds,
+								sseStorage.getSseOrigin()
+						)
+				);
 			}
 		});
 

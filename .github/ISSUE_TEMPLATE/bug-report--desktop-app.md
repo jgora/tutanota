@@ -3,7 +3,7 @@ name: 'Bug report: desktop app'
 about: Create a report to help us improve
 title: ''
 labels: bug, desktop
-assignees: ganthern
+assignees: ''
 ---
 
 - [ ] This is not a feature request (existing functionality does not work, **not** missing functionality).

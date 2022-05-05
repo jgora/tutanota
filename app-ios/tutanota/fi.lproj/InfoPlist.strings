@@ -1,6 +1,5 @@
 NSCameraUsageDescription = "Ota kuva tai video ja lisää se liitteeksi.";
 NSPhotoLibraryUsageDescription = "Lisää kuva liitteenä.";
-NSMicrophoneUsageDescription = "Lisää kuva liitteenä.";
 NSMicrophoneUsageDescription = "Käytetään, kun videota tallennetaan liitteenä.";
 NSContactsUsageDescription = "Etsi vastaanottajan sähköpostiosoite yhteystiedoista.";
 NSRemindersUsageDescription = "Viestin saapumisilmoitus.";
@@ -12,3 +11,4 @@ TutaoCancelAction = "Peruuta";
 TutaoSettingsAction = "Asetukset";
 TutaoCalendarAlarmTitle = "Muistutus";
 TutaoScheduleAlarmError = "Hälytystä ei voitu asettaa. Päivitä sovellus.";
+TutaoUnlockCredentialsAction = "Avaa tunnistetiedot";

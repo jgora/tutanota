@@ -1,28 +1,17 @@
-import pluginBabel from "@rollup/plugin-babel"
+import typescript from "@rollup/plugin-typescript"
 import commonjs from "@rollup/plugin-commonjs"
 import path from "path"
 import fs from "fs-extra"
-import {babelPlugins, dependencyMap} from "./RollupConfig.js";
+import {resolveLibs} from "./RollupUtils.js"
 
-const {babel} = pluginBabel
 
-function resolveLibs(baseDir = ".") {
-	return {
-		name: "resolve-libs",
-		resolveId(source) {
-			const resolved = dependencyMap[source]
-			return resolved && path.join(baseDir, resolved)
-		}
-	}
-}
-
-export function rollupDebugPlugins(baseDir, pluginsForBabel = babelPlugins) {
+export function rollupDebugPlugins(baseDir, tsOptions) {
 	return [
-		babel({
-			plugins: pluginsForBabel,
-			inputSourceMap: false,
-			babelHelpers: "bundled",
-			retainLines: true,
+		typescript({
+			tsconfig: "tsconfig.json",
+			// We need this so that we include files which are not in our cwd() (like tests which import stuff from "..")
+			filterRoot: baseDir,
+			...tsOptions,
 		}),
 		resolveLibs(baseDir),
 		commonjs({
@@ -35,18 +24,9 @@ export function rollupDebugPlugins(baseDir, pluginsForBabel = babelPlugins) {
 			// "auto" will try to wrap into namespace, "preferred" will try to use default export as a namespace which is something that
 			// we want in most cases.
 			requireReturnsDefault: "preferred",
+			ignoreDynamicRequires: true,
 		}),
 	]
-}
-
-export async function writeNollupBundle(generatedBundle, log, dir = "build") {
-	await fs.mkdirp(dir)
-
-	return Promise.all(generatedBundle.output.map((o) => {
-		const filePath = path.join(dir, o.fileName)
-		// log("Writing", filePath)
-		return fs.writeFile(filePath, o.code || o.source)
-	}))
 }
 
 /**

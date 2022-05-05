@@ -1,6 +1,6 @@
-import path, {dirname} from "path"
+import path from "path"
 import {readFileSync} from "fs"
-import {fileURLToPath} from "url"
+import {getElectronVersion, getInstalledModuleVersion} from "./buildUtils.js"
 
 /**
  * This is used for launching electron:
@@ -9,15 +9,13 @@ import {fileURLToPath} from "url"
  */
 
 export default function generateTemplate({nameSuffix, version, updateUrl, iconPath, sign, notarize, unpacked}) {
-	const __dirname = dirname(fileURLToPath(import.meta.url))
-
-	const pj = JSON.parse(readFileSync(path.resolve(__dirname, "../package.json"), "utf-8"))
 	const appName = "tutanota-desktop" + nameSuffix
 	const appId = "de.tutao.tutanota" + nameSuffix
 	if(process.env.JENKINS && process.env.DEBUG_SIGN) throw new Error("Tried to DEBUG_SIGN in CI!")
 	const debugkey = process.env.DEBUG_SIGN
 		? readFileSync(path.join(process.env.DEBUG_SIGN, "test.pubkey"), {encoding: 'utf8'})
 		: undefined
+	const log = console.log.bind(console)
 	return {
 		"name": appName,
 		"main": "./desktop/DesktopMain.js",
@@ -72,10 +70,10 @@ export default function generateTemplate({nameSuffix, version, updateUrl, iconPa
 			}
 		},
 		"dependencies": {
-			"electron-updater": pj.devDependencies["electron-updater"],
+			"electron-updater": getInstalledModuleVersion("electron-updater", log),
 		},
 		"build": {
-			"electronVersion": pj.devDependencies.electron,
+			"electronVersion": getElectronVersion(),
 			"icon": iconPath,
 			"appId": appId,
 			"productName": nameSuffix.length > 0

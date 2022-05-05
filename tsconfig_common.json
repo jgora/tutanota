@@ -1,0 +1,36 @@
+{
+  "compilerOptions": {
+	"lib": [
+	  "ES2020",
+	  "webworker",
+	  "dom",
+	  "es2015.proxy",
+	  "esnext"
+	],
+	"allowJs": true,
+	"checkJs": false,
+	"target": "ES2017",
+	"module": "esnext",
+	"moduleResolution": "node",
+	"skipLibCheck": true,
+	"declaration": true,
+	"noEmitOnError": true,
+	"noErrorTruncation": true,
+	"allowSyntheticDefaultImports": true,
+	"noImplicitAny": true,
+	"noImplicitThis": true,
+	"noUnusedLocals": false,
+	"noUnusedParameters": false,
+	"esModuleInterop": true,
+	"strict": false,
+	"alwaysStrict": true,
+	"strictBindCallApply": true,
+	// Can't enable right now: cannot infer callbacks in some generic attributes
+	"strictFunctionTypes": false,
+	"strictPropertyInitialization": true,
+	// Can't enable right now: filter(isNotNull) does not work then
+	"noStrictGenericChecks": false,
+	"strictNullChecks": true,
+	"useUnknownInCatchVariables": false,
+  }
+}

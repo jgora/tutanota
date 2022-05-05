@@ -1,11 +1,3 @@
-//
-//  TutaoErrorFactory.m
-//  Tutanota
-//
-//  Created by Tutao GmbH on 28.10.16.
-//
-//
-
 #import <Foundation/Foundation.h>
 #import "TUTErrorFactory.h"
 
@@ -24,9 +16,10 @@ NSString *const TUT_NETWORK_ERROR = @"de.tutao.tutanota.network";
 }
 
 + (NSError *)wrapNativeErrorWithDomain:(NSString *)domain message:(NSString *)description error:(NSError *)error {
-	NSMutableDictionary * userInfo = [[NSMutableDictionary alloc] initWithDictionary:error.userInfo];
-	[userInfo setValue:description forKey:@"message"];
-	return [NSError errorWithDomain:domain code:error.code userInfo:userInfo];
+  return [NSError errorWithDomain:domain code:-101 userInfo:@{
+      NSUnderlyingErrorKey: error,
+      @"message": description
+  }];
 }
 
 + (NSError *)wrapCryptoErrorWithMessage:(NSString *)descrption error:(NSError *)error {

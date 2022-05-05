@@ -1,11 +1,14 @@
-import child_process, {spawn} from "child_process"
+import child_process from "child_process"
 import {BuildServerClient} from "@tutao/tutanota-build-server"
-import flow from "flow-bin"
 import path from "path"
+import {build} from "./TestBuilder.js"
+import {getTutanotaAppVersion} from "../buildSrc/buildUtils.js"
 
 run()
 
 async function run() {
+	console.log("testing version:", getTutanotaAppVersion())
+
 	let project
 	if (process.argv.indexOf("api") !== -1) {
 		project = "api"
@@ -18,22 +21,30 @@ async function run() {
 	const clean = process.argv.includes("-c")
 
 
-	spawn(flow, ["--quiet"], {stdio: "inherit"})
-
 	try {
 		const buildServerClient = new BuildServerClient("test")
-		await buildServerClient.buildWithServer({
+		const buildServerOpts = {
 			forceRestart: clean,
 			builderPath: path.resolve("TestBuilder.js"),
 			watchFolders: [path.resolve("api"), path.resolve("client"), path.resolve("../src")],
-			buildOpts: {}
-		})
+			autoRebuild: false
+		}
+		const buildOpts = {clean: false, stage: null, host: null}
+		await buildServerClient.buildWithServer(buildServerOpts, buildOpts)
+		// await buildWithoutServer(buildOpts, buildServerOpts)
 		console.log("build finished!")
 		const code = await runTest(project)
 		process.exit(code)
 	} catch (e) {
 		console.error("Build failed", e)
 		process.exit(1)
+	}
+}
+
+async function buildWithoutServer(buildOptions, serverOptions) {
+	const bundleWrappers = await build(buildOptions, serverOptions, console.log.bind(console))
+	for (const wrapper of bundleWrappers) {
+		await wrapper.generate()
 	}
 }
 
@@ -44,10 +55,4 @@ function runTest(project) {
 			resolve(code)
 		})
 	})
-}
-
-async function directoryExists(filePath) {
-	return fs.stat(filePath)
-	         .then(stats => stats.isDirectory())
-	         .catch(() => false)
 }

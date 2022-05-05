@@ -1,4 +1,4 @@
-import {rollupDebugPlugins, writeNollupBundle} from "../buildSrc/RollupDebugConfig.js"
+import {rollupDebugPlugins} from "../buildSrc/RollupDebugConfig.js"
 import nollup from "nollup"
 import * as env from "../buildSrc/env.js"
 import {promises as fs} from "fs"
@@ -6,13 +6,17 @@ import path, {dirname} from "path"
 import {renderHtml} from "../buildSrc/LaunchHtml.js"
 import {fileURLToPath} from "url"
 import nodeResolve from "@rollup/plugin-node-resolve"
+import {sqliteNativeBannerPlugin} from "../buildSrc/nativeLibraryRollupPlugin.js"
+import rollupPluginJson from "@rollup/plugin-json"
+import {writeNollupBundle} from "../buildSrc/RollupUtils.js"
 
-const root = dirname(fileURLToPath(import.meta.url))
+const testRoot = dirname(fileURLToPath(import.meta.url))
+const projectRoot = path.resolve(path.join(testRoot, ".."))
 
 export async function build(buildOptions, serverOptions, log) {
 	log("Building tests")
 
-	const pjPath = path.join(root, "..", "package.json")
+	const pjPath = path.join(projectRoot, "package.json")
 	await fs.mkdir(buildDir(), {recursive: true})
 	const {version} = JSON.parse(await fs.readFile(pjPath, "utf8"))
 	await fs.copyFile(pjPath, buildDir("package.json"))
@@ -20,12 +24,25 @@ export async function build(buildOptions, serverOptions, log) {
 
 	log("Bundling...")
 	const bundle = await nollup({
-		input: ["api/bootstrapTests-api.js", "client/bootstrapTests-client.js"],
+		input: [
+			"api/bootstrapTests-api.ts",
+			"client/bootstrapTests-client.ts"
+		],
 		plugins: [
 			envPlugin(localEnv),
 			resolveTestLibsPlugin(),
+			...rollupDebugPlugins(path.resolve(".."), {outDir: "build"}),
+			rollupPluginJson({}),
 			nodeResolve({preferBuiltins: true}),
-			...rollupDebugPlugins(".."),
+			sqliteNativeBannerPlugin(
+				{
+					environment: "node",
+					platform: process.platform,
+					rootDir: projectRoot,
+					dstPath: buildDir("better_sqlite3.node")
+				},
+				log
+			),
 		],
 	})
 	return [
@@ -39,7 +56,7 @@ export async function build(buildOptions, serverOptions, log) {
 
 				const start = Date.now()
 				log("Generating...")
-				const result = await bundle.generate({sourcemap: false, dir: buildDir(), format: "esm", chunkFileNames: "[name].js"})
+				const result = await bundle.generate({sourceMap: true, dir: buildDir(), format: "esm", chunkFileNames: "[name].js"})
 				log("Generated in", Date.now() - start)
 
 				const writingStart = Date.now()
@@ -63,7 +80,8 @@ function resolveTestLibsPlugin() {
 					// nollup only rewrites absolute paths so resolve path first.
 					return path.resolve("../node_modules/mithril/test-utils/browserMock.js")
 				case "ospec":
-					return ("../node_modules/ospec/ospec.js")
+					return "../node_modules/ospec/ospec.js"
+				case "better-sqlite3":
 				case "crypto":
 				case "xhr2":
 				case "express":
@@ -82,6 +100,7 @@ function resolveTestLibsPlugin() {
 				case "fs":
 				case "buffer":
 				case "winreg":
+				case "testdouble": // cannot bundle it now because nollup
 					return false
 				case "electron":
 					throw new Error(`electron is imported by ${importer}, don't do it in tests`)
@@ -129,5 +148,5 @@ function _writeFile(targetFile, content) {
 }
 
 function buildDir(...files) {
-	return path.join(root, "build", ...files)
+	return path.join(testRoot, "build", ...files)
 }

@@ -1,17 +1,16 @@
 package de.tutao.tutanota;
 
-import android.Manifest;
+import static de.tutao.tutanota.Utils.parseColor;
+
 import android.annotation.SuppressLint;
 import android.app.job.JobInfo;
 import android.app.job.JobScheduler;
 import android.content.ActivityNotFoundException;
-import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -31,12 +30,12 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
 
-import androidx.activity.ComponentActivity;
 import androidx.annotation.ColorInt;
 import androidx.annotation.MainThread;
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresPermission;
 import androidx.core.content.ContextCompat;
+import androidx.fragment.app.FragmentActivity;
 
 import org.jdeferred.Deferred;
 import org.jdeferred.Promise;
@@ -62,11 +61,7 @@ import de.tutao.tutanota.push.LocalNotificationsFacade;
 import de.tutao.tutanota.push.PushNotificationService;
 import de.tutao.tutanota.push.SseStorage;
 
-import static de.tutao.tutanota.Utils.parseColor;
-
-public class MainActivity extends ComponentActivity {
-
-	public static final String INVALIDATE_SSE_ACTION = "de.tutao.tutanota.INVALIDATE_SSE";
+public class MainActivity extends FragmentActivity {
 	public static final String OPEN_USER_MAILBOX_ACTION = "de.tutao.tutanota.OPEN_USER_MAILBOX_ACTION";
 	public static final String OPEN_CALENDAR_ACTION = "de.tutao.tutanota.OPEN_CALENDAR_ACTION";
 	public static final String OPEN_USER_MAILBOX_MAILADDRESS_KEY = "mailAddress";
@@ -76,7 +71,7 @@ public class MainActivity extends ComponentActivity {
 	private static final String TAG = "MainActivity";
 
 	private static int requestId = 0;
-	private final Map<Integer, Deferred> requests = new ConcurrentHashMap<>();
+	private final Map<Integer, Deferred<ActivityResult, Exception, Void>> requests = new ConcurrentHashMap<>();
 
 	private WebView webView;
 	public SseStorage sseStorage;
@@ -87,7 +82,7 @@ public class MainActivity extends ComponentActivity {
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
 		Log.d(TAG, "App started");
-		AndroidKeyStoreFacade keyStoreFacade = new AndroidKeyStoreFacade(this);
+		AndroidKeyStoreFacade keyStoreFacade = AndroidKeyStoreFacadeFactory.create(this);
 		sseStorage = new SseStorage(AppDatabase.getDatabase(this, /*allowMainThreadAccess*/false),
 				keyStoreFacade);
 		AlarmNotificationsManager alarmNotificationsManager = new AlarmNotificationsManager(sseStorage,
@@ -159,14 +154,6 @@ public class MainActivity extends ComponentActivity {
 		}
 
 		startWebApp(queryParameters);
-
-		IntentFilter filter = new IntentFilter(INVALIDATE_SSE_ACTION);
-		this.registerReceiver(new BroadcastReceiver() {
-			@Override
-			public void onReceive(Context context, Intent intent) {
-
-			}
-		}, filter);
 	}
 
 	@Override
@@ -195,6 +182,7 @@ public class MainActivity extends ComponentActivity {
 
 	@Override
 	protected void onNewIntent(Intent intent) {
+		super.onNewIntent(intent);
 		handleIntent(intent);
 	}
 
@@ -300,6 +288,8 @@ public class MainActivity extends ComponentActivity {
 			parameters.put("theme", Objects.requireNonNull(JSONObject.wrap(theme)).toString());
 		}
 
+		parameters.put("platformId", "android");
+
 		StringBuilder queryBuilder = new StringBuilder();
 		for (Map.Entry<String, String> entry : parameters.entrySet()) {
 			try {
@@ -337,8 +327,8 @@ public class MainActivity extends ComponentActivity {
 		return requestId;
 	}
 
-	Promise<Void, Exception, Void> getPermission(String permission) {
-		Deferred<Void, Exception, Void> p = new DeferredObject<>();
+	Promise<ActivityResult, Exception, Void> getPermission(String permission) {
+		Deferred<ActivityResult, Exception, Void> p = new DeferredObject<>();
 		if (hasPermission(permission)) {
 			p.resolve(null);
 		} else {
@@ -353,12 +343,10 @@ public class MainActivity extends ComponentActivity {
 		return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED;
 	}
 
-	// deprecated but we need requestCode to identify the request which is not possible with new API
-	@SuppressWarnings("deprecation")
 	@Override
 	public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
 		super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-		Deferred deferred = requests.remove(requestCode);
+		Deferred<ActivityResult, Exception, Void> deferred = requests.remove(requestCode);
 		if (deferred == null) {
 			Log.w(TAG, "No deferred for the permission request" + requestCode);
 			return;
@@ -370,26 +358,22 @@ public class MainActivity extends ComponentActivity {
 		}
 	}
 
-	@SuppressWarnings("deprecation")
 	public Promise<ActivityResult, ?, ?> startActivityForResult(@RequiresPermission Intent intent) {
 		int requestCode = getRequestCode();
-		Deferred p = new DeferredObject();
+		Deferred<ActivityResult, Exception, Void> p = new DeferredObject<>();
 		requests.put(requestCode, p);
 		// deprecated but we need requestCode to identify the request which is not possible with new API
 		super.startActivityForResult(intent, requestCode);
 		return p;
 	}
 
-	// deprecated but we need requestCode to identify the request which is not possible with new API
-	@SuppressWarnings("deprecation")
 	@Override
 	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
 		super.onActivityResult(requestCode, resultCode, data);
-		Deferred deferred = requests.remove(requestCode);
+		Deferred<ActivityResult, Exception, Void> deferred = requests.remove(requestCode);
 		if (deferred != null) {
 			deferred.resolve(new ActivityResult(resultCode, data));
 		} else {
-
 			Log.w(TAG, "No deferred for activity request" + requestCode);
 		}
 	}
@@ -407,7 +391,7 @@ public class MainActivity extends ComponentActivity {
 
 	/**
 	 * The sharing activity. Either invoked from MainActivity (if the app was not active when the
-	 * share occured) or from onCreate.
+	 * share occurred) or from onCreate.
 	 */
 	void share(Intent intent) {
 		String action = intent.getAction();
@@ -504,9 +488,9 @@ public class MainActivity extends ComponentActivity {
 			return;
 		}
 		nativeImpl.sendRequest(JsRequest.openMailbox, new Object[]{userId, address});
-		ArrayList<String> addressess = new ArrayList<>(1);
-		addressess.add(address);
-		startService(LocalNotificationsFacade.notificationDismissedIntent(this, addressess,
+		ArrayList<String> addresses = new ArrayList<>(1);
+		addresses.add(address);
+		startService(LocalNotificationsFacade.notificationDismissedIntent(this, addresses,
 				"MainActivity#openMailbox", isSummary));
 	}
 
@@ -519,7 +503,6 @@ public class MainActivity extends ComponentActivity {
 	}
 
 	@Override
-
 	public void onBackPressed() {
 		if (nativeImpl.getWebAppInitialized().isResolved()) {
 			nativeImpl.sendRequest(JsRequest.handleBackPress, new Object[0])
@@ -573,15 +556,5 @@ public class MainActivity extends ComponentActivity {
 				return true;
 			});
 		}
-	}
-}
-
-class ActivityResult {
-	int resultCode;
-	Intent data;
-
-	ActivityResult(int resultCode, Intent data) {
-		this.resultCode = resultCode;
-		this.data = data;
 	}
 }
