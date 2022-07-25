@@ -89,7 +89,7 @@ class PushNotificationService : LifecycleJobService() {
 	override fun onStartJob(params: JobParameters): Boolean {
 		Log.d(TAG, "onStartJob")
 		jobParameters = params
-		return true
+		return false // Wakelock is not needed
 	}
 
 	override fun onStopJob(params: JobParameters): Boolean {
@@ -154,7 +154,7 @@ class PushNotificationService : LifecycleJobService() {
 		override fun onConnectionEstablished() {
 			removeBackgroundServiceNotification()
 			// After establishing connection we finish in some time.
-			scheduleJobFinish()
+			// scheduleJobFinish() Wakelock is not needed
 		}
 
 		override fun onNotAuthorized(userId: String) {
