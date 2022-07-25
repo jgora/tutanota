@@ -1,21 +1,14 @@
 import {FULL_INDEXED_TIMESTAMP, MailFolderType, MailState, NOTHING_INDEXED_TIMESTAMP, OperationType} from "../../common/TutanotaConstants"
-import type {MailBody} from "../../entities/tutanota/MailBody"
-import {MailBodyTypeRef} from "../../entities/tutanota/MailBody"
+import type {File as TutanotaFile, Mail, MailBody, MailBox, MailFolder} from "../../entities/tutanota/TypeRefs.js"
+import {FileTypeRef, MailBodyTypeRef, MailboxGroupRootTypeRef, MailBoxTypeRef, MailFolderTypeRef, MailTypeRef} from "../../entities/tutanota/TypeRefs.js"
 import {ConnectionError, NotAuthorizedError, NotFoundError} from "../../common/error/RestError"
-import {MailboxGroupRootTypeRef} from "../../entities/tutanota/MailboxGroupRoot"
-import type {MailBox} from "../../entities/tutanota/MailBox"
-import {MailBoxTypeRef} from "../../entities/tutanota/MailBox"
-import type {MailFolder} from "../../entities/tutanota/MailFolder"
-import {MailFolderTypeRef} from "../../entities/tutanota/MailFolder"
-import type {Mail} from "../../entities/tutanota/Mail"
-import {_TypeModel as MailModel, MailTypeRef} from "../../entities/tutanota/Mail"
+import {typeModels} from "../../entities/tutanota/TypeModels"
 import {containsEventOfType, getMailBodyText} from "../../common/utils/Utils"
-import {flat, groupBy, neverNull, noOp, ofClass, promiseMap, splitInChunks, TypeRef} from "@tutao/tutanota-utils"
+import {flat, groupBy, isNotNull, neverNull, noOp, ofClass, promiseMap, splitInChunks, TypeRef} from "@tutao/tutanota-utils"
 import {elementIdPart, isSameId, listIdPart, timestampToGeneratedId} from "../../common/utils/EntityUtils"
 import {_createNewIndexUpdate, encryptIndexKeyBase64, filterMailMemberships, getPerformanceTimestamp, htmlToText, typeRefToTypeInfo} from "./IndexUtils"
 import type {Db, GroupData, IndexUpdate, SearchIndexEntry} from "./SearchTypes"
-import type {File as TutanotaFile} from "../../entities/tutanota/File"
-import {FileTypeRef} from "../../entities/tutanota/File"
+import {IndexingErrorReason} from "./SearchTypes"
 import {CancelledError} from "../../common/error/CancelledError"
 import {IndexerCore} from "./IndexerCore"
 import {ElementDataOS, GroupDataOS, Metadata, MetaDataOS} from "./Indexer"
@@ -23,16 +16,13 @@ import type {WorkerImpl} from "../WorkerImpl"
 import {DbError} from "../../common/error/DbError"
 import {EntityRestCache} from "../rest/EntityRestCache"
 import type {DateProvider} from "../DateProvider"
-import type {EntityUpdate} from "../../entities/sys/EntityUpdate"
-import type {User} from "../../entities/sys/User"
-import type {GroupMembership} from "../../entities/sys/GroupMembership"
+import type {EntityUpdate, GroupMembership, User} from "../../entities/sys/TypeRefs.js"
 import {EntityRestClient} from "../rest/EntityRestClient"
 import {EntityClient} from "../../common/EntityClient"
 import {ProgressMonitor} from "../../common/utils/ProgressMonitor"
 import type {SomeEntity} from "../../common/EntityTypes"
 import {EntityUpdateData} from "../../main/EventController";
 import {EphemeralCacheStorage} from "../rest/EphemeralCacheStorage";
-import {IndexingErrorReason} from "./SearchTypes"
 
 export const INITIAL_MAIL_INDEX_INTERVAL_DAYS = 28
 const ENTITY_INDEXER_CHUNK = 20
@@ -86,7 +76,8 @@ export class MailIndexer {
 	createMailIndexEntries(mail: Mail, mailBody: MailBody | null, files: TutanotaFile[]): Map<string, SearchIndexEntry[]> {
 		let startTimeIndex = getPerformanceTimestamp()
 
-		let keyToIndexEntries = this._core.createIndexEntriesForAttributes(MailModel, mail, [
+		const MailModel = typeModels.Mail
+		let keyToIndexEntries = this._core.createIndexEntriesForAttributes(mail, [
 			{
 				attribute: MailModel.values["subject"],
 				value: () => mail.subject,
@@ -331,14 +322,14 @@ export class MailIndexer {
 
 			const success = this._core.isStoppedProcessing() || e instanceof CancelledError
 
-			const failedIndexingUpTo =  success
+			const failedIndexingUpTo = success
 				? null
 				: oldestTimestamp
 
 			const error = success
 				? null
 				: e instanceof ConnectionError
-				? IndexingErrorReason.ConnectionLost
+					? IndexingErrorReason.ConnectionLost
 					: IndexingErrorReason.Unknown
 
 			await this._worker.sendIndexState({
@@ -500,7 +491,7 @@ export class MailIndexer {
 									  files: files.filter(file => mail.attachments.find(a => isSameId(a, file._id))),
 								  }
 							  })
-							  .filter(Boolean),
+							  .filter(isNotNull),
 					  )
 					  .then(
 						  (

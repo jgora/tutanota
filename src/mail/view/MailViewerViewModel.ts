@@ -1,7 +1,19 @@
-import {Mail} from "../../api/entities/tutanota/Mail"
-import {MailBody, MailBodyTypeRef} from "../../api/entities/tutanota/MailBody"
-import {File as TutanotaFile, FileTypeRef} from "../../api/entities/tutanota/File"
-import {CalendarEvent} from "../../api/entities/tutanota/CalendarEvent"
+import {
+	CalendarEvent,
+	ConversationEntryTypeRef,
+	createEncryptedMailAddress,
+	createListUnsubscribeData,
+	createMailAddress,
+	EncryptedMailAddress,
+	File as TutanotaFile,
+	FileTypeRef,
+	Mail,
+	MailAddress,
+	MailBody,
+	MailBodyTypeRef,
+	MailHeadersTypeRef,
+	MailRestriction
+} from "../../api/entities/tutanota/TypeRefs.js"
 import {
 	CalendarMethod,
 	ConversationType,
@@ -21,10 +33,9 @@ import {ContactModel} from "../../contacts/model/ContactModel"
 import {ConfigurationDatabase} from "../../api/worker/facades/ConfigurationDatabase"
 import {InlineImages} from "./MailViewer"
 import {isDesktop} from "../../api/common/Env"
-import {Request} from "../../api/common/MessageDispatcher"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
-import {addAll, contains, defer, DeferredObject, downcast, neverNull, noOp, ofClass, startsWith} from "@tutao/tutanota-utils"
+import {addAll, contains, downcast, neverNull, noOp, ofClass, startsWith} from "@tutao/tutanota-utils"
 import {lang} from "../../misc/LanguageViewModel"
 import {
 	getArchiveFolder,
@@ -38,37 +49,30 @@ import {
 } from "../model/MailUtils"
 import {LoginController} from "../../api/main/LoginController"
 import m from "mithril"
-import {ConversationEntryTypeRef} from "../../api/entities/tutanota/ConversationEntry"
-import {ConnectionError, LockedError, NotAuthorizedError, NotFoundError} from "../../api/common/error/RestError"
-import {NativeInterface} from "../../native/common/NativeInterface"
+import {LockedError, NotAuthorizedError, NotFoundError} from "../../api/common/error/RestError"
 import {elementIdPart, listIdPart} from "../../api/common/utils/EntityUtils"
 import {getReferencedAttachments, loadInlineImages, moveMails, revokeInlineImages} from "./MailGuiUtils"
 import {locator} from "../../api/main/MainLocator"
-import {SanitizeResult} from "../../misc/HtmlSanitizer"
-import {stringifyFragment} from "../../gui/HtmlUtils"
+import {SanitizedFragment} from "../../misc/HtmlSanitizer"
 import {CALENDAR_MIME_TYPE, FileController} from "../../file/FileController"
-import {createMailAddress, MailAddress} from "../../api/entities/tutanota/MailAddress"
 import {getMailBodyText, getMailHeaders} from "../../api/common/utils/Utils"
-import {MailHeadersTypeRef} from "../../api/entities/tutanota/MailHeaders"
-import {createEncryptedMailAddress, EncryptedMailAddress} from "../../api/entities/tutanota/EncryptedMailAddress"
 import {exportMails} from "../export/Exporter.js"
 import {FileFacade} from "../../api/worker/facades/FileFacade"
 import {IndexingNotSupportedError} from "../../api/common/error/IndexingNotSupportedError"
 import {FileOpenError} from "../../api/common/error/FileOpenError"
 import {Dialog} from "../../gui/base/Dialog"
-import {createListUnsubscribeData} from "../../api/entities/tutanota/ListUnsubscribeData"
 import {checkApprovalStatus} from "../../misc/LoginUtils"
 import {formatDateTime, urlEncodeHtmlTags} from "../../misc/Formatter"
 import {UserError} from "../../api/main/UserError"
 import {showUserError} from "../../misc/ErrorHandlerImpl"
-import {ResponseMailParameters} from "../editor/SendMailModel"
-import {GroupInfo} from "../../api/entities/sys/GroupInfo"
-import {CustomerTypeRef} from "../../api/entities/sys/Customer"
-import {MailRestriction} from "../../api/entities/tutanota/MailRestriction"
+import {CustomerTypeRef, GroupInfo} from "../../api/entities/sys/TypeRefs.js"
 import {LoadingStateTracker} from "../../offline/LoadingState"
 import {IServiceExecutor} from "../../api/common/ServiceRequest"
 import {ListUnsubscribeService} from "../../api/entities/tutanota/Services"
 import {ProgrammingError} from "../../api/common/error/ProgrammingError"
+import {InitAsResponseArgs} from "../editor/SendMailModel"
+import {isOfflineError} from "../../api/common/utils/ErrorCheckUtils.js"
+import {DesktopSystemFacade} from "../../native/common/generatedipc/DesktopSystemFacade.js"
 
 
 export const enum ContentBlockingStatus {
@@ -83,8 +87,8 @@ export class MailViewerViewModel {
 	private mailBody: MailBody | null = null
 	private contrastFixNeeded: boolean = false
 
-	// always sanitized in this.setSanitizedMailBodyFromMail
-	private sanitizeResult: SanitizeResult | null = null
+	// always sanitized in this.sanitizeMailBody
+	private sanitizeResult: SanitizedFragment | null = null
 	private loadingAttachments: boolean = false
 
 	private attachments: TutanotaFile[] = []
@@ -122,7 +126,7 @@ export class MailViewerViewModel {
 		public readonly mailModel: MailModel,
 		readonly contactModel: ContactModel,
 		private readonly configFacade: ConfigurationDatabase,
-		native: NativeInterface | null,
+		desktopSystemFacade: DesktopSystemFacade | null,
 		private readonly fileFacade: FileFacade,
 		private readonly fileController: FileController,
 		readonly logins: LoginController,
@@ -135,17 +139,11 @@ export class MailViewerViewModel {
 		)
 		if (isDesktop()) {
 			// Notify the admin client about the mail being selected
-			native?.invokeNative(
-				new Request("sendSocketMessage", [
-					{
-						mailAddress: mail.sender.address,
-					},
-				]),
-			)
+			desktopSystemFacade?.sendSocketMessage(mail.sender.address)
 		}
 
 		this.folderText = null
-		this.filesExpanded = stream(false)
+		this.filesExpanded = stream<boolean>(false)
 
 		if (showFolder) {
 			const folder = this.mailModel.getMailFolder(mail._id[0])
@@ -165,10 +163,16 @@ export class MailViewerViewModel {
 	}
 
 	async loadAll() {
-		await this.loadingState.trackPromise(
-			this.loadMailBody(this.mail)
-				.then((inlineImageCids) => this.loadAttachments(this.mail, inlineImageCids))
-		).catch(ofClass(ConnectionError, noOp))
+		try {
+			await this.loadingState.trackPromise(
+				this.loadMailBody(this.mail)
+					.then((inlineImageCids) => this.loadAttachments(this.mail, inlineImageCids))
+			)
+		} catch (e) {
+			if (!isOfflineError(e)) {
+				throw e
+			}
+		}
 
 		m.redraw()
 
@@ -177,8 +181,15 @@ export class MailViewerViewModel {
 		// So we load it here pre-emptively to make sure it is in the cache.
 		this.entityClient
 			.load(ConversationEntryTypeRef, this.mail.conversationEntry)
-			.catch(ofClass(NotFoundError, e => console.log("could load conversation entry as it has been moved/deleted already", e)))
-			.catch(ofClass(ConnectionError, e => console.log("failed to load conversation entry, because of a lost connection", e)))
+			.catch((e) => {
+				if (e instanceof NotFoundError) {
+					console.log("could load conversation entry as it has been moved/deleted already", e)
+				} else if (isOfflineError(e)) {
+					console.log("failed to load conversation entry, because of a lost connection", e)
+				} else {
+					throw e
+				}
+			})
 	}
 
 	isLoading(): boolean {
@@ -238,8 +249,8 @@ export class MailViewerViewModel {
 		return this.mail._id
 	}
 
-	getSanitizedMailBody(): string | null {
-		return this.sanitizeResult?.text ?? null
+	getSanitizedMailBody(): DocumentFragment | null {
+		return this.sanitizeResult?.fragment ?? null
 	}
 
 	getMailBody(): string {
@@ -357,7 +368,7 @@ export class MailViewerViewModel {
 
 		// We don't check mail authentication status here because the user has manually called this
 
-		this.sanitizeResult = await this.setSanitizedMailBodyFromMail(this.mail, this.isBlockingExternalImages())
+		this.sanitizeResult = await this.sanitizeMailBody(this.mail, this.isBlockingExternalImages())
 	}
 
 	async markAsNotPhishing(): Promise<void> {
@@ -499,7 +510,7 @@ export class MailViewerViewModel {
 		// We should not try to sanitize body while we still animate because it's a heavy operation.
 		await this.delayBodyRenderingUntil
 
-		this.sanitizeResult = await this.setSanitizedMailBodyFromMail(mail, !isAllowedAndAuthenticatedExternalSender)
+		this.sanitizeResult = await this.sanitizeMailBody(mail, !isAllowedAndAuthenticatedExternalSender)
 
 		this.checkMailForPhishing(mail, this.sanitizeResult.links)
 
@@ -628,7 +639,7 @@ export class MailViewerViewModel {
 	}
 
 
-	private createResponseMailArgsForForwarding(recipients: MailAddress[], replyTos: EncryptedMailAddress[], addSignature: boolean): Promise<ResponseMailParameters> {
+	private async createResponseMailArgsForForwarding(recipients: MailAddress[], replyTos: EncryptedMailAddress[], addSignature: boolean): Promise<InitAsResponseArgs> {
 		let infoLine = lang.get("date_label") + ": " + formatDateTime(this.mail.sentDate) + "<br>"
 		infoLine += lang.get("from_label") + ": " + this.getSender().address + "<br>"
 
@@ -646,20 +657,18 @@ export class MailViewerViewModel {
 		const mailSubject = this.getSubject() || ""
 		infoLine += lang.get("subject_label") + ": " + urlEncodeHtmlTags(mailSubject)
 		let body = infoLine + '<br><br><blockquote class="tutanota_quote">' + this.getMailBody() + "</blockquote>"
-		return Promise.all([this.getSenderOfResponseMail(), import("../signature/Signature")]).then(([senderMailAddress, {prependEmailSignature}]) => {
-			return {
-				previousMail: this.mail,
-				conversationType: ConversationType.FORWARD,
-				senderMailAddress,
-				toRecipients: recipients,
-				ccRecipients: [],
-				bccRecipients: [],
-				attachments: this.attachments.slice(),
-				subject: "FWD: " + mailSubject,
-				bodyText: addSignature ? prependEmailSignature(body, this.logins) : body,
-				replyTos,
-			}
-		})
+		const {prependEmailSignature} = await import("../signature/Signature")
+		const senderMailAddress = await this.getSenderOfResponseMail()
+		return {
+			previousMail: this.mail,
+			conversationType: ConversationType.FORWARD,
+			senderMailAddress,
+			recipients,
+			attachments: this.attachments.slice(),
+			subject: "FWD: " + mailSubject,
+			bodyText: addSignature ? prependEmailSignature(body, this.logins) : body,
+			replyTos,
+		}
 	}
 
 	async reply(replyAll: boolean): Promise<void> {
@@ -727,9 +736,11 @@ export class MailViewerViewModel {
 						previousMail: this.mail,
 						conversationType: ConversationType.REPLY,
 						senderMailAddress,
-						toRecipients,
-						ccRecipients,
-						bccRecipients,
+						recipients: {
+							to: toRecipients,
+							cc: ccRecipients,
+							bcc: bccRecipients,
+						},
 						attachments: attachmentsForReply,
 						subject,
 						bodyText: prependEmailSignature(body, this.logins),
@@ -750,13 +761,14 @@ export class MailViewerViewModel {
 		}
 	}
 
-	private async setSanitizedMailBodyFromMail(mail: Mail, blockExternalContent: boolean): Promise<SanitizeResult> {
+	private async sanitizeMailBody(mail: Mail, blockExternalContent: boolean): Promise<SanitizedFragment> {
 		const {htmlSanitizer} = await import("../../misc/HtmlSanitizer")
-		const sanitizeResult = htmlSanitizer.sanitizeFragment(this.getMailBody(), {
+		const urlified = await locator.worker.urlify(this.getMailBody())
+		const sanitizeResult = htmlSanitizer.sanitizeFragment(urlified, {
 			blockExternalContent,
 			allowRelativeLinks: isTutanotaTeamMail(mail),
 		})
-		const {html, inlineImageCids, links, externalContent} = sanitizeResult
+		const {fragment, inlineImageCids, links, externalContent} = sanitizeResult
 
 		/**
 		 * Check if we need to improve contrast for dark theme. We apply the contrast fix if any of the following is contained in
@@ -766,13 +778,16 @@ export class MailViewerViewModel {
 		 *  * any font tag with the color attribute set
 		 */
 		this.contrastFixNeeded =
-			Array.from(html.querySelectorAll("*[style]"), e => (e as HTMLElement).style).some(
+			Array.from(fragment.querySelectorAll("*[style]"), e => (e as HTMLElement).style).some(
 				s => (s.color && s.color !== "inherit") || (s.backgroundColor && s.backgroundColor !== "inherit"),
-			) || html.querySelectorAll("font[color]").length > 0
-		const text = await locator.worker.urlify(stringifyFragment(html))
+			) || fragment.querySelectorAll("font[color]").length > 0
+
 		m.redraw()
 		return {
-			text,
+			// We want to stringify and return the fragment here, because once a fragment is appended to a DOM Node, it's children are moved
+			// and the fragment is left empty. If we cache the fragment and then append that directly to the DOM tree when rendering, there are cases where
+			// we would try to do so twice, and on the second pass the mail body will be left blank
+			fragment,
 			inlineImageCids,
 			links,
 			externalContent,
@@ -829,20 +844,22 @@ export class MailViewerViewModel {
 		await this.fileController.downloadAll(nonInlineFiles)
 	}
 
-	downloadAndOpenAttachment(file: TutanotaFile, open: boolean): void {
-		locator.fileController
-			   .downloadAndOpen(file, open)
-			   .catch(
-				   ofClass(FileOpenError, e => {
-					   console.warn("FileOpenError", e)
-					   Dialog.message("canNotOpenFileOnDevice_msg")
-				   }),
-			   )
-			   .catch(e => {
-				   const msg = e || "unknown error"
-				   console.error("could not open file:", msg)
-				   return Dialog.message("errorDuringFileOpen_msg")
-			   })
+	async downloadAndOpenAttachment(file: TutanotaFile, open: boolean) {
+		try {
+			if (open) {
+				await this.fileController.open(file)
+			} else {
+				await this.fileController.download(file)
+			}
+		} catch (e) {
+			if (e instanceof FileOpenError) {
+				console.warn("FileOpenError", e)
+				await Dialog.message("canNotOpenFileOnDevice_msg")
+			} else {
+				console.error("could not open file:", e.message ?? "unknown error")
+				await Dialog.message("errorDuringFileOpen_msg")
+			}
+		}
 	}
 
 	/** Special feature for contact forms with shared mailboxes. */

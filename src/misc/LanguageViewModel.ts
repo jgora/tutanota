@@ -12,6 +12,7 @@ export type DateTimeFormatOptions = {
 }
 const translationImportMap: Record<LanguageCode, () => Promise<any>> = {
 	ar: () => import("../translations/ar.js"),
+	be: () => import("../translations/be.js"),
 	bg: () => import("../translations/bg.js"),
 	ca: () => import("../translations/ca.js"),
 	cs: () => import("../translations/cs.js"),
@@ -66,6 +67,7 @@ const translationImportMap: Record<LanguageCode, () => Promise<any>> = {
  */
 export const LanguageNames: Record<string, TranslationKey> = Object.freeze({
 	ar: "languageArabic_label",
+	be: "languageBelarusian_label",
 	bg: "languageBulgarian_label",
 	ca: "languageCatalan_label",
 	cs: "languageCzech_label",
@@ -107,7 +109,7 @@ export const LanguageNames: Record<string, TranslationKey> = Object.freeze({
 	vi: "languageVietnamese_label",
 	zh: "languageChineseSimplified_label",
 	zh_hant: "languageChineseTraditional_label",
-})
+} as const)
 export type LanguageCode = keyof typeof LanguageNames
 export type Language = {
 	code: LanguageCode
@@ -456,7 +458,7 @@ export function getLanguageNoDefault(restrictions?: LanguageCode[]): | {code: La
 
 	if (languageTags) {
 		for (let tag of languageTags) {
-			let code = _getSubstitutedLanguageCode(tag, restrictions)
+			let code = getSubstitutedLanguageCode(tag, restrictions)
 
 			if (code) {
 				return {
@@ -496,7 +498,7 @@ export function getLanguage(
 	}
 }
 
-export function _getSubstitutedLanguageCode(tag: string, restrictions?: LanguageCode[]): LanguageCode | null {
+export function getSubstitutedLanguageCode(tag: string, restrictions?: LanguageCode[]): LanguageCode | null {
 	let code = tag.toLowerCase().replace("-", "_")
 	let language = languages.find(l => l.code === code && (restrictions == null || restrictions.indexOf(l.code) !== -1))
 
@@ -540,7 +542,7 @@ function getBasePart(code: string): string {
 }
 
 export function getAvailableLanguageCode(code: string): string {
-	return _getSubstitutedLanguageCode(code) || "en"
+	return getSubstitutedLanguageCode(code) || "en"
 }
 
 /**

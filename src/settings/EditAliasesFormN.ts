@@ -3,9 +3,8 @@ import {Dialog} from "../gui/base/Dialog"
 import type {TableAttrs, TableLineAttrs} from "../gui/base/TableN"
 import {ColumnWidth, TableN} from "../gui/base/TableN"
 import {lang, TranslationKey} from "../misc/LanguageViewModel"
-import {isTutanotaMailAddress} from "../api/common/RecipientInfo"
 import {InvalidDataError, LimitReachedError, PreconditionFailedError} from "../api/common/error/RestError"
-import {noOp} from "@tutao/tutanota-utils"
+import {firstThrow, noOp, ofClass} from "@tutao/tutanota-utils"
 import {SelectMailAddressForm, SelectMailAddressFormAttrs} from "./SelectMailAddressForm"
 import {logins} from "../api/main/LoginController"
 import {Icons} from "../gui/base/icons/Icons"
@@ -18,22 +17,17 @@ import stream from "mithril/stream"
 import {ExpanderButtonN, ExpanderPanelN} from "../gui/base/Expander"
 import {attachDropdown} from "../gui/base/DropdownN"
 import {TUTANOTA_MAIL_ADDRESS_DOMAINS} from "../api/common/TutanotaConstants"
-import type {GroupInfo} from "../api/entities/sys/GroupInfo"
-import type {MailAddressAlias} from "../api/entities/sys/MailAddressAlias"
+import type {GroupInfo, MailAddressAlias} from "../api/entities/sys/TypeRefs.js"
 import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
-import {firstThrow} from "@tutao/tutanota-utils"
-import {ofClass} from "@tutao/tutanota-utils"
 import {locator} from "../api/main/MainLocator"
 import {assertMainOrNode} from "../api/common/Env"
-import Stream from "mithril/stream";
-import {TextFieldAttrs} from "../gui/base/TextFieldN"
+import {isTutanotaMailAddress} from "../mail/model/MailUtils.js";
 
 assertMainOrNode()
 const FAILURE_USER_DISABLED = "mailaddressaliasservice.group_disabled"
 export type EditAliasesFormAttrs = {
 	userGroupInfo: GroupInfo
 	aliasCount: AliasCount
-	expanded: Stream<boolean>
 }
 type AliasCount = {
 	availableToCreate: number
@@ -41,6 +35,8 @@ type AliasCount = {
 }
 
 export class EditAliasesFormN implements Component<EditAliasesFormAttrs> {
+	private expanded: boolean = false
+
 	view(vnode: Vnode<EditAliasesFormAttrs>): Children {
 		const a = vnode.attrs
 		const addAliasButtonAttrs: ButtonAttrs = {
@@ -60,13 +56,12 @@ export class EditAliasesFormN implements Component<EditAliasesFormAttrs> {
 				m(".h4", lang.get("mailAddressAliases_label")),
 				m(ExpanderButtonN, {
 					label: "showEmailAliases_action",
-					expanded: a.expanded,
+					expanded: this.expanded,
+					onExpandedChange: (v) => this.expanded = v
 				}),
 			]),
-			m(
-				ExpanderPanelN,
-				{
-					expanded: a.expanded,
+			m(ExpanderPanelN, {
+					expanded: this.expanded,
 				},
 				m(TableN, aliasesTableAttrs),
 			),
@@ -101,20 +96,6 @@ export class EditAliasesFormN implements Component<EditAliasesFormAttrs> {
 				let formErrorId: TranslationKey | null = null
 				let formDomain = stream(firstThrow(domains))
 
-				const mailAddressFormAttrs: SelectMailAddressFormAttrs = {
-					availableDomains: domains,
-					onEmailChanged: (email, validationResult) => {
-						if (validationResult.isValid) {
-							mailAddress = email
-							formErrorId = null
-						} else {
-							formErrorId = validationResult.errorId
-						}
-					},
-					onBusyStateChanged: isBusy => (isVerificationBusy = isBusy),
-					onDomainChanged: domain => formDomain(domain),
-				}
-
 				const addEmailAliasOkAction = (dialog: Dialog) => {
 					if (isVerificationBusy) return
 
@@ -134,11 +115,21 @@ export class EditAliasesFormN implements Component<EditAliasesFormAttrs> {
 					child: {
 						view: () => {
 							return [
-								m(SelectMailAddressForm, mailAddressFormAttrs),
-								m(
-									ExpanderPanelN,
-									{
-										expanded: isTutanotaDomain,
+								m(SelectMailAddressForm, {
+									availableDomains: domains,
+									onEmailChanged: (email, validationResult) => {
+										if (validationResult.isValid) {
+											mailAddress = email
+											formErrorId = null
+										} else {
+											formErrorId = validationResult.errorId
+										}
+									},
+									onBusyStateChanged: isBusy => (isVerificationBusy = isBusy),
+									onDomainChanged: domain => formDomain(domain),
+								}),
+								m(ExpanderPanelN, {
+										expanded: isTutanotaDomain(),
 									},
 									m(".pt-m", lang.get("permanentAliasWarning_msg")),
 								),
@@ -261,6 +252,5 @@ export function createEditAliasFormAttrs(userGroupInfo: GroupInfo): EditAliasesF
 			availableToEnable: 0,
 			availableToCreate: 0,
 		},
-		expanded: stream(false),
 	}
 }

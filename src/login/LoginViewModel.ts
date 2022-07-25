@@ -1,8 +1,4 @@
-import {
-	AccessExpiredError,
-	BadRequestError,
-	NotAuthenticatedError,
-} from "../api/common/error/RestError"
+import {AccessExpiredError, BadRequestError, NotAuthenticatedError,} from "../api/common/error/RestError"
 import type {TranslationText} from "../misc/LanguageViewModel"
 import {SecondFactorHandler} from "../misc/2fa/SecondFactorHandler"
 import {getLoginErrorMessage, handleExpectedLoginError} from "../misc/LoginUtils"
@@ -18,6 +14,7 @@ import {assertMainOrNode} from "../api/common/Env"
 import {SessionType} from "../api/common/SessionType"
 import {DeviceStorageUnavailableError} from "../api/common/error/DeviceStorageUnavailableError"
 import {DatabaseKeyFactory} from "../misc/credentials/DatabaseKeyFactory"
+import {DeviceConfig} from "../misc/DeviceConfig"
 
 assertMainOrNode()
 
@@ -131,13 +128,13 @@ export class LoginViewModel implements ILoginViewModel {
 	helpText: TranslationText
 	readonly savePassword: Stream<boolean>
 	_savedInternalCredentials: Array<CredentialsInfo>
-	_autoLoginCredentials: CredentialsInfo | null
 
 	constructor(
 		private readonly loginController: LoginController,
 		private readonly credentialsProvider: ICredentialsProvider,
 		private readonly secondFactorHandler: SecondFactorHandler,
-		private readonly databaseKeyFactory: DatabaseKeyFactory
+		private readonly databaseKeyFactory: DatabaseKeyFactory,
+		private readonly deviceConfig: DeviceConfig,
 	) {
 		this.state = LoginState.NotAuthenticated
 		this.displayMode = DisplayMode.Form
@@ -148,6 +145,8 @@ export class LoginViewModel implements ILoginViewModel {
 		this.savePassword = stream(false)
 		this._savedInternalCredentials = []
 	}
+
+	_autoLoginCredentials: CredentialsInfo | null
 
 	/**
 	 * This method should be called right after creation of the view model by whoever created the viewmodel. The view model will not be
@@ -281,8 +280,14 @@ export class LoginViewModel implements ILoginViewModel {
 				const credentials = await this.credentialsProvider.getCredentialsByUserId(this._autoLoginCredentials.userId)
 
 				if (credentials) {
-					await this.loginController.resumeSession(credentials)
-					await this._onLogin()
+					const offlineTimeRange = this.deviceConfig.getOfflineTimeRangeDays(this._autoLoginCredentials.userId)
+					const result = await this.loginController.resumeSession(credentials, null, offlineTimeRange)
+					if (result.type == "success") {
+						await this._onLogin()
+					} else {
+						this.state = LoginState.NotAuthenticated
+						this.helpText = "offlineLoginPremiumOnly_msg"
+					}
 				}
 			}
 		} catch (e) {

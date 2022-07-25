@@ -29,7 +29,7 @@ import {client} from "./ClientDetector"
 import type {Params} from "mithril";
 
 /**
- * Shows warnings if the invoices is not paid or the registration is not approved yet.
+ * Shows warnings if the invoices are not paid or the registration is not approved yet.
  * @param includeInvoiceNotPaidForAdmin If true, also shows a warning for an admin if the invoice is not paid (use at login), if false does not show this warning (use when sending an email).
  * @param defaultStatus This status is used if the actual status on the customer is "0"
  * @returns True if the user may still send emails, false otherwise.
@@ -218,17 +218,13 @@ export function deleteCampaign(): void {
 	}
 }
 
+async function loadRedeemGiftCardWizard(urlHash: string): Promise<Dialog> {
+	const wizard = await import("../subscription/giftcards/RedeemGiftCardWizard")
+	return wizard.loadRedeemGiftCardWizard(urlHash)
+}
+
 export async function showGiftCardDialog(urlHash: string) {
-	const showWizardPromise = import("../subscription/giftcards/GiftCardUtils")
-		.then(({getTokenFromUrl}) => getTokenFromUrl(urlHash))
-		.then(async ([id, key]) => {
-			return locator.giftCardFacade
-						  .getGiftCardInfo(id, key)
-						  .then(giftCardInfo =>
-							  import("../subscription/giftcards/RedeemGiftCardWizard").then(wizard => wizard.loadRedeemGiftCardWizard(giftCardInfo, key)),
-						  )
-		})
-	showProgressDialog("loading_msg", showWizardPromise)
+	showProgressDialog("loading_msg", loadRedeemGiftCardWizard(urlHash))
 		.then(dialog => dialog.show())
 		.catch(e => {
 			if (e instanceof NotAuthorizedError || e instanceof NotFoundError) {

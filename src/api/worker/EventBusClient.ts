@@ -2,7 +2,6 @@ import {LoginFacadeImpl} from "./facades/LoginFacade"
 import type {MailFacade} from "./facades/MailFacade"
 import type {WorkerImpl} from "./WorkerImpl"
 import {assertWorkerOrNode, isAdminClient, isTest} from "../common/Env"
-import {_TypeModel as MailTypeModel} from "../entities/tutanota/Mail"
 import {
 	AccessBlockedError,
 	AccessDeactivatedError,
@@ -12,21 +11,26 @@ import {
 	ServiceUnavailableError,
 	SessionExpiredError,
 } from "../common/error/RestError"
-import {EntityEventBatch, EntityEventBatchTypeRef} from "../entities/sys/EntityEventBatch"
+import {
+	createWebsocketLeaderStatus,
+	EntityEventBatch,
+	EntityEventBatchTypeRef,
+	EntityUpdate,
+	WebsocketCounterData,
+	WebsocketCounterDataTypeRef,
+	WebsocketEntityData,
+	WebsocketEntityDataTypeRef,
+	WebsocketLeaderStatus,
+	WebsocketLeaderStatusTypeRef
+} from "../entities/sys/TypeRefs.js"
 import {assertNotNull, binarySearch, delay, identity, lastThrow, ofClass, randomIntFromInterval} from "@tutao/tutanota-utils"
 import {OutOfSyncError} from "../common/error/OutOfSyncError"
 import type {Indexer} from "./search/Indexer"
 import {CloseEventBusOption, GroupType, SECOND_MS} from "../common/TutanotaConstants"
-import type {WebsocketEntityData} from "../entities/sys/WebsocketEntityData"
-import {_TypeModel as WebsocketEntityDataTypeModel} from "../entities/sys/WebsocketEntityData"
 import {CancelledError} from "../common/error/CancelledError"
-import {_TypeModel as PhishingMarkerWebsocketDataTypeModel, PhishingMarkerWebsocketData} from "../entities/tutanota/PhishingMarkerWebsocketData"
-import {_TypeModel as WebsocketCounterDataTypeModel, WebsocketCounterData} from "../entities/sys/WebsocketCounterData"
-import type {EntityUpdate} from "../entities/sys/EntityUpdate"
 import {EntityClient} from "../common/EntityClient"
 import type {QueuedBatch} from "./search/EventQueue"
 import {EventQueue} from "./search/EventQueue"
-import {_TypeModel as WebsocketLeaderStatusTypeModel, createWebsocketLeaderStatus, WebsocketLeaderStatus} from "../entities/sys/WebsocketLeaderStatus"
 import {ProgressMonitorDelegate} from "./ProgressMonitorDelegate"
 import type {IProgressMonitor} from "../common/utils/ProgressMonitor"
 import {NoopProgressMonitor} from "../common/utils/ProgressMonitor"
@@ -35,6 +39,11 @@ import {InstanceMapper} from "./crypto/InstanceMapper"
 import {WsConnectionState} from "../main/WorkerClient";
 import {IEntityRestCache} from "./rest/EntityRestCache"
 import {SleepDetector} from "./utils/SleepDetector.js"
+import sysModelInfo from "../entities/sys/ModelInfo.js"
+import tutanotaModelInfo from "../entities/tutanota/ModelInfo.js"
+import {resolveTypeReference} from "../common/EntityFunctions.js"
+import {PhishingMarkerWebsocketData, PhishingMarkerWebsocketDataTypeRef} from "../entities/tutanota/TypeRefs"
+import {UserFacade} from "./facades/UserFacade"
 
 assertWorkerOrNode()
 
@@ -119,13 +128,15 @@ export class EventBusClient {
 		private readonly indexer: Indexer,
 		private readonly cache: IEntityRestCache,
 		private readonly mail: MailFacade,
-		private readonly login: LoginFacadeImpl,
+		private readonly userFacade: UserFacade,
 		private readonly entity: EntityClient,
 		private readonly instanceMapper: InstanceMapper,
 		private readonly socketFactory: (path: string) => WebSocket,
 		private readonly sleepDetector: SleepDetector,
+		private readonly loginFacade: LoginFacadeImpl,
 	) {
-		this.state = EventBusState.Automatic
+		// We are not connected by default and will not try to unless connect() is called
+		this.state = EventBusState.Terminated
 		this.lastEntityEventIds = new Map()
 		this.lastAddedBatchForGroup = new Map()
 		this.socket = null
@@ -168,27 +179,24 @@ export class EventBusClient {
 			this.progressMonitor.completed()
 		}
 
-		this.progressMonitor = connectMode === ConnectMode.Reconnect
-			? new ProgressMonitorDelegate(this.eventGroups().length + 2, this.worker)
-			: new NoopProgressMonitor()
-
+		this.progressMonitor = new ProgressMonitorDelegate(this.eventGroups().length + 2, this.worker)
 		this.progressMonitor.workDone(1)
 
 		this.state = EventBusState.Automatic
 		this.connectTimer = null
 
-		const authHeaders = this.login.createAuthHeaders()
+		const authHeaders = this.userFacade.createAuthHeaders()
 
 		// Native query building is not supported in old browser, mithril is not available in the worker
 		const authQuery =
 			"modelVersions=" +
-			WebsocketEntityDataTypeModel.version +
+			sysModelInfo.version +
 			"." +
-			MailTypeModel.version +
+			tutanotaModelInfo.version +
 			"&clientVersion=" +
 			env.versionNumber +
 			"&userId=" +
-			this.login.getLoggedInUser()._id +
+			this.userFacade.getLoggedInUser()._id +
 			"&accessToken=" +
 			authHeaders.accessToken +
 			(this.lastAntiphishingMarkersId ? "&lastPhishingMarkersId=" + this.lastAntiphishingMarkersId : "")
@@ -278,7 +286,7 @@ export class EventBusClient {
 		switch (type) {
 			case MessageType.EntityUpdate: {
 				const data: WebsocketEntityData = await this.instanceMapper.decryptAndMapToInstance(
-					WebsocketEntityDataTypeModel,
+					await resolveTypeReference(WebsocketEntityDataTypeRef),
 					JSON.parse(value),
 					null,
 				)
@@ -287,7 +295,7 @@ export class EventBusClient {
 			}
 			case MessageType.UnreadCounterUpdate: {
 				const counterData: WebsocketCounterData = await this.instanceMapper.decryptAndMapToInstance(
-					WebsocketCounterDataTypeModel,
+					await resolveTypeReference(WebsocketCounterDataTypeRef),
 					JSON.parse(value),
 					null,
 				)
@@ -296,7 +304,7 @@ export class EventBusClient {
 			}
 			case MessageType.PhishingMarkers: {
 				const data: PhishingMarkerWebsocketData = await this.instanceMapper.decryptAndMapToInstance(
-					PhishingMarkerWebsocketDataTypeModel,
+					await resolveTypeReference(PhishingMarkerWebsocketDataTypeRef),
 					JSON.parse(value),
 					null,
 				)
@@ -306,11 +314,12 @@ export class EventBusClient {
 			}
 			case MessageType.LeaderStatus:
 				const data: WebsocketLeaderStatus = await this.instanceMapper.decryptAndMapToInstance(
-					WebsocketLeaderStatusTypeModel,
+					await resolveTypeReference(WebsocketLeaderStatusTypeRef),
 					JSON.parse(value),
 					null,
 				)
-				await this.login.setLeaderStatus(data)
+				await this.userFacade.setLeaderStatus(data)
+				await this.worker.updateLeaderStatus(data)
 				break
 			default:
 				console.log("ws message with unknown type", type)
@@ -322,7 +331,7 @@ export class EventBusClient {
 		this.failedConnectionAttempts++
 		console.log("ws close event:", event, "state:", this.state)
 
-		this.login.setLeaderStatus(
+		this.userFacade.setLeaderStatus(
 			createWebsocketLeaderStatus({
 				leaderStatus: false,
 			}),
@@ -342,7 +351,7 @@ export class EventBusClient {
 			// session is expired. do not try to reconnect until the user creates a new session
 			this.state = EventBusState.Suspended
 			this.worker.updateWebSocketState(WsConnectionState.connecting)
-		} else if (this.state === EventBusState.Automatic && this.login.isLoggedIn()) {
+		} else if (this.state === EventBusState.Automatic && this.userFacade.isFullyLoggedIn()) {
 			this.worker.updateWebSocketState(WsConnectionState.connecting)
 
 			if (this.immediateReconnect) {
@@ -374,7 +383,9 @@ export class EventBusClient {
 		this.eventQueue.pause()
 
 		const existingConnection = connectMode == ConnectMode.Reconnect && this.lastEntityEventIds.size > 0
-		const p = (existingConnection) ? this.loadMissedEntityEvents() : this.initOnNewConnection()
+		const p = existingConnection
+			? this.loadMissedEntityEvents()
+			: this.initOnNewConnection()
 
 		return p
 			.then(() => {
@@ -465,6 +476,8 @@ export class EventBusClient {
 				lastIds.set(groupId, [batchId])
 				// In case we don't receive any events for the group this time we want to still download from this point next time.
 				await this.cache.setLastEntityEventBatchForGroup(groupId, batchId)
+				// We will not process any entities for this group so we consider this group "done"
+				this.progressMonitor.workDone(1)
 			}
 		}
 
@@ -473,7 +486,7 @@ export class EventBusClient {
 
 	/** Load event batches since the last time we were connected to bring cache and other things up-to-date. */
 	private async loadMissedEntityEvents(): Promise<void> {
-		if (!this.login.isLoggedIn()) {
+		if (!this.userFacade.isFullyLoggedIn()) {
 			return
 		}
 
@@ -513,12 +526,10 @@ export class EventBusClient {
 	private async checkOutOfSync() {
 		// We try to detect whether event batches have already expired.
 		// If this happened we don't need to download anything, we need to purge the cache and start all over.
-		const sinceLastUpdate = await this.cache.timeSinceLastSync()
-		if (sinceLastUpdate != null && sinceLastUpdate > ENTITY_EVENT_BATCH_EXPIRE_MS) {
-			console.log("ws cache is out of sync, purging...")
+		if (await this.cache.isOutOfSync()) {
 
 			// Allow the progress bar to complete
-			this.progressMonitor.workDone(this.eventGroups().length)
+			this.progressMonitor.completed()
 
 			// We handle it where we initialize the connection and purge the cache there.
 			throw new OutOfSyncError("some missed EntityEventBatches cannot be loaded any more")
@@ -586,7 +597,7 @@ export class EventBusClient {
 		} else if (
 			(this.socket == null || this.socket.readyState === WebSocket.CLOSED || this.socket.readyState === WebSocket.CLOSING) &&
 			this.state !== EventBusState.Terminated &&
-			this.login.isLoggedIn()
+			this.userFacade.isFullyLoggedIn()
 		) {
 			// Don't try to connect right away because connection may not be actually there
 			// see #1165
@@ -627,7 +638,7 @@ export class EventBusClient {
 		try {
 			if (this.isTerminated()) return
 			const filteredEvents = await this.cache.entityEventsReceived(batch)
-			if (!this.isTerminated()) await this.login.entityEventsReceived(filteredEvents)
+			if (!this.isTerminated()) await this.loginFacade.entityEventsReceived(filteredEvents)
 			if (!this.isTerminated()) await this.mail.entityEventsReceived(filteredEvents)
 			if (!this.isTerminated()) await this.worker.entityEventsReceived(filteredEvents, batch.groupId)
 			// Call the indexer in this last step because now the processed event is stored and the indexer has a separate event queue that
@@ -672,10 +683,10 @@ export class EventBusClient {
 	}
 
 	private eventGroups(): Id[] {
-		return this.login
+		return this.userFacade
 				   .getLoggedInUser()
 				   .memberships.filter(membership => membership.groupType !== GroupType.MailingList)
 				   .map(membership => membership.group)
-				   .concat(this.login.getLoggedInUser().userGroup.group)
+				   .concat(this.userFacade.getLoggedInUser().userGroup.group)
 	}
 }

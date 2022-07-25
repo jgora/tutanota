@@ -8,13 +8,12 @@ import {EntityRestCache} from "./rest/EntityRestCache"
 import {GroupManagementFacadeImpl} from "./facades/GroupManagementFacade"
 import {MailFacade} from "./facades/MailFacade"
 import {MailAddressFacade} from "./facades/MailAddressFacade"
-import {BlobFacade} from "./facades/BlobFacade.js"
-import {FileFacade} from "./facades/FileFacade.js"
+import {FileFacade} from "./facades/FileFacade"
 import {SearchFacade} from "./search/SearchFacade"
 import {CustomerFacadeImpl} from "./facades/CustomerFacade"
 import {CounterFacade} from "./facades/CounterFacade"
 import {EventBusClient} from "./EventBusClient"
-import {assertWorkerOrNode, getWebsocketOrigin, isAdminClient, isDesktop, isOfflineStorageAvailable} from "../common/Env"
+import {assertWorkerOrNode, getWebsocketOrigin, isAdminClient, isOfflineStorageAvailable} from "../common/Env"
 import {Const} from "../common/TutanotaConstants"
 import type {BrowserData} from "../../misc/ClientConstants"
 import {CalendarFacade} from "./facades/CalendarFacade"
@@ -35,25 +34,35 @@ import type {RsaImplementation} from "./crypto/RsaImplementation"
 import {createRsaImplementation} from "./crypto/RsaImplementation"
 import {CryptoFacade, CryptoFacadeImpl} from "./crypto/CryptoFacade"
 import {InstanceMapper} from "./crypto/InstanceMapper"
-import type {SecondFactorAuthHandler} from "../../misc/2fa/SecondFactorHandler"
 import {EphemeralCacheStorage} from "./rest/EphemeralCacheStorage"
-import {OfflineStorage} from "./rest/OfflineStorage"
-import {exposeRemote} from "../common/WorkerProxy"
 import {AdminClientRestCacheDummy} from "./rest/AdminClientRestCacheDummy"
 import {SleepDetector} from "./utils/SleepDetector.js"
 import {SchedulerImpl} from "../common/utils/Scheduler.js"
 import {WorkerDateProvider} from "./utils/WorkerDateProvider.js"
 import {LateInitializedCacheStorage, LateInitializedCacheStorageImpl} from "./rest/CacheStorageProxy"
-import {uint8ArrayToKey} from "@tutao/tutanota-crypto"
 import {IServiceExecutor} from "../common/ServiceRequest"
 import {ServiceExecutor} from "./rest/ServiceExecutor"
 import {BookingFacade} from "./facades/BookingFacade"
+import {BlobFacade} from "./facades/BlobFacade"
+import {CacheStorage} from "./rest/EntityRestCache.js"
+import {UserFacade} from "./facades/UserFacade"
+import {OfflineStorage} from "./offline/OfflineStorage.js"
+import {exposeNativeInterface} from "../common/ExposeNativeInterface"
+import {OFFLINE_STORAGE_MIGRATIONS, OfflineStorageMigrator} from "./offline/OfflineStorageMigrator.js"
+import {modelInfos} from "../common/EntityFunctions.js"
+import {FileFacadeSendDispatcher} from "../../native/common/generatedipc/FileFacadeSendDispatcher.js"
+import {NativePushFacadeSendDispatcher} from "../../native/common/generatedipc/NativePushFacadeSendDispatcher.js"
+import {NativeCryptoFacadeSendDispatcher} from "../../native/common/generatedipc/NativeCryptoFacadeSendDispatcher"
+import {random} from "@tutao/tutanota-crypto"
+import {ExportFacadeSendDispatcher} from "../../native/common/generatedipc/ExportFacadeSendDispatcher.js"
+import {assertNotNull} from "@tutao/tutanota-utils"
 
 assertWorkerOrNode()
 
 export type WorkerLocatorType = {
 	serviceExecutor: IServiceExecutor
 	login: LoginFacadeImpl
+	user: UserFacade
 	indexer: Indexer
 	cache: EntityRestInterface
 	cachingEntityClient: EntityClient
@@ -78,16 +87,16 @@ export type WorkerLocatorType = {
 	contactFormFacade: ContactFormFacade
 	deviceEncryptionFacade: DeviceEncryptionFacade
 	native: NativeInterface
-	secondFactorAuthenticationHandler: SecondFactorAuthHandler
 	rsa: RsaImplementation
 	crypto: CryptoFacade
 	instanceMapper: InstanceMapper
 	booking: BookingFacade
+	cacheStorage: CacheStorage
 }
 export const locator: WorkerLocatorType = {} as any
 
 export async function initLocator(worker: WorkerImpl, browserData: BrowserData) {
-	const getAuthHeaders = () => locator.login.createAuthHeaders()
+	locator.user = new UserFacade()
 
 	const suspensionHandler = new SuspensionHandler(worker, self)
 	locator.instanceMapper = new InstanceMapper()
@@ -95,52 +104,71 @@ export async function initLocator(worker: WorkerImpl, browserData: BrowserData) 
 	locator.restClient = new RestClient(suspensionHandler)
 	locator.serviceExecutor = new ServiceExecutor(
 		locator.restClient,
-		() => locator.login.createAuthHeaders(),
+		locator.user,
 		locator.instanceMapper,
 		() => locator.crypto,
 	)
-	const entityRestClient = new EntityRestClient(getAuthHeaders, locator.restClient, () => locator.crypto, locator.instanceMapper)
+	const entityRestClient = new EntityRestClient(locator.user, locator.restClient, () => locator.crypto, locator.instanceMapper)
 	locator._browserData = browserData
 
 	locator.native = worker
 	locator.booking = new BookingFacade(locator.serviceExecutor)
 
-	const uninitializedStorage = makeCacheStorage()
+	const offlineStorageProvider = async () => {
+		if (isOfflineStorageAvailable()) {
+			const {offlineDbFacade} = exposeNativeInterface(locator.native)
+			return new OfflineStorage(offlineDbFacade, new WorkerDateProvider(), new OfflineStorageMigrator(OFFLINE_STORAGE_MIGRATIONS, modelInfos))
+		} else {
+			return null
+		}
+	}
+
+	const maybeUninitializedStorage = isOfflineStorageAvailable()
+		? new LateInitializedCacheStorageImpl(worker, offlineStorageProvider)
+		: new AlwaysInitializedStorage()
+
+	locator.cacheStorage = maybeUninitializedStorage
+
+	const fileApp = new NativeFileApp(new FileFacadeSendDispatcher(worker), new ExportFacadeSendDispatcher(worker))
 
 	// We don't wont to cache within the admin client
-	const cache = isAdminClient() ? null : new EntityRestCache(entityRestClient, uninitializedStorage)
+	let cache: EntityRestCache | null = null
+	if (!isAdminClient()) {
+		cache = new EntityRestCache(entityRestClient, maybeUninitializedStorage)
+	}
 
 	locator.cache = cache ?? entityRestClient
 
 	locator.cachingEntityClient = new EntityClient(locator.cache)
 	locator.indexer = new Indexer(entityRestClient, worker, browserData, locator.cache as EntityRestCache)
 	const mainInterface = worker.getMainInterface()
-	locator.secondFactorAuthenticationHandler = mainInterface.secondFactorAuthenticationHandler
+
+	locator.crypto = new CryptoFacadeImpl(locator.user, locator.cachingEntityClient, locator.restClient, locator.rsa, locator.serviceExecutor)
 	locator.login = new LoginFacadeImpl(
 		worker,
 		locator.restClient,
 		/**
 		 * we don't want to try to use the cache in the login facade, because it may not be available (when no user is logged in)
 		 */
-		new EntityClient(entityRestClient),
-		locator.secondFactorAuthenticationHandler,
+		new EntityClient(locator.cache),
+		mainInterface.loginListener,
 		locator.instanceMapper,
-		() => locator.crypto,
-		uninitializedStorage.initialize.bind(uninitializedStorage),
+		locator.crypto,
+		maybeUninitializedStorage.initialize.bind(maybeUninitializedStorage),
 		locator.serviceExecutor,
+		locator.user,
 	)
-	locator.crypto = new CryptoFacadeImpl(locator.login, locator.cachingEntityClient, locator.restClient, locator.rsa, locator.serviceExecutor)
 	const suggestionFacades = [
 		locator.indexer._contact.suggestionFacade,
 		locator.indexer._groupInfo.suggestionFacade,
 		locator.indexer._whitelabelChildIndexer.suggestionFacade,
 	]
-	locator.search = new SearchFacade(locator.login, locator.indexer.db, locator.indexer._mail, suggestionFacades, browserData, locator.cachingEntityClient)
+	locator.search = new SearchFacade(locator.user, locator.indexer.db, locator.indexer._mail, suggestionFacades, browserData, locator.cachingEntityClient)
 	locator.counters = new CounterFacade(locator.serviceExecutor)
-	locator.groupManagement = new GroupManagementFacadeImpl(locator.login, locator.counters, locator.cachingEntityClient, locator.rsa, locator.serviceExecutor)
+	locator.groupManagement = new GroupManagementFacadeImpl(locator.user, locator.counters, locator.cachingEntityClient, locator.rsa, locator.serviceExecutor)
 	locator.userManagement = new UserManagementFacade(
 		worker,
-		locator.login,
+		locator.user,
 		locator.groupManagement,
 		locator.counters,
 		locator.rsa,
@@ -149,7 +177,7 @@ export async function initLocator(worker: WorkerImpl, browserData: BrowserData) 
 	)
 	locator.customer = new CustomerFacadeImpl(
 		worker,
-		locator.login,
+		locator.user,
 		locator.groupManagement,
 		locator.userManagement,
 		locator.counters,
@@ -157,17 +185,18 @@ export async function initLocator(worker: WorkerImpl, browserData: BrowserData) 
 		locator.cachingEntityClient,
 		locator.serviceExecutor,
 		locator.booking,
+		locator.crypto,
 	)
-	const fileApp = new NativeFileApp(worker)
-	const aesApp = new AesApp(worker)
-	locator.blob = new BlobFacade(locator.login, locator.serviceExecutor, locator.restClient, suspensionHandler, fileApp, aesApp, locator.instanceMapper, locator.crypto)
-	locator.file = new FileFacade(locator.login, locator.restClient, suspensionHandler, fileApp, aesApp, locator.instanceMapper, locator.serviceExecutor)
-	locator.mail = new MailFacade(locator.login, locator.file, locator.blob, locator.cachingEntityClient, locator.crypto, locator.serviceExecutor)
+	const aesApp = new AesApp(new NativeCryptoFacadeSendDispatcher(worker), random)
+	locator.blob = new BlobFacade(locator.user, locator.serviceExecutor, locator.restClient, suspensionHandler, fileApp, aesApp, locator.instanceMapper, locator.crypto)
+	locator.file = new FileFacade(locator.user, locator.restClient, suspensionHandler, fileApp, aesApp, locator.instanceMapper, locator.serviceExecutor, locator.crypto)
+	locator.mail = new MailFacade(locator.user, locator.file, locator.cachingEntityClient, locator.crypto, locator.serviceExecutor, locator.blob)
+	const nativePushFacade = new NativePushFacadeSendDispatcher(worker)
 	// not needed for admin client
-	if (cache) {
-		locator.calendar = new CalendarFacade(locator.login, locator.groupManagement, cache, worker, worker, locator.instanceMapper, locator.serviceExecutor)
+	if (!isAdminClient()) {
+		locator.calendar = new CalendarFacade(locator.user, locator.groupManagement, assertNotNull(cache), nativePushFacade, worker, locator.instanceMapper, locator.serviceExecutor, locator.crypto)
 	}
-	locator.mailAddress = new MailAddressFacade(locator.login, locator.serviceExecutor)
+	locator.mailAddress = new MailAddressFacade(locator.user, locator.serviceExecutor)
 
 	const dateProvider = new WorkerDateProvider()
 	const scheduler = new SchedulerImpl(dateProvider, self, self)
@@ -177,17 +206,18 @@ export async function initLocator(worker: WorkerImpl, browserData: BrowserData) 
 		locator.indexer,
 		cache ?? new AdminClientRestCacheDummy(),
 		locator.mail,
-		locator.login,
+		locator.user,
 		locator.cachingEntityClient,
 		locator.instanceMapper,
 		(path) => new WebSocket(getWebsocketOrigin() + path),
 		new SleepDetector(scheduler, dateProvider),
+		locator.login,
 	)
 	locator.login.init(locator.indexer, locator.eventBusClient)
 	locator.Const = Const
-	locator.share = new ShareFacade(locator.login, locator.crypto, locator.serviceExecutor)
-	locator.giftCards = new GiftCardFacadeImpl(locator.login, locator.serviceExecutor)
-	locator.configFacade = new ConfigurationDatabase(locator.login)
+	locator.share = new ShareFacade(locator.user, locator.crypto, locator.serviceExecutor, locator.cachingEntityClient)
+	locator.giftCards = new GiftCardFacadeImpl(locator.user, locator.customer, locator.serviceExecutor, locator.crypto)
+	locator.configFacade = new ConfigurationDatabase(locator.user)
 	locator.contactFormFacade = new ContactFormFacadeImpl(locator.restClient, locator.instanceMapper)
 	locator.deviceEncryptionFacade = new Aes256DeviceEncryptionFacade()
 }
@@ -201,26 +231,12 @@ if (typeof self !== "undefined") {
 	(self as unknown as WorkerGlobalScope).locator = locator // export in worker scope
 }
 
-function makeCacheStorage(): LateInitializedCacheStorage {
-	if (isOfflineStorageAvailable()) {
-		return new LateInitializedCacheStorageImpl(async (args) => {
-			if (args.persistent) {
-				const {offlineDbFacade} = exposeRemote((request) => locator.native.invokeNative(request))
-				const offlineStorage = new OfflineStorage(offlineDbFacade)
-				await offlineStorage.init(args.userId, uint8ArrayToKey(args.databaseKey))
-				return offlineStorage
-			} else {
-				return new EphemeralCacheStorage()
-			}
-		})
-	} else {
-		return new AlwaysInitializedStorage()
-	}
-}
-
 // for cases where we know offlineStorage won't be available
 class AlwaysInitializedStorage extends EphemeralCacheStorage implements LateInitializedCacheStorage {
-	async initialize(): Promise<void> {
-		// do nothing
+	async initialize(): Promise<{isPersistent: false, isNewOfflineDb: false}> {
+		return {
+			isPersistent: false,
+			isNewOfflineDb: false
+		}
 	}
 }

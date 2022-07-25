@@ -4,7 +4,7 @@ import {EventController} from "./EventController"
 import {EntropyCollector} from "./EntropyCollector"
 import {SearchModel} from "../../search/model/SearchModel"
 import {MailModel} from "../../mail/model/MailModel"
-import {assertMainOrNode, getWebRoot, isAdminClient, isBrowser, isDesktop} from "../common/Env"
+import {assertMainOrNode, assertOfflineStorageAvailable, getWebRoot, isBrowser, isDesktop, isElectronClient} from "../common/Env"
 import {notifications} from "../../gui/Notifications"
 import {logins} from "./LoginController"
 import type {ContactModel} from "../../contacts/model/ContactModel"
@@ -13,7 +13,7 @@ import {EntityClient} from "../common/EntityClient"
 import type {CalendarModel} from "../../calendar/model/CalendarModel"
 import {CalendarModelImpl} from "../../calendar/model/CalendarModel"
 import type {DeferredObject} from "@tutao/tutanota-utils"
-import {defer, downcast} from "@tutao/tutanota-utils"
+import {defer} from "@tutao/tutanota-utils"
 import {ProgressTracker} from "./ProgressTracker"
 import {MinimizedMailEditorViewModel} from "../../mail/model/MinimizedMailEditorViewModel"
 import {SchedulerImpl} from "../common/utils/Scheduler.js"
@@ -37,17 +37,15 @@ import type {DeviceEncryptionFacade} from "../worker/facades/DeviceEncryptionFac
 import {FileController} from "../../file/FileController"
 import type {NativeFileApp} from "../../native/common/FileApp"
 import type {NativePushServiceApp} from "../../native/main/NativePushServiceApp"
-import type {NativeSystemApp} from "../../native/main/NativeSystemApp"
 import type {NativeInterfaceMain} from "../../native/main/NativeInterfaceMain"
-import type {NativeInterfaces} from "./NativeInterfaceFactory"
-import {createNativeInterfaces} from "./NativeInterfaceFactory"
+import type {NativeInterfaces} from "../../native/main/NativeInterfaceFactory.js"
 import {ProgrammingError} from "../common/error/ProgrammingError"
 import {SecondFactorHandler} from "../../misc/2fa/SecondFactorHandler"
 import {IWebauthnClient, WebauthnClient} from "../../misc/2fa/webauthn/WebauthnClient"
 import {UserManagementFacade} from "../worker/facades/UserManagementFacade"
 import {GroupManagementFacade} from "../worker/facades/GroupManagementFacade"
 import {exposeRemote} from "../common/WorkerProxy"
-import {ExposedNativeInterface} from "../../native/common/NativeInterface"
+import {ExposedNativeInterface, ExposedWebInterface} from "../../native/common/NativeInterface"
 import {IWebauthn} from "../../misc/2fa/webauthn/IWebauthn.js"
 import {BrowserWebauthn} from "../../misc/2fa/webauthn/BrowserWebauthn.js"
 import {UsageTestController} from "@tutao/tutanota-usagetests"
@@ -56,6 +54,20 @@ import {deviceConfig} from "../../misc/DeviceConfig"
 import {IServiceExecutor} from "../common/ServiceRequest.js"
 import {BlobFacade} from "../worker/facades/BlobFacade"
 import {CryptoFacade} from "../worker/crypto/CryptoFacade"
+import type {InterWindowEventBus} from "../../native/common/InterWindowEventBus"
+import {RecipientsModel} from "./RecipientsModel"
+import {OfflineDbFacade} from "../../desktop/db/OfflineDbFacade"
+import {ExposedCacheStorage} from "../worker/rest/EntityRestCache.js"
+import {InterWindowEventTypes} from "../../native/common/InterWindowEventTypes"
+import {LoginListener} from "./LoginListener"
+import {SearchTextInAppFacade} from "../../native/common/generatedipc/SearchTextInAppFacade.js"
+import {SettingsFacade} from "../../native/common/generatedipc/SettingsFacade.js"
+import {MobileSystemFacade} from "../../native/common/generatedipc/MobileSystemFacade.js"
+import {CommonSystemFacade} from "../../native/common/generatedipc/CommonSystemFacade.js"
+import {DesktopSystemFacade} from "../../native/common/generatedipc/DesktopSystemFacade.js"
+import {ThemeFacade} from "../../native/common/generatedipc/ThemeFacade.js"
+import {FileControllerBrowser} from "../../file/FileControllerBrowser.js"
+import {FileControllerNative} from "../../file/FileControllerNative.js"
 
 assertMainOrNode()
 
@@ -75,7 +87,9 @@ export interface IMainLocator {
 	readonly fileController: FileController
 	readonly fileApp: NativeFileApp
 	readonly pushService: NativePushServiceApp
-	readonly systemApp: NativeSystemApp
+	readonly commonSystemFacade: CommonSystemFacade
+	readonly themeFacade: ThemeFacade
+	readonly systemFacade: MobileSystemFacade
 	readonly secondFactorHandler: SecondFactorHandler
 	readonly webauthnClient: IWebauthnClient
 	readonly loginFacade: LoginFacade
@@ -100,7 +114,14 @@ export interface IMainLocator {
 	readonly usageTestModel: UsageTestModel
 	readonly serviceExecutor: IServiceExecutor
 	readonly cryptoFacade: CryptoFacade
-
+	readonly interWindowEventBus: InterWindowEventBus<InterWindowEventTypes>
+	readonly loginListener: LoginListener
+	readonly offlineDbFacade: OfflineDbFacade
+	readonly cacheStorage: ExposedCacheStorage
+	readonly recipientsModel: RecipientsModel
+	readonly searchTextFacade: SearchTextInAppFacade
+	readonly desktopSettingsFacade: SettingsFacade
+	readonly desktopSystemFacade: DesktopSystemFacade
 	readonly init: () => Promise<void>
 	readonly initialized: Promise<void>
 }
@@ -141,8 +162,20 @@ class MainLocator implements IMainLocator {
 	usageTestModel!: UsageTestModel
 	serviceExecutor!: IServiceExecutor
 	cryptoFacade!: CryptoFacade
+	recipientsModel!: RecipientsModel
+	searchTextFacade!: SearchTextInAppFacade
+	desktopSettingsFacade!: SettingsFacade
+	desktopSystemFacade!: DesktopSystemFacade
+	cacheStorage!: ExposedCacheStorage
+	_interWindowEventBus!: InterWindowEventBus<InterWindowEventTypes>
+	loginListener!: LoginListener
 
+	/**
+	 * @deprecated
+	 */
 	private _nativeInterfaces: NativeInterfaces | null = null
+
+	private _exposedNativeInterfaces: ExposedNativeInterface | null = null
 
 	get native(): NativeInterfaceMain {
 		return this._getNativeInterface("native")
@@ -156,19 +189,47 @@ class MainLocator implements IMainLocator {
 		return this._getNativeInterface("pushService")
 	}
 
-	get systemApp(): NativeSystemApp {
-		return this._getNativeInterface("systemApp")
+	get commonSystemFacade(): CommonSystemFacade {
+		return this._getNativeInterface("commonSystemFacade")
+	}
+
+	get themeFacade(): ThemeFacade {
+		return this._getNativeInterface("themeFacade")
+	}
+
+	get systemFacade(): MobileSystemFacade {
+		return this._getNativeInterface("mobileSystemFacade")
+	}
+
+	get interWindowEventBus(): InterWindowEventBus<InterWindowEventTypes> {
+		if (!isElectronClient()) {
+			throw new ProgrammingError("Trying to use InterWindowEventBus not in electron")
+		}
+		return this._interWindowEventBus
 	}
 
 	get webauthnController(): IWebauthn {
 		const creds = navigator.credentials
-		return isDesktop() || isAdminClient()
-			? this.exposeNativeInterface().webauthn
+		return isElectronClient()
+			? this.getExposedNativeInterface().webauthn
 			: new BrowserWebauthn(creds, window.location.hostname)
 	}
 
-	exposeNativeInterface(): ExposedNativeInterface {
-		return exposeRemote<ExposedNativeInterface>((msg) => this.native.invokeNative(msg))
+	get offlineDbFacade(): OfflineDbFacade {
+		assertOfflineStorageAvailable()
+		return this.getExposedNativeInterface().offlineDbFacade
+	}
+
+	private getExposedNativeInterface(): ExposedNativeInterface {
+		if (isBrowser()) {
+			throw new ProgrammingError("Tried to access native interfaces in browser")
+		}
+
+		if (this._exposedNativeInterfaces == null) {
+			this._exposedNativeInterfaces = exposeRemote<ExposedNativeInterface>((msg) => this.native.invokeNative(msg.requestType, msg.args))
+		}
+
+		return this._exposedNativeInterfaces
 	}
 
 	_getNativeInterface<T extends keyof NativeInterfaces>(name: T): NativeInterfaces[T] {
@@ -205,10 +266,6 @@ class MainLocator implements IMainLocator {
 	}
 
 	async _createInstances() {
-		if (!isBrowser()) {
-			this._nativeInterfaces = await createNativeInterfaces()
-		}
-
 		const {
 			loginFacade,
 			customerFacade,
@@ -231,6 +288,7 @@ class MainLocator implements IMainLocator {
 			restInterface,
 			serviceExecutor,
 			cryptoFacade,
+			cacheStorage
 		} = this.worker.getWorkerInterface()
 		this.loginFacade = loginFacade
 		this.customerFacade = customerFacade
@@ -256,9 +314,46 @@ class MainLocator implements IMainLocator {
 		this.search = new SearchModel(this.searchFacade)
 		this.entityClient = new EntityClient(restInterface)
 		this.cryptoFacade = cryptoFacade
+		this.cacheStorage = cacheStorage
+
+		if (!isBrowser()) {
+			if (isElectronClient()) {
+				const {InterWindowEventBus} = await import("../../native/common/InterWindowEventBus.js")
+				this._interWindowEventBus = new InterWindowEventBus()
+			}
+			const webInterface: ExposedWebInterface = {
+				interWindowEventHandler: this._interWindowEventBus,
+			}
+
+			const {WebDesktopFacade} = await import("../../native/main/WebDesktopFacade")
+			const {WebMobileFacade} = await import("../../native/main/WebMobileFacade.js")
+			const {WebCommonNativeFacade} = await import("../../native/main/WebCommonNativeFacade.js")
+			const {createNativeInterfaces, createDesktopInterfaces} = await import("../../native/main/NativeInterfaceFactory.js")
+			this._nativeInterfaces = createNativeInterfaces(
+				webInterface,
+				new WebMobileFacade(),
+				new WebDesktopFacade(),
+				new WebCommonNativeFacade(),
+				cryptoFacade,
+				calendarFacade,
+				this.entityClient,
+			)
+
+			if (isElectronClient()) {
+				const desktopInterfaces = createDesktopInterfaces(this.native)
+				this.searchTextFacade = desktopInterfaces.searchTextFacade
+				this.interWindowEventBus.init(this.getExposedNativeInterface().interWindowEventSender)
+				if (isDesktop()) {
+					this.desktopSettingsFacade = desktopInterfaces.desktopSettingsFacade
+					this.desktopSystemFacade = desktopInterfaces.desktopSystemFacade
+				}
+			}
+		}
+
 		this.webauthnClient = new WebauthnClient(this.webauthnController, getWebRoot())
 		this.secondFactorHandler = new SecondFactorHandler(this.eventController, this.entityClient, this.webauthnClient, this.loginFacade)
-		this.credentialsProvider = await createCredentialsProvider(deviceEncryptionFacade, this._nativeInterfaces?.native ?? null)
+		this.loginListener = new LoginListener(this.secondFactorHandler)
+		this.credentialsProvider = await createCredentialsProvider(deviceEncryptionFacade, this._nativeInterfaces?.native ?? null, isDesktop() ? this.interWindowEventBus : null)
 		this.mailModel = new MailModel(notifications, this.eventController, this.worker, this.mailFacade, this.entityClient)
 		this.usageTestModel = new UsageTestModel(
 			deviceConfig, {
@@ -270,7 +365,7 @@ class MainLocator implements IMainLocator {
 				},
 			},
 			this.serviceExecutor,
-			)
+		)
 
 		const lazyScheduler = async () => {
 			const {AlarmSchedulerImpl} = await import("../../calendar/date/AlarmScheduler")
@@ -279,7 +374,10 @@ class MainLocator implements IMainLocator {
 			return new AlarmSchedulerImpl(dateProvider, new SchedulerImpl(dateProvider, window, window))
 		}
 
-		this.fileController = new FileController(this._nativeInterfaces?.fileApp ?? null, blobFacade, fileFacade)
+		this.fileController = this._nativeInterfaces == null
+			? new FileControllerBrowser(blobFacade, fileFacade)
+			: new FileControllerNative(this._nativeInterfaces.fileApp, blobFacade, fileFacade)
+
 		this.calendarModel = new CalendarModelImpl(
 			notifications,
 			lazyScheduler,
@@ -295,6 +393,7 @@ class MainLocator implements IMainLocator {
 		this.contactModel = new ContactModelImpl(this.searchFacade, this.entityClient, logins)
 		this.minimizedMailModel = new MinimizedMailEditorViewModel()
 		this.usageTestController = new UsageTestController(this.usageTestModel)
+		this.recipientsModel = new RecipientsModel(this.contactModel, logins, this.mailFacade, this.entityClient)
 	}
 }
 
@@ -302,30 +401,4 @@ export const locator: IMainLocator = new MainLocator()
 
 if (typeof window !== "undefined") {
 	window.tutao.locator = locator
-}
-
-// It is critical to accept new locator here because locator is used in a lot of places and calculating all the dependencies is very
-// slow during HMR.
-// HMR is not meant for changing models so if there is a big change then you are better off reloading but this will work with simple
-// method implementation swapping.
-// @ts-ignore
-const hot = typeof module !== "undefined" && module.hot
-
-if (hot) {
-	hot.accept(async () => {
-		// This should be there already
-		await locator.initialized
-		const worker = locator.worker
-
-		// Import this module again and init the locator. If someone just imports it they will get a new one
-		const newLocator = require(module.id).locator
-
-		newLocator.worker = worker
-		await newLocator._createInstances(worker)
-
-		// This will patch old instances to use new classes, this is when instances are already injected
-		for (const key of Object.getOwnPropertyNames(newLocator)) {
-			Object.setPrototypeOf(downcast(locator)[key], Object.getPrototypeOf(newLocator[key]))
-		}
-	})
 }

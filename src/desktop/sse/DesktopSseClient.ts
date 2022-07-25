@@ -1,37 +1,24 @@
 import type {App} from "electron"
 import type {TimeoutSetter} from "@tutao/tutanota-utils"
-import {
-	base64ToBase64Url,
-	filterInt,
-	neverNull,
-	randomIntFromInterval,
-	remove,
-	stringToUtf8Uint8Array,
-	uint8ArrayToBase64
-} from "@tutao/tutanota-utils"
+import {base64ToBase64Url, filterInt, neverNull, randomIntFromInterval, remove, stringToUtf8Uint8Array, uint8ArrayToBase64} from "@tutao/tutanota-utils"
 import type {DesktopNotifier} from "../DesktopNotifier"
+import {NotificationResult} from "../DesktopNotifier";
 import type {WindowManager} from "../DesktopWindowManager"
 import type {DesktopConfig} from "../config/DesktopConfig"
 import {FileNotFoundError} from "../../api/common/error/FileNotFoundError"
-import type {DesktopAlarmScheduler, EncryptedAlarmNotification} from "./DesktopAlarmScheduler"
+import type {NativeAlarmScheduler} from "./DesktopAlarmScheduler"
 import type {DesktopNetworkClient} from "../DesktopNetworkClient"
-import {DesktopCryptoFacade} from "../DesktopCryptoFacade"
-import {_TypeModel as MissedNotificationTypeModel} from "../../api/entities/sys/MissedNotification"
+import {DesktopNativeCryptoFacade} from "../DesktopNativeCryptoFacade"
+import {typeModels} from "../../api/entities/sys/TypeModels"
 import type {DesktopAlarmStorage} from "./DesktopAlarmStorage"
 import type {LanguageViewModelType} from "../../misc/LanguageViewModel"
-import type {NotificationInfo} from "../../api/entities/sys/NotificationInfo"
-import {
-	handleRestError,
-	NotAuthenticatedError,
-	NotAuthorizedError,
-	ServiceUnavailableError,
-	TooManyRequestsError
-} from "../../api/common/error/RestError"
+import type {NotificationInfo} from "../../api/entities/sys/TypeRefs.js"
+import {handleRestError, NotAuthenticatedError, NotAuthorizedError, ServiceUnavailableError, TooManyRequestsError} from "../../api/common/error/RestError"
 import {TutanotaError} from "../../api/common/error/TutanotaError"
 import {log} from "../DesktopLog"
 import {BuildConfigKey, DesktopConfigEncKey, DesktopConfigKey} from "../config/ConfigKeys"
-import {NotificationResult} from "../DesktopNotifier";
 import http from "http";
+import {EncryptedAlarmNotification} from "../../native/common/EncryptedAlarmNotification.js"
 
 export type SseInfo = {
 	identifier: string
@@ -45,12 +32,12 @@ export class DesktopSseClient {
 	private readonly _conf: DesktopConfig
 	private readonly _wm: WindowManager
 	private readonly _notifier: DesktopNotifier
-	private readonly _alarmScheduler: DesktopAlarmScheduler
+	private readonly _alarmScheduler: NativeAlarmScheduler
 	private readonly _net: DesktopNetworkClient
 	private readonly _alarmStorage: DesktopAlarmStorage
 	private readonly _delayHandler: TimeoutSetter
 	private readonly _lang: LanguageViewModelType
-	private readonly _crypto: DesktopCryptoFacade
+	private readonly _crypto: DesktopNativeCryptoFacade
 	private _connectedSseInfo: SseInfo | null = null
 	private _connection: http.ClientRequest | null = null
 	_readTimeoutInSeconds!: number
@@ -67,9 +54,9 @@ export class DesktopSseClient {
 		conf: DesktopConfig,
 		notifier: DesktopNotifier,
 		wm: WindowManager,
-		alarmScheduler: DesktopAlarmScheduler,
+		alarmScheduler: NativeAlarmScheduler,
 		net: DesktopNetworkClient,
-		desktopCrypto: DesktopCryptoFacade,
+		desktopCrypto: DesktopNativeCryptoFacade,
 		alarmStorage: DesktopAlarmStorage,
 		lang: LanguageViewModelType,
 		delayHandler: TimeoutSetter = setTimeout,
@@ -196,7 +183,7 @@ export class DesktopSseClient {
 									   Connection: "Keep-Alive",
 									   "Keep-Alive": "header",
 									   Accept: "text/event-stream",
-									   v: MissedNotificationTypeModel.version,
+									   v: typeModels.MissedNotification.version,
 									   cv: this._app.getVersion(),
 								   },
 								   method: "GET",
@@ -210,11 +197,11 @@ export class DesktopSseClient {
 		})
 			.on("response", async res => {
 				this._reconnectAttempts = 1
-				log.debug("established SSE connection")
+				log.debug("established SSE connection with code", res.statusCode)
 
-				if (res.statusCode === 403) {
+				if (res.statusCode === 403 || res.statusCode === 401) {
 					// invalid userids
-					log.debug("sse: got NotAuthenticated, deleting userId")
+					log.debug("sse: got NotAuthenticated or NotAuthorized, deleting userId")
 					const sseInfo = await this._removeUserId(userId)
 
 					// If we don't remove _connectedSseInfo then timeout loop will restart connection automatiicaly
@@ -306,6 +293,7 @@ export class DesktopSseClient {
 				.then(() => this._reschedule())
 				.catch(async e => {
 					if (e instanceof NotAuthenticatedError || e instanceof NotAuthorizedError) {
+						log.error("Not authorized or not authenticated")
 						// Reset the queue so that the previous error will not be handled again
 						await this._removeUserId(userId)
 						this._handlingPushMessage = Promise.resolve()
@@ -442,7 +430,7 @@ export class DesktopSseClient {
 			log.debug("downloading missed notification")
 			const headers: Record<string, string> = {
 				userIds: userId,
-				v: MissedNotificationTypeModel.version,
+				v: typeModels.MissedNotification.version,
 				cv: this._app.getVersion(),
 			}
 			const lastProcessedId = await this._conf.getVar(DesktopConfigKey.lastProcessedNotificationId)

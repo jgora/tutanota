@@ -9,13 +9,10 @@ import {assertWorkerOrNode, isMainOrNode} from "../common/Env"
 import type {ContactFormFacade} from "./facades/ContactFormFacade"
 import type {BrowserData} from "../../misc/ClientConstants"
 import type {InfoMessage} from "../common/CommonTypes"
-import {CryptoFacade, resolveSessionKey} from "./crypto/CryptoFacade"
+import {CryptoFacade} from "./crypto/CryptoFacade"
 import {delay} from "@tutao/tutanota-utils"
-import type {EntityUpdate} from "../entities/sys/EntityUpdate"
-import type {WebsocketCounterData} from "../entities/sys/WebsocketCounterData"
+import type {EntityUpdate, User, WebsocketCounterData, WebsocketLeaderStatus} from "../entities/sys/TypeRefs.js"
 import type {ProgressMonitorId} from "../common/utils/ProgressMonitor"
-import type {WebsocketLeaderStatus} from "../entities/sys/WebsocketLeaderStatus"
-import type {User} from "../entities/sys/User"
 import {urlify} from "./Urlifier"
 import type {GiftCardFacade} from "./facades/GiftCardFacade"
 import type {LoginFacade} from "./facades/LoginFacade"
@@ -37,12 +34,13 @@ import type {DeviceEncryptionFacade} from "./facades/DeviceEncryptionFacade"
 import type {EntropySource} from "@tutao/tutanota-crypto"
 import {aes256RandomKey, keyToBase64, random} from "@tutao/tutanota-crypto"
 import type {NativeInterface} from "../../native/common/NativeInterface"
-import type {SecondFactorAuthHandler} from "../../misc/2fa/SecondFactorHandler"
 import type {EntityRestInterface} from "./rest/EntityRestClient"
 import {WsConnectionState} from "../main/WorkerClient";
 import {RestClient} from "./rest/RestClient"
 import {IServiceExecutor} from "../common/ServiceRequest.js"
 import {BlobFacade} from "./facades/BlobFacade"
+import {ExposedCacheStorage} from "./rest/EntityRestCache.js"
+import {ILoginListener} from "../main/LoginListener"
 
 assertWorkerOrNode()
 
@@ -69,11 +67,12 @@ export interface WorkerInterface {
 	readonly restInterface: EntityRestInterface
 	readonly serviceExecutor: IServiceExecutor
 	readonly cryptoFacade: CryptoFacade
+	readonly cacheStorage: ExposedCacheStorage
 }
 
 /** Interface for the "main"/webpage context of the app, interface for the worker client. */
 export interface MainInterface {
-	readonly secondFactorAuthenticationHandler: SecondFactorAuthHandler
+	readonly loginListener: ILoginListener
 }
 
 type WorkerRequest = Request<WorkerRequestType>
@@ -205,10 +204,12 @@ export class WorkerImpl implements NativeInterface {
 			get serviceExecutor() {
 				return locator.serviceExecutor
 			},
-
 			get cryptoFacade() {
 				return locator.crypto
 			},
+			get cacheStorage() {
+				return locator.cacheStorage
+			}
 		}
 	}
 
@@ -239,7 +240,7 @@ export class WorkerImpl implements NativeInterface {
 				const args = message.args as Parameters<RestClient["request"]>
 				let [path, method, options] = args
 				options = options ?? {}
-				options.headers = {...locator.login.createAuthHeaders(), ...options.headers}
+				options.headers = {...locator.user.createAuthHeaders(), ...options.headers}
 				return locator.restClient.request(path, method, options)
 			},
 			entropy: (message: WorkerRequest) => {
@@ -262,9 +263,6 @@ export class WorkerImpl implements NativeInterface {
 				locator.eventBusClient.close(message.args[0])
 				return Promise.resolve()
 			},
-			resolveSessionKey: (message: WorkerRequest) => {
-				return resolveSessionKey.apply(null, message.args).then((sk: BitArray) => (sk ? keyToBase64(sk) : null))
-			},
 			getLog: () => {
 				const global = self as any
 
@@ -282,8 +280,8 @@ export class WorkerImpl implements NativeInterface {
 		}
 	}
 
-	invokeNative(msg: Request<NativeRequestType>): Promise<any> {
-		return this._dispatcher.postRequest(new Request("execNative", [msg.requestType, msg.args]))
+	invokeNative(requestType: string, args: ReadonlyArray<unknown>): Promise<any> {
+		return this._dispatcher.postRequest(new Request("execNative", [requestType, args]))
 	}
 
 	getMainInterface(): MainInterface {
@@ -358,9 +356,5 @@ export class WorkerImpl implements NativeInterface {
 
 	updateLeaderStatus(status: WebsocketLeaderStatus): Promise<void> {
 		return this._dispatcher.postRequest(new Request("updateLeaderStatus", [status]))
-	}
-
-	writeIndexerDebugLog(reason: string, user: User): Promise<void> {
-		return this._dispatcher.postRequest(new Request("writeIndexerDebugLog", [reason, user]))
 	}
 }

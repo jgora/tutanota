@@ -3,31 +3,18 @@ import stream from "mithril/stream"
 import {Dialog, DialogType} from "../../gui/base/Dialog"
 import type {TableLineAttrs} from "../../gui/base/TableN"
 import {ColumnWidth, TableN} from "../../gui/base/TableN"
-import {assert, assertNotNull, downcast, neverNull, ofClass, remove} from "@tutao/tutanota-utils"
+import {assert, assertNotNull, downcast, findAndRemove, neverNull, remove} from "@tutao/tutanota-utils"
 import {Icons} from "../../gui/base/icons/Icons"
 import {lang} from "../../misc/LanguageViewModel"
-import {Bubble, BubbleTextField} from "../../gui/base/BubbleTextField"
-import {RecipientInfoBubbleHandler} from "../../misc/RecipientInfoBubbleHandler"
-import {createRecipientInfo, getDisplayText, resolveRecipientInfoContact} from "../../mail/model/MailUtils"
-import type {DropdownChildAttrs} from "../../gui/base/DropdownN"
-import {attachDropdown} from "../../gui/base/DropdownN"
+import {getDisplayText} from "../../mail/model/MailUtils"
 import {ButtonType} from "../../gui/base/ButtonN"
 import {showProgressDialog} from "../../gui/dialogs/ProgressDialog"
 import {ShareCapability} from "../../api/common/TutanotaConstants"
 import {DropDownSelectorN} from "../../gui/base/DropDownSelectorN"
 import {PreconditionFailedError, TooManyRequestsError} from "../../api/common/error/RestError"
 import {TextFieldN} from "../../gui/base/TextFieldN"
-import type {GroupInfo} from "../../api/entities/sys/GroupInfo"
-import type {Contact} from "../../api/entities/tutanota/Contact"
-import type {RecipientInfo} from "../../api/common/RecipientInfo"
-import {
-	getCapabilityText,
-	getMemberCabability,
-	getSharedGroupName,
-	hasCapabilityOnGroup,
-	isShareableGroupType,
-	isSharedGroupOwner
-} from "../GroupUtils"
+import type {GroupInfo} from "../../api/entities/sys/TypeRefs.js"
+import {getCapabilityText, getMemberCabability, getSharedGroupName, hasCapabilityOnGroup, isShareableGroupType, isSharedGroupOwner} from "../GroupUtils"
 import {sendShareNotificationEmail} from "../GroupSharingUtils"
 import {GroupSharingModel} from "../model/GroupSharingModel"
 import {logins} from "../../api/main/LoginController"
@@ -37,9 +24,9 @@ import {showUserError} from "../../misc/ErrorHandlerImpl"
 import {getConfirmation} from "../../gui/base/GuiUtils"
 import type {GroupSharingTexts} from "../GroupGuiUtils"
 import {getTextsForGroupType} from "../GroupGuiUtils"
-import Stream from "mithril/stream";
-// the maximum number of BTF suggestions so the suggestions dropdown does not overflow the dialog
-const SHOW_CONTACT_SUGGESTIONS_MAX = 3
+import {ResolvableRecipient, ResolveMode} from "../../api/main/RecipientsModel"
+import {MailRecipientsTextField} from "../../gui/MailRecipientsTextField.js"
+import {getRecipientsSearchModel} from "../../misc/RecipientsSearchModel.js"
 
 export function showGroupSharingDialog(groupInfo: GroupInfo, allowGroupNameOverride: boolean) {
 	const groupType = downcast(assertNotNull(groupInfo.groupType))
@@ -55,18 +42,18 @@ export function showGroupSharingDialog(groupInfo: GroupInfo, allowGroupNameOverr
 			locator.mailFacade,
 			locator.shareFacade,
 			locator.groupManagementFacade,
+			locator.recipientsModel,
 		),
 	).then(model => {
 		model.onEntityUpdate.map(m.redraw.bind(m))
-		const contentAttrs: GroupSharingDialogAttrs = {
-			model,
-			allowGroupNameOverride,
-			texts,
-		}
 		Dialog.showActionDialog({
 			title: lang.get("sharing_label"),
 			type: DialogType.EditMedium,
-			child: () => m(GroupSharingDialogContent, contentAttrs),
+			child: () => m(GroupSharingDialogContent, {
+				model,
+				allowGroupNameOverride,
+				texts,
+			}),
 			okAction: null,
 			cancelAction: () => model.dispose(),
 			cancelActionTextId: "close_alt",
@@ -154,64 +141,52 @@ class GroupSharingDialogContent implements Component<GroupSharingDialogAttrs> {
 			}
 		})
 	}
-} // This is a separate function because "this" inside bubble handler object is "any"
-
-function _createBubbleContextButtons(bubbles: Array<Bubble<RecipientInfo>>, name: string, mailAddress: string): Array<DropdownChildAttrs> {
-	let buttonAttrs: Array<DropdownChildAttrs> = [
-		{
-			info: mailAddress,
-			center: false,
-			bold: false,
-		},
-	]
-	buttonAttrs.push({
-		label: "remove_action",
-		type: ButtonType.Secondary,
-		click: () => {
-			const bubbleToRemove = bubbles.find(bubble => bubble.entity.mailAddress === mailAddress)
-
-			if (bubbleToRemove) {
-				remove(bubbles, bubbleToRemove)
-			}
-		},
-	})
-	return buttonAttrs
 }
 
-function showAddParticipantDialog(model: GroupSharingModel, texts: GroupSharingTexts) {
-	const bubbleHandler = new RecipientInfoBubbleHandler(
-		{
-			createBubble(name: string | null, mailAddress: string, contact: Contact | null): Bubble<RecipientInfo> {
-				let recipientInfo = createRecipientInfo(mailAddress, name, contact)
-				recipientInfo.resolveContactPromise = resolveRecipientInfoContact(recipientInfo, locator.contactModel, logins.getUserController().user)
-				let bubbleWrapper = {}
-
-				const childAttrs = () => _createBubbleContextButtons(invitePeopleValueTextField.bubbles, recipientInfo.name, mailAddress)
-
-				const buttonAttrs = attachDropdown(
-					{
-                        mainButtonAttrs: {
-                            label: () => getDisplayText(recipientInfo.name, mailAddress, false),
-                            type: ButtonType.TextBubble,
-                            isSelected: () => false,
-                        }, childAttrs: childAttrs
-                    },
-				)
-				return new Bubble(recipientInfo, neverNull(buttonAttrs), mailAddress)
-			},
-		},
-		locator.contactModel,
-		SHOW_CONTACT_SUGGESTIONS_MAX,
-	)
-	const invitePeopleValueTextField = new BubbleTextField<RecipientInfo>("shareWithEmailRecipient_label", bubbleHandler)
-	const capability: Stream<ShareCapability> = stream(ShareCapability.Read)
+async function showAddParticipantDialog(model: GroupSharingModel, texts: GroupSharingTexts) {
+	const recipientsText = stream("")
+	const recipients = [] as Array<ResolvableRecipient>
+	const capability = stream<ShareCapability>(ShareCapability.Read)
 	const realGroupName = getSharedGroupName(model.info, false)
 	const customGroupName = getSharedGroupName(model.info, true)
+
+	const search = await getRecipientsSearchModel()
+
 	let dialog = Dialog.showActionDialog({
 		type: DialogType.EditMedium,
 		title: () => lang.get("addParticipant_action"),
 		child: () => [
-			m(".rel", m(invitePeopleValueTextField)),
+			m(".rel", m(MailRecipientsTextField, {
+				label: "shareWithEmailRecipient_label",
+				text: recipientsText(),
+				recipients: recipients,
+				disabled: false,
+				getRecipientClickedDropdownAttrs: async address => [
+					{
+						info: address,
+						center: false,
+						bold: false,
+					},
+					{
+						label: "remove_action",
+						type: ButtonType.Secondary,
+						click: () => {
+							const bubbleToRemove = recipients.find(recipient => recipient.address === address)
+							if (bubbleToRemove) {
+								remove(recipients, bubbleToRemove)
+							}
+						},
+					}
+				],
+				onRecipientAdded: (address, name, contact) => recipients.push(
+					locator.recipientsModel.resolve({address, name, contact}, ResolveMode.Eager)
+						   .whenResolved(() => m.redraw())
+				),
+				onRecipientRemoved: address => findAndRemove(recipients, recipient => recipient.address === address),
+				onTextChanged: recipientsText,
+				search,
+				maxSuggestionsToShow: 3
+			})),
 			m(DropDownSelectorN, {
 				label: "permissions_label",
 				items: [
@@ -228,11 +203,12 @@ function showAddParticipantDialog(model: GroupSharingModel, texts: GroupSharingT
 						value: ShareCapability.Read,
 					},
 				],
-				selectedValue: capability,
+				selectedValue: capability(),
+				selectionChangedHandler: capability,
 				dropdownWidth: 300,
 			}),
 			m(TextFieldN, {
-				value: stream(realGroupName),
+				value: realGroupName,
 				label: texts.groupNameLabel,
 				disabled: true,
 				helpLabel: () => {
@@ -241,41 +217,40 @@ function showAddParticipantDialog(model: GroupSharingModel, texts: GroupSharingT
 			}),
 			m(".pt", texts.addMemberMessage(customGroupName || realGroupName)),
 		],
-		okAction: () => {
-			invitePeopleValueTextField.createBubbles()
-
-			if (invitePeopleValueTextField.bubbles.length === 0) {
+		okAction: async () => {
+			if (recipients.length === 0) {
 				return Dialog.message("noRecipients_msg")
-			} else {
-				const recipients = invitePeopleValueTextField.bubbles.map(b => b.entity)
-				return import("../../misc/SubscriptionDialogs")
-					.then(SubscriptionDialogUtils => SubscriptionDialogUtils.checkPremiumSubscription(false))
-					.then(ok => {
-						if (ok) {
-							showProgressDialog("calendarInvitationProgress_msg", model.sendGroupInvitation(model.info, recipients, capability()))
-								.then(invitedMailAddresses => {
-									dialog.close()
-									sendShareNotificationEmail(
-										model.info,
-										invitedMailAddresses.map(ma => createRecipientInfo(ma.address, null, null)),
-										texts,
-									)
-								})
-								.catch(
-									ofClass(PreconditionFailedError, e => {
-										if (logins.getUserController().isGlobalAdmin()) {
-											getConfirmation(() => texts.sharingNotOrderedAdmin).confirmed(() =>
-												import("../../subscription/BuyDialog").then(BuyDialog => BuyDialog.showSharingBuyDialog(true)),
-											)
-										} else {
-											Dialog.message(() => `${texts.sharingNotOrderedUser} ${lang.get("contactAdmin_msg")}`)
-										}
-									}),
-								)
-								.catch(ofClass(UserError, showUserError))
-								.catch(ofClass(TooManyRequestsError, e => Dialog.message("tooManyAttempts_msg")))
+			}
+
+			const {checkPremiumSubscription} = await import("../../misc/SubscriptionDialogs")
+			if (await checkPremiumSubscription(false)) {
+				try {
+					const invitedMailAddresses = await showProgressDialog("calendarInvitationProgress_msg", model.sendGroupInvitation(model.info, recipients, capability()))
+					dialog.close()
+					await sendShareNotificationEmail(
+						model.info,
+						invitedMailAddresses,
+						texts,
+					)
+				} catch (e) {
+
+					if (e instanceof PreconditionFailedError) {
+						if (logins.getUserController().isGlobalAdmin()) {
+							if (await Dialog.confirm(() => texts.sharingNotOrderedAdmin)) {
+								const {showSharingBuyDialog} = await import("../../subscription/BuyDialog")
+								showSharingBuyDialog(true)
+							}
+						} else {
+							Dialog.message(() => `${texts.sharingNotOrderedUser} ${lang.get("contactAdmin_msg")}`)
 						}
-					})
+					} else if (e instanceof UserError) {
+						showUserError(e)
+					} else if (e instanceof TooManyRequestsError) {
+						Dialog.message("tooManyAttempts_msg")
+					} else {
+						throw e
+					}
+				}
 			}
 		},
 		okActionTextId: "invite_alt",

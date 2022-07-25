@@ -16,7 +16,7 @@ import {
 	SpamRuleType,
 	TabIndex,
 } from "../../api/common/TutanotaConstants"
-import type {File as TutanotaFile} from "../../api/entities/tutanota/File"
+import type {File as TutanotaFile, Mail} from "../../api/entities/tutanota/TypeRefs.js"
 import {InfoLink, lang} from "../../misc/LanguageViewModel"
 import {assertMainOrNode, isAndroidApp, isDesktop, isIOSApp} from "../../api/common/Env"
 import {Dialog} from "../../gui/base/Dialog"
@@ -52,7 +52,6 @@ import {styles} from "../../gui/styles"
 import {attachDropdown, createAsyncDropdown, createDropdown, showDropdownAtPosition} from "../../gui/base/DropdownN"
 import {navButtonRoutes} from "../../misc/RouteChange"
 import {RecipientButton} from "../../gui/base/RecipientButton"
-import type {Mail} from "../../api/entities/tutanota/Mail"
 import {EventBanner} from "./EventBanner"
 import type {InlineImageReference} from "./MailGuiUtils"
 import {moveMails, promptAndDeleteMails, replaceCidsWithInlineImages} from "./MailGuiUtils"
@@ -62,7 +61,7 @@ import {createMoreSecondaryButtonAttrs, getCoordsOfMouseOrTouchEvent, ifAllowedT
 import {copyToClipboard} from "../../misc/ClipboardUtils";
 import {ContentBlockingStatus, MailViewerViewModel} from "./MailViewerViewModel"
 import {getListId} from "../../api/common/utils/EntityUtils"
-import {createEmailSenderListElement} from "../../api/entities/sys/EmailSenderListElement"
+import {createEmailSenderListElement} from "../../api/entities/sys/TypeRefs.js"
 import {checkApprovalStatus} from "../../misc/LoginUtils"
 import {UserError} from "../../api/main/UserError"
 import {showUserError} from "../../misc/ErrorHandlerImpl"
@@ -70,14 +69,11 @@ import {animations, DomMutation, scroll} from "../../gui/animation/Animations"
 import {ease} from "../../gui/animation/Easing"
 import {isNewMailActionAvailable} from "../../gui/nav/NavFunctions"
 import {CancelledError} from "../../api/common/error/CancelledError"
+import {ProgrammingError} from "../../api/common/error/ProgrammingError.js"
 
 assertMainOrNode()
 // map of inline image cid to InlineImageReference
 export type InlineImages = Map<string, InlineImageReference>
-// synthetic events are fired in code to distinguish between double and single click events
-type MaybeSyntheticEvent = TouchEvent & {
-	synthetic?: boolean
-}
 
 const SCROLL_FACTOR = 4 / 5
 const DOUBLE_TAP_TIME_MS = 350
@@ -131,6 +127,9 @@ export class MailViewer implements Component<MailViewerAttrs> {
 
 	private domBodyDeferred: DeferredObject<HTMLElement> = defer()
 	private domBody: HTMLElement | null = null
+
+	private shadowDomRoot: ShadowRoot | null = null
+	private currentlyRenderedMailBody: DocumentFragment | null = null
 
 	constructor(vnode: Vnode<MailViewerAttrs>) {
 		this.setViewModel(vnode.attrs.viewModel)
@@ -236,10 +235,8 @@ export class MailViewer implements Component<MailViewerAttrs> {
 						]),
 						m(
 							".mb-m",
-							m(
-								ExpanderPanelN,
-								{
-									expanded: this.detailsExpanded,
+							m(ExpanderPanelN, {
+									expanded: this.detailsExpanded(),
 								},
 								this.renderDetails({bubbleMenuWidth: 300}),
 							),
@@ -293,32 +290,8 @@ export class MailViewer implements Component<MailViewerAttrs> {
 						(client.isMobileDevice() ? "" : ".scroll-no-overlay") +
 						(this.viewModel.isContrastFixNeeded() ? ".bg-white.content-black" : " "),
 						{
-							ontouchstart: (event: EventRedraw<TouchEvent>) => {
-								event.redraw = false
-								const touch = event.touches[0]
-								this.lastTouchStart.x = touch.clientX
-								this.lastTouchStart.y = touch.clientY
-								this.lastTouchStart.time = Date.now()
-							},
 							oncreate: (vnode) => {
 								this.scrollDom = vnode.dom as HTMLElement
-							},
-							ontouchend: (event: EventRedraw<TouchEvent>) => {
-								if (client.isMobileDevice()) {
-									this.handleDoubleTap(
-										event,
-										e => this.handleAnchorClick(e, true),
-										() => this.rescale(true),
-									)
-								}
-
-								// Avoid redraws for this event listener, we don't need it for either opening links or rescaling
-								event.redraw = false
-							},
-							onclick: (event: MouseEvent) => {
-								if (!client.isMobileDevice()) {
-									this.handleAnchorClick(event, false)
-								}
 							},
 						},
 						this.renderMailBodySection(),
@@ -352,20 +325,18 @@ export class MailViewer implements Component<MailViewerAttrs> {
 		}
 	}
 
-	private renderMailBody(sanitizedMailBody: string): Children {
-		return m(
-			"#mail-body.selectable.touch-callout.break-word-links" + (client.isMobileDevice() ? ".break-pre" : ""),
+	private renderMailBody(sanitizedMailBody: DocumentFragment): Children {
+		return m("#mail-body",
 			{
 				oncreate: vnode => {
 					const dom = vnode.dom as HTMLElement
-
 					this.setDomBody(dom)
 					this.updateLineHeight(dom)
 					this.rescale(false)
+					this.renderShadowMailBody(sanitizedMailBody)
 				},
 				onupdate: vnode => {
 					const dom = vnode.dom as HTMLElement
-
 					this.setDomBody(dom)
 
 					// Only measure and update line height once.
@@ -376,6 +347,7 @@ export class MailViewer implements Component<MailViewerAttrs> {
 					}
 
 					this.rescale(false)
+					this.renderShadowMailBody(sanitizedMailBody)
 				},
 				onbeforeremove: () => {
 					// Clear dom body in case there will be a new one, we want promise to be up-to-date
@@ -391,17 +363,65 @@ export class MailViewer implements Component<MailViewerAttrs> {
 					"line-height": this.bodyLineHeight ? this.bodyLineHeight.toString() : size.line_height,
 					"transform-origin": "top left",
 				},
-			},
-			m.trust(sanitizedMailBody),
+			}
 		)
+	}
+
+	/**
+	 * manually wrap and style a mail body to display correctly inside a shadow root
+	 * @param sanitizedMailBody the mail body to display
+	 * @private
+	 */
+	private renderShadowMailBody(sanitizedMailBody: DocumentFragment) {
+		if (this.currentlyRenderedMailBody === sanitizedMailBody) return
+		assertNonNull(this.shadowDomRoot)
+		while (this.shadowDomRoot.firstChild) {
+			this.shadowDomRoot.firstChild.remove()
+		}
+		const wrapNode = document.createElement("div")
+		wrapNode.className = "selectable touch-callout break-word-links" + (client.isMobileDevice() ? " break-pre" : "")
+		wrapNode.style.lineHeight = String(this.bodyLineHeight ? this.bodyLineHeight.toString() : size.line_height)
+		wrapNode.style.transformOrigin = "top left"
+		wrapNode.appendChild(sanitizedMailBody.cloneNode(true))
+		if (client.isMobileDevice()) {
+			wrapNode.addEventListener("touchstart", (event) => {
+				const touch = event.touches[0]
+				this.lastTouchStart.x = touch.clientX
+				this.lastTouchStart.y = touch.clientY
+				this.lastTouchStart.time = Date.now()
+			})
+			wrapNode.addEventListener("touchend", (event) => {
+				const href = (event.target as Element | null)?.closest("a")?.getAttribute("href") ?? null
+				this.handleDoubleTap(
+					event,
+					e => this.handleAnchorClick(e, href, true),
+					() => this.rescale(true),
+				)
+			})
+		} else {
+			wrapNode.addEventListener("click", (event) => {
+				const href = (event.target as Element | null)?.closest("a")?.getAttribute("href") ?? null
+				this.handleAnchorClick(event, href, false)
+			})
+		}
+		this.shadowDomRoot.appendChild(styles.getStyleSheetElement("main"))
+		this.shadowDomRoot.appendChild(wrapNode)
+		this.currentlyRenderedMailBody = sanitizedMailBody
 	}
 
 	private clearDomBody() {
 		this.domBodyDeferred = defer()
 		this.domBody = null
+		this.shadowDomRoot = null
 	}
 
 	private setDomBody(dom: HTMLElement) {
+		if (dom !== this.domBody || this.shadowDomRoot == null) {
+			// If the dom element hasn't been created anew in onupdate
+			// then trying to create a new shadow root on the same node will cause an error
+			this.shadowDomRoot = dom.attachShadow({mode: "open"})
+		}
+
 		this.domBodyDeferred.resolve(dom)
 		this.domBody = dom
 	}
@@ -438,7 +458,7 @@ export class MailViewer implements Component<MailViewerAttrs> {
 				buttons: [
 					{
 						label: "retry_action",
-						click: () => this.viewModel.loadAll()
+						click: () => this.load()
 					}
 				]
 			})
@@ -462,7 +482,8 @@ export class MailViewer implements Component<MailViewerAttrs> {
 	private renderShowMoreButton() {
 		return m(ExpanderButtonN, {
 			label: "showMore_action",
-			expanded: this.detailsExpanded,
+			expanded: this.detailsExpanded(),
+			onExpandedChange: this.detailsExpanded,
 		})
 	}
 
@@ -614,8 +635,7 @@ export class MailViewer implements Component<MailViewerAttrs> {
 	async replaceInlineImages() {
 		const loadedInlineImages = await this.viewModel.getLoadedInlineImages()
 		const domBody = await this.domBodyDeferred.promise
-
-		replaceCidsWithInlineImages(domBody, loadedInlineImages, (cid, event, dom) => {
+		replaceCidsWithInlineImages(domBody, loadedInlineImages, (cid, event) => {
 			const inlineAttachment = this.viewModel.getAttachments().find(attachment => attachment.cid === cid)
 
 			if (inlineAttachment) {
@@ -950,12 +970,11 @@ export class MailViewer implements Component<MailViewerAttrs> {
 								margin: "0px 6px",
 							},
 							label: "showAll_action",
-							expanded: this.filesExpanded,
+							expanded: this.filesExpanded(),
+							onExpandedChange: this.filesExpanded,
 						}),
-						m(
-							ExpanderPanelN,
-							{
-								expanded: this.filesExpanded,
+						m(ExpanderPanelN, {
+								expanded: this.filesExpanded(),
 							},
 							attachments.slice(spoilerLimit).map(attachment => this.renderAttachmentButton(attachment)),
 						),
@@ -1172,8 +1191,8 @@ export class MailViewer implements Component<MailViewerAttrs> {
 		)
 
 		if (logins.getUserController().isInternalUser()) {
-
-			if (createContact && !logins.isEnabled(FeatureType.DisableContacts)) {
+			//searching for contacts will never resolve if the user has not logged in online
+			if (createContact && !logins.isEnabled(FeatureType.DisableContacts) && logins.isFullyLoggedIn()) {
 				const contact = await this.viewModel.contactModel.searchForContact(mailAddress.address)
 				if (contact) {
 					buttons.push({
@@ -1235,7 +1254,7 @@ export class MailViewer implements Component<MailViewerAttrs> {
 		}
 	}
 
-	private handleDoubleTap(e: MaybeSyntheticEvent, singleClickAction: (e: MaybeSyntheticEvent) => void, doubleClickAction: (e: MaybeSyntheticEvent) => void) {
+	private handleDoubleTap(e: TouchEvent, singleClickAction: (e: TouchEvent) => void, doubleClickAction: (e: TouchEvent) => void) {
 		const lastClick = this.lastBodyTouchEndTime
 		const now = Date.now()
 		const touch = e.changedTouches[0]
@@ -1244,7 +1263,6 @@ export class MailViewer implements Component<MailViewerAttrs> {
 		// much then do nothing
 		if (
 			!touch ||
-			e.synthetic ||
 			!e.cancelable ||
 			Date.now() - this.lastTouchStart.time > DOUBLE_TAP_TIME_MS ||
 			touch.clientX - this.lastTouchStart.x > 40 ||
@@ -1258,7 +1276,6 @@ export class MailViewer implements Component<MailViewerAttrs> {
 		if (now - lastClick < DOUBLE_TAP_TIME_MS) {
 			this.isScaling = !this.isScaling
 			this.lastBodyTouchEndTime = 0
-			;(e as any).redraw = false
 			doubleClickAction(e)
 		} else {
 			setTimeout(() => {
@@ -1481,32 +1498,31 @@ export class MailViewer implements Component<MailViewerAttrs> {
 		}
 	}
 
-	private handleAnchorClick(event: Event, shouldDispatchSyntheticClick: boolean): void {
-		const target = event.target as Element | undefined
-
-		if (target?.closest) {
-			const anchorElement = target.closest("a")
-
-			if (anchorElement && anchorElement.href.startsWith("mailto:")) {
+	private handleAnchorClick(event: Event, href: string | null, shouldDispatchSyntheticClick: boolean): void {
+		if (href) {
+			if (href.startsWith("mailto:")) {
 				event.preventDefault()
 
 				if (isNewMailActionAvailable()) {
 					// disable new mails for external users.
 					import("../editor/MailEditor").then(({newMailtoUrlMailEditor}) => {
-						newMailtoUrlMailEditor(anchorElement.href, !logins.getUserController().props.defaultUnconfidential)
+						newMailtoUrlMailEditor(href, !logins.getUserController().props.defaultUnconfidential)
 							.then(editor => editor.show())
 							.catch(ofClass(CancelledError, noOp))
 					})
 				}
-			} else if (anchorElement && isSettingsLink(anchorElement, this.viewModel.mail)) {
+			} else if (isSettingsLink(href, this.viewModel.mail)) {
 				// Navigate to the settings menu if they are linked within an email.
-				const newRoute = anchorElement.href.substring(anchorElement.href.indexOf("/settings/"))
+				const newRoute = href.substring(href.indexOf("/settings/"))
 				m.route.set(newRoute)
 				event.preventDefault()
-			} else if (anchorElement && shouldDispatchSyntheticClick) {
-				const newClickEvent: MouseEvent & {synthetic?: true} = new MouseEvent("click")
-				newClickEvent.synthetic = true
-				anchorElement.dispatchEvent(newClickEvent)
+			} else if (shouldDispatchSyntheticClick) {
+				const syntheticTag = document.createElement("a")
+				syntheticTag.setAttribute("href", href)
+				syntheticTag.setAttribute("target", "_blank")
+				syntheticTag.setAttribute("rel", "noopener noreferrer")
+				const newClickEvent = new MouseEvent("click")
+				syntheticTag.dispatchEvent(newClickEvent)
 			}
 		}
 	}
@@ -1527,7 +1543,7 @@ export function createMailViewerViewModel({mail, showFolder, delayBodyRenderingU
 		locator.mailModel,
 		locator.contactModel,
 		locator.configFacade,
-		isDesktop() ? locator.native : null,
+		isDesktop() ? locator.desktopSystemFacade : null,
 		locator.fileFacade,
 		locator.fileController,
 		logins,
@@ -1539,6 +1555,12 @@ export function createMailViewerViewModel({mail, showFolder, delayBodyRenderingU
  * support and invoice mails can contain links to the settings page.
  * we don't want normal mails to be able to link places in the app, though.
  * */
-function isSettingsLink(anchor: HTMLAnchorElement, mail: Mail): boolean {
-	return (anchor.getAttribute("href")?.startsWith("/settings/") ?? false) && isTutanotaTeamMail(mail)
+function isSettingsLink(href: string, mail: Mail): boolean {
+	return (href.startsWith("/settings/") ?? false) && isTutanotaTeamMail(mail)
+}
+
+function assertNonNull<T extends {}>(value: T | null | undefined): asserts value is T {
+	if (value == null) {
+		throw new ProgrammingError("it is null")
+	}
 }

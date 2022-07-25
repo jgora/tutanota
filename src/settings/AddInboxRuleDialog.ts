@@ -1,23 +1,24 @@
 import m from "mithril"
 import {Dialog} from "../gui/base/Dialog"
-import {lang} from "../misc/LanguageViewModel"
+import {lang, TranslationKey} from "../misc/LanguageViewModel"
 import {InboxRuleType} from "../api/common/TutanotaConstants"
 import {isDomainName, isMailAddress, isRegularExpression} from "../misc/FormatValidator"
 import {getInboxRuleTypeNameMapping} from "../mail/model/InboxRuleHandler"
-import type {InboxRule} from "../api/entities/tutanota/InboxRule"
-import {createInboxRule} from "../api/entities/tutanota/InboxRule"
+import type {InboxRule} from "../api/entities/tutanota/TypeRefs.js"
+import {createInboxRule} from "../api/entities/tutanota/TypeRefs.js"
 import {logins} from "../api/main/LoginController"
 import {getArchiveFolder, getExistingRuleForType, getFolderName} from "../mail/model/MailUtils"
 import type {MailboxDetail} from "../mail/model/MailModel"
 import stream from "mithril/stream"
 import {DropDownSelectorN} from "../gui/base/DropDownSelectorN"
 import {TextFieldN} from "../gui/base/TextFieldN"
-import {neverNull, noOp, ofClass} from "@tutao/tutanota-utils"
-import {LockedError} from "../api/common/error/RestError"
+import {neverNull} from "@tutao/tutanota-utils"
+import {ConnectionError, LockedError} from "../api/common/error/RestError"
 import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
 import {isSameId} from "../api/common/utils/EntityUtils"
 import {assertMainOrNode} from "../api/common/Env"
 import {locator} from "../api/main/MainLocator"
+import {isOfflineError} from "../api/common/utils/ErrorCheckUtils.js"
 
 assertMainOrNode()
 
@@ -42,11 +43,13 @@ export function show(mailBoxDetails: MailboxDetail, ruleOrTemplate: InboxRule) {
 			m(DropDownSelectorN, {
 				items: getInboxRuleTypeNameMapping(),
 				label: "inboxRuleField_label",
-				selectedValue: inboxRuleType,
+				selectedValue: inboxRuleType(),
+				selectionChangedHandler: inboxRuleType,
 			}),
 			m(TextFieldN, {
 				label: "inboxRuleValue_label",
-				value: inboxRuleValue,
+				value: inboxRuleValue(),
+				oninput: inboxRuleValue,
 				helpLabel: () =>
 					inboxRuleType() !== InboxRuleType.SUBJECT_CONTAINS && inboxRuleType() !== InboxRuleType.MAIL_HEADER_CONTAINS
 						? lang.get("emailSenderPlaceholder_label")
@@ -55,34 +58,44 @@ export function show(mailBoxDetails: MailboxDetail, ruleOrTemplate: InboxRule) {
 			m(DropDownSelectorN, {
 				label: "inboxRuleTargetFolder_label",
 				items: targetFolders,
-				selectedValue: inboxRuleTarget,
+				selectedValue: inboxRuleTarget(),
+				selectionChangedHandler: inboxRuleTarget,
 			}),
 		]
 
 		const isNewRule = ruleOrTemplate._id === null
 
+
 		const addInboxRuleOkAction = (dialog: Dialog) => {
 			let rule = createInboxRule()
 			rule.type = inboxRuleType()
-			rule.value = _getCleanedValue(inboxRuleType(), inboxRuleValue())
+			rule.value = getCleanedValue(inboxRuleType(), inboxRuleValue())
 			rule.targetFolder = inboxRuleTarget()._id
 			const props = logins.getUserController().props
 			const inboxRules = props.inboxRules
 			props.inboxRules = isNewRule ? [...inboxRules, rule] : inboxRules.map(inboxRule => (isSameId(inboxRule._id, ruleOrTemplate._id) ? rule : inboxRule))
-			locator.entityClient
-				   .update(props)
-				   .catch(error => {
-					   props.inboxRules = inboxRules
-					   throw error
-				   })
-				   .catch(ofClass(LockedError, noOp))
-			dialog.close()
+
+			locator.entityClient.update(props).then(() => {
+				dialog.close()
+			}).catch(error => {
+				if (isOfflineError(error)) {
+					props.inboxRules = inboxRules
+					//do not close
+					throw error
+				} else if (error instanceof LockedError) {
+					dialog.close()
+				} else {
+					props.inboxRules = inboxRules
+					dialog.close()
+					throw error
+				}
+			})
 		}
 
 		Dialog.showActionDialog({
 			title: lang.get("addInboxRule_action"),
 			child: form,
-			validator: () => _validateInboxRuleInput(inboxRuleType(), inboxRuleValue(), ruleOrTemplate._id),
+			validator: () => validateInboxRuleInput(inboxRuleType(), inboxRuleValue(), ruleOrTemplate._id),
 			allowOkWithReturn: true,
 			okAction: addInboxRuleOkAction,
 		})
@@ -92,16 +105,16 @@ export function show(mailBoxDetails: MailboxDetail, ruleOrTemplate: InboxRule) {
 export function createInboxRuleTemplate(ruleType: string | null, value: string | null): InboxRule {
 	const template = createInboxRule()
 	template.type = ruleType || InboxRuleType.FROM_EQUALS
-	template.value = _getCleanedValue(neverNull(ruleType), value || "")
+	template.value = getCleanedValue(neverNull(ruleType), value || "")
 	return template
 }
 
-function _validateInboxRuleInput(type: string, value: string, ruleId: Id) {
-	let currentCleanedValue = _getCleanedValue(type, value)
+function validateInboxRuleInput(type: string, value: string, ruleId: Id): TranslationKey | null {
+	let currentCleanedValue = getCleanedValue(type, value)
 
 	if (currentCleanedValue === "") {
 		return "inboxRuleEnterValue_msg"
-	} else if (_isInvalidRegex(currentCleanedValue)) {
+	} else if (isInvalidRegex(currentCleanedValue)) {
 		return "invalidRegexSyntax_msg"
 	} else if (
 		type !== InboxRuleType.SUBJECT_CONTAINS &&
@@ -122,7 +135,7 @@ function _validateInboxRuleInput(type: string, value: string, ruleId: Id) {
 	return null
 }
 
-function _getCleanedValue(type: string, value: string) {
+function getCleanedValue(type: string, value: string) {
 	if (type === InboxRuleType.SUBJECT_CONTAINS || type === InboxRuleType.MAIL_HEADER_CONTAINS) {
 		return value
 	} else {
@@ -135,7 +148,7 @@ function _getCleanedValue(type: string, value: string) {
  * @returns true if provided string is a regex and it's unparseable by RegExp, else false
  * @private
  */
-function _isInvalidRegex(value: string) {
+function isInvalidRegex(value: string) {
 	if (!isRegularExpression(value)) return false // not a regular expression is not an invalid regular expression
 
 	try {

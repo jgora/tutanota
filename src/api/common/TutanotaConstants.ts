@@ -1,28 +1,13 @@
 //@bundleInto:common-min
 
 import {downcast} from "@tutao/tutanota-utils"
-import type {GroupMembership} from "../entities/sys/GroupMembership"
-import type {EmailSenderListElement} from "../entities/sys/EmailSenderListElement"
-import type {CertificateInfo} from "../entities/sys/CertificateInfo"
-import type {UserSettingsGroupRoot} from "../entities/tutanota/UserSettingsGroupRoot"
-import type {CalendarEventAttendee} from "../entities/tutanota/CalendarEventAttendee"
-import {isAdminClient, isApp, isDesktop} from "./Env"
+import type {CertificateInfo, CreditCard, EmailSenderListElement, GroupMembership} from "../entities/sys/TypeRefs.js"
+import {AccountingInfo, Customer} from "../entities/sys/TypeRefs.js";
+import type {CalendarEventAttendee, UserSettingsGroupRoot} from "../entities/tutanota/TypeRefs.js"
+import {ContactSocialId, MailFolder} from "../entities/tutanota/TypeRefs.js";
+import {isAdminClient, isApp, isDesktop, isElectronClient} from "./Env"
 import type {Country} from "./CountryList"
-import type {CreditCard} from "../entities/sys/CreditCard"
 import {ProgrammingError} from "./error/ProgrammingError";
-import {MailFolder} from "../entities/tutanota/MailFolder";
-import {ContactSocialId} from "../entities/tutanota/ContactSocialId";
-import {Customer} from "../entities/sys/Customer";
-import {AccountingInfo} from "../entities/sys/AccountingInfo";
-// export const reverse = <K, V>(objectMap: Record<K, V>): Record<V, K> =>
-//     Object.keys(objectMap).reduce((r, k) => {
-//         const v = objectMap[downcast(k)]
-//         return Object.assign(r, {
-//             [v]: k,
-//         })
-//     }, {})
-// Also used in other projects
-// export type $Reversed<T> = $Call<typeof reverse, T>
 
 export const MAX_NBR_MOVE_DELETE_MAIL_SERVICE = 50
 
@@ -70,13 +55,23 @@ export const GroupTypeNameByCode = reverse(GroupType)
 
 export const getMembershipGroupType = (membership: GroupMembership): GroupType => downcast(membership.groupType)
 
+/**
+ * Permission is a kind of a metadata instance. Primarily used for two purposes:
+ *  - key sharing
+ *  - reference counting in the db
+ * */
 export const enum PermissionType {
+	/** Used in combination with bucket permission to send multiple things encrypted with the same public key. */
 	Public = "0",
+	/** Used to encrypt an instance for another group (which we are member of). */
 	Symmetric = "1",
+	/** Used to updating public permission with symmetric key. */
 	Public_Symmetric = "2",
-	// instances without ownerEncSessionKey (e.g. MailBody, FileData) after asymmetric decryption
+	/** Instances without ownerEncSessionKey (e.g. MailBody, FileData) after asymmetric decryption, used for reference counting. */
 	Unencrypted = "3",
+	/** Sending parts of email for external users. */
 	External = "5",
+	/** Used to mark the owner of the list. */
 	Owner_List = "8",
 }
 
@@ -501,6 +496,7 @@ export const enum PostingType {
 	Payment = "5",
 	Refund = "6",
 	SuspensionCancel = "7",
+	GiftCard = "8",
 }
 
 export const CounterType_UnreadMails = "2"
@@ -522,6 +518,10 @@ export const Keys = Object.freeze({
 	RETURN: {
 		code: 13,
 		name: "⏎",
+	},
+	BACKSPACE: {
+		code: 8,
+		name: "BACKSPACE"
 	},
 	TAB: {
 		code: 9,
@@ -910,7 +910,7 @@ export const enum ClientType {
 }
 
 export function getClientType(): ClientType {
-	return isApp() ? ClientType.App : isDesktop() || isAdminClient() ? ClientType.Desktop : ClientType.Browser
+	return isApp() ? ClientType.App : isElectronClient() ? ClientType.Desktop : ClientType.Browser
 }
 
 export const enum ExternalImageRule {
@@ -956,3 +956,5 @@ export const enum ArchiveDataType {
 	MailBody = "2",
 	MailHeaders = "3"
 }
+
+export const OFFLINE_STORAGE_DEFAULT_TIME_RANGE_DAYS = 31

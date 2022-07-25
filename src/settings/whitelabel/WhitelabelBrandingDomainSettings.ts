@@ -12,8 +12,8 @@ import stream from "mithril/stream"
 import {lang} from "../../misc/LanguageViewModel"
 import m, {Children, Component, Vnode} from "mithril"
 import {ButtonN} from "../../gui/base/ButtonN"
-import type {CustomerInfo} from "../../api/entities/sys/CustomerInfo"
-import type {CertificateInfo} from "../../api/entities/sys/CertificateInfo"
+import type {CustomerInfo} from "../../api/entities/sys/TypeRefs.js"
+import type {CertificateInfo} from "../../api/entities/sys/TypeRefs.js"
 import {CertificateState, CertificateType} from "../../api/common/TutanotaConstants"
 import {formatDateTime} from "../../misc/Formatter"
 import {locator} from "../../api/main/MainLocator"
@@ -36,7 +36,7 @@ export class WhitelabelBrandingDomainSettings implements Component<WhitelabelBra
 		const {customerInfo, certificateInfo, whitelabelDomain, isWhitelabelFeatureEnabled} = vnode.attrs
 		const whitelabelDomainConfigAttrs = {
 			label: "whitelabelDomain_label",
-			value: stream(whitelabelDomain ? whitelabelDomain : lang.get("deactivated_label")),
+			value: whitelabelDomain ? whitelabelDomain : lang.get("deactivated_label"),
 			helpLabel: this._renderWhitelabelInfo(certificateInfo),
 			disabled: true,
 			injectionsRight: () => [

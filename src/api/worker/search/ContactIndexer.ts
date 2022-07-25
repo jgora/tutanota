@@ -1,16 +1,15 @@
 import {NotAuthorizedError, NotFoundError} from "../../common/error/RestError"
-import type {Contact} from "../../entities/tutanota/Contact"
-import {_TypeModel as ContactModel, ContactTypeRef} from "../../entities/tutanota/Contact"
+import type {Contact, ContactList} from "../../entities/tutanota/TypeRefs.js"
+import {ContactTypeRef} from "../../entities/tutanota/TypeRefs.js"
+import {typeModels as tutanotaModels} from "../../entities/tutanota/TypeModels"
 import type {Db, GroupData, IndexUpdate, SearchIndexEntry} from "./SearchTypes"
 import {_createNewIndexUpdate, typeRefToTypeInfo} from "./IndexUtils"
 import {neverNull, noOp, ofClass, promiseMap} from "@tutao/tutanota-utils"
-import {FULL_INDEXED_TIMESTAMP, NOTHING_INDEXED_TIMESTAMP, OperationType} from "../../common/TutanotaConstants"
-import type {ContactList} from "../../entities/tutanota/ContactList"
-import {ContactListTypeRef} from "../../entities/tutanota/ContactList"
+import {FULL_INDEXED_TIMESTAMP, OperationType} from "../../common/TutanotaConstants"
 import {IndexerCore} from "./IndexerCore"
 import {SuggestionFacade} from "./SuggestionFacade"
 import {tokenize} from "./Tokenizer"
-import type {EntityUpdate} from "../../entities/sys/EntityUpdate"
+import type {EntityUpdate} from "../../entities/sys/TypeRefs.js"
 import {EntityClient} from "../../common/EntityClient"
 import {GroupDataOS, MetaDataOS} from "./Indexer"
 
@@ -28,7 +27,8 @@ export class ContactIndexer {
 	}
 
 	createContactIndexEntries(contact: Contact): Map<string, SearchIndexEntry[]> {
-		let keyToIndexEntries = this._core.createIndexEntriesForAttributes(ContactModel, contact, [
+		const ContactModel = tutanotaModels.Contact
+		let keyToIndexEntries = this._core.createIndexEntriesForAttributes(contact, [
 			{
 				attribute: ContactModel.values["firstName"],
 				value: () => contact.firstName,
@@ -116,49 +116,46 @@ export class ContactIndexer {
 				   )
 	}
 
+	async getIndexTimestamp(contactList: ContactList): Promise<number | null> {
+		const t = await this._db.dbFacade.createTransaction(true, [MetaDataOS, GroupDataOS])
+		const groupId = neverNull(contactList._ownerGroup)
+		return t.get(GroupDataOS, groupId).then((groupData: GroupData | null) => {
+			return groupData ? groupData.indexTimestamp : null
+		})
+	}
+
 	/**
 	 * Indexes the contact list if it is not yet indexed.
 	 */
-	indexFullContactList(userGroupId: Id): Promise<any> {
-		return this._entity
-				   .loadRoot(ContactListTypeRef, userGroupId)
-				   .then((contactList: ContactList) => {
-					   return this._db.dbFacade.createTransaction(true, [MetaDataOS, GroupDataOS]).then(t => {
-						   let groupId = neverNull(contactList._ownerGroup)
+	async indexFullContactList(contactList: ContactList): Promise<any> {
+		const groupId = neverNull(contactList._ownerGroup)
+		let indexUpdate = _createNewIndexUpdate(typeRefToTypeInfo(ContactTypeRef))
+		try {
+			const contacts = await this._entity.loadAll(ContactTypeRef, contactList.contacts)
+			contacts.forEach(contact => {
+				let keyToIndexEntries = this.createContactIndexEntries(contact)
+				this._core.encryptSearchIndexEntries(contact._id, neverNull(contact._ownerGroup), keyToIndexEntries, indexUpdate)
+			})
+			return Promise.all([
+				this._core.writeIndexUpdate(
+					[
+						{
+							groupId,
+							indexTimestamp: FULL_INDEXED_TIMESTAMP,
+						},
+					],
+					indexUpdate,
+				),
+				this.suggestionFacade.store(),
+			])
+		} catch (e) {
+			if (e instanceof NotFoundError) {
+				return Promise.resolve()
+			}
+			throw e
+		}
 
-						   let indexUpdate = _createNewIndexUpdate(typeRefToTypeInfo(ContactTypeRef))
 
-						   return t.get(GroupDataOS, groupId).then((groupData: GroupData | null) => {
-							   if (groupData && groupData.indexTimestamp === NOTHING_INDEXED_TIMESTAMP) {
-								   return this._entity.loadAll(ContactTypeRef, contactList.contacts).then(contacts => {
-									   contacts.forEach(contact => {
-										   let keyToIndexEntries = this.createContactIndexEntries(contact)
-
-										   this._core.encryptSearchIndexEntries(contact._id, neverNull(contact._ownerGroup), keyToIndexEntries, indexUpdate)
-									   })
-									   return Promise.all([
-										   this._core.writeIndexUpdate(
-											   [
-												   {
-													   groupId,
-													   indexTimestamp: FULL_INDEXED_TIMESTAMP,
-												   },
-											   ],
-											   indexUpdate,
-										   ),
-										   this.suggestionFacade.store(),
-									   ])
-								   })
-							   }
-						   })
-					   })
-				   })
-				   .catch(
-					   ofClass(NotFoundError, e => {
-						   // external users have no contact list.
-						   return Promise.resolve()
-					   }),
-				   )
 	}
 
 	processEntityEvents(events: EntityUpdate[], groupId: Id, batchId: Id, indexUpdate: IndexUpdate): Promise<void> {

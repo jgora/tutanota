@@ -1,6 +1,7 @@
 pipeline {
     environment {
          PATH="/opt/node-v16.3.0-linux-x64/bin:${env.PATH}"
+         VERSION = sh(returnStdout: true, script: "${NODE_PATH}/node -p -e \"require('./package.json').version\" | tr -d \"\n\"")
     }
 	options {
 		preserveStashes()
@@ -63,6 +64,15 @@ pipeline {
 
 				unstash 'webapp_built'
 				sh 'node buildSrc/publish.js webapp'
+
+				catchError(stageResult: 'UNSTABLE', buildResult: 'SUCCESS', message: 'Failed to create github release page') {
+					withCredentials([string(credentialsId: 'github-access-token', variable: 'GITHUB_TOKEN')]) {
+						sh """node buildSrc/releaseNotes.js --releaseName '${VERSION}' \
+																	--milestone '${VERSION}' \
+																	--tag 'tutanota-release-${VERSION}' \
+																	--platform all"""
+					}
+				}
             }
         }
 

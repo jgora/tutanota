@@ -1,21 +1,13 @@
 import m, {Children, Component} from "mithril"
-import stream from "mithril/stream"
+import type Stream from "mithril/stream"
 import type {ModalComponent} from "./Modal"
 import {modal} from "./Modal"
-import {
-	alpha,
-	AlphaEnum, AnimationPromise,
-	animations,
-	DefaultAnimationTime,
-	opacity,
-	transform,
-	TransformEnum
-} from "../animation/Animations"
+import {alpha, AlphaEnum, AnimationPromise, animations, DefaultAnimationTime, opacity, transform, TransformEnum} from "../animation/Animations"
 import {ease} from "../animation/Easing"
 import type {TranslationKey, TranslationText} from "../../misc/LanguageViewModel"
 import {lang} from "../../misc/LanguageViewModel"
 import type {KeyPress, Shortcut} from "../../misc/KeyManager"
-import {focusNext, focusPrevious, keyManager} from "../../misc/KeyManager"
+import {focusNext, focusPrevious, isKeyPressed, keyManager} from "../../misc/KeyManager"
 import {getElevatedBackground} from "../theme"
 import {px, size} from "../size"
 import {HabReminderImage} from "./icons/Icons"
@@ -25,19 +17,20 @@ import type {ButtonAttrs} from "./ButtonN"
 import {ButtonN, ButtonType} from "./ButtonN"
 import type {DialogHeaderBarAttrs} from "./DialogHeaderBar"
 import {DialogHeaderBar} from "./DialogHeaderBar"
-import type {TextFieldAttrs} from "./TextFieldN"
 import {TextFieldN, TextFieldType} from "./TextFieldN"
-import type {SelectorItemList} from "./DropDownSelectorN"
+import type {DropDownSelectorAttrs, SelectorItemList} from "./DropDownSelectorN"
 import {DropDownSelectorN} from "./DropDownSelectorN"
 import {Keys} from "../../api/common/TutanotaConstants"
 import {dialogAttrs} from "../AriaUtils"
 import {styles} from "../styles"
 import type {lazy, MaybeLazy, Thunk} from "@tutao/tutanota-utils"
-import {$Promisable, assertNotNull, getAsLazy, mapLazily, noOp} from "@tutao/tutanota-utils"
+import {$Promisable, assertNotNull, getAsLazy, identity, mapLazily, noOp} from "@tutao/tutanota-utils"
 import type {DialogInjectionRightAttrs} from "./DialogInjectionRight"
 import {DialogInjectionRight} from "./DialogInjectionRight"
 import {assertMainOrNode} from "../../api/common/Env"
-import type Stream from "mithril/stream"
+import {Icon} from "./Icon"
+import {BootIcons} from "./icons/BootIcons"
+import {isOfflineError} from "../../api/common/utils/ErrorCheckUtils.js"
 
 assertMainOrNode()
 export const INPUT = "input, textarea, div[contenteditable='true']"
@@ -753,22 +746,63 @@ export class Dialog implements ModalComponent {
 		inputValidator?: stringValidator,
 	): Promise<string> {
 		return new Promise(resolve => {
-			const result: Stream<string> = stream(value)
-			const textFieldAttrs: TextFieldAttrs = {
-				label: labelIdOrLabelFunction,
-				value: result,
-				helpLabel: () => (infoMsgId ? lang.getMaybeLazy(infoMsgId) : ""),
-			}
+			let result = value
 			Dialog.showActionDialog({
 				title: lang.getMaybeLazy(titleId),
-				child: () => m(TextFieldN, textFieldAttrs),
-				validator: () => (inputValidator ? inputValidator(result()) : null),
+				child: () => m(TextFieldN, {
+					label: labelIdOrLabelFunction,
+					value: result,
+					oninput: (newValue) => result = newValue,
+					helpLabel: () => (infoMsgId ? lang.getMaybeLazy(infoMsgId) : ""),
+				}),
+				validator: () => (inputValidator ? inputValidator(result) : null),
 				allowOkWithReturn: true,
 				okAction: (dialog: Dialog) => {
-					resolve(result())
+					resolve(result)
 					dialog.close()
 				},
 			})
+		})
+	}
+
+	/**
+	 * Shows a dialog with a text field input and ok/cancel buttons. In contrast to {@link showTextInputDialog} the entered text is not returned but processed in the okayAction.
+	 * @param titleId title of the dialog
+	 * @param labelIdOrLabelFunction label of the text field
+	 * @param infoMsgId help label of the text field
+	 * @param value initial value
+	 * @param inputValidator Called when "Ok" is clicked receiving the entered text. Must return null if the text is valid or an error messageId if the text is invalid, so an error message is shown.
+	 * @param okAction Called when "OK" is clicked, receives the entered text. If the okayAction results in a ConnectionsError the dialog is not closed.
+	 */
+	static showProcessTextInputDialog(
+		titleId: TranslationKey | lazy<string>,
+		labelIdOrLabelFunction: TranslationKey | lazy<string>,
+		infoMsgId: (TranslationKey | null) | (lazy<string> | null),
+		value: string,
+		okAction: (arg0: string) => Promise<unknown>,
+		inputValidator?: stringValidator,
+	) {
+		let result = value
+		Dialog.showActionDialog({
+			title: lang.getMaybeLazy(titleId),
+			child: () => m(TextFieldN, {
+				label: labelIdOrLabelFunction,
+				value: result,
+				oninput: (newValue) => result = newValue,
+				helpLabel: () => (infoMsgId ? lang.getMaybeLazy(infoMsgId) : ""),
+			}),
+			validator: () => (inputValidator ? inputValidator(result) : null),
+			allowOkWithReturn: true,
+			okAction: (dialog: Dialog) => {
+				okAction(result).then(() => {
+					dialog.close()
+				}).catch(error => {
+					if (!(isOfflineError(error))) {
+						dialog.close()
+					}
+					throw error
+				})
+			}
 		})
 	}
 
@@ -778,7 +812,6 @@ export class Dialog implements ModalComponent {
 	 * @param labelIdOrLabelFunction label of the text area
 	 * @param infoMsgId help label of the text area
 	 * @param value initial value
-	 * @param inputValidator Called when "Ok" is clicked receiving the entered text. Must return null if the text is valid or an error messageId if the text is invalid, so an error message is shown.
 	 * @returns A promise resolving to the entered text. The returned promise is only resolved if "ok" is clicked.
 	 */
 	static showTextAreaInputDialog(
@@ -788,20 +821,20 @@ export class Dialog implements ModalComponent {
 		value: string,
 	): Promise<string> {
 		return new Promise(resolve => {
-			const result: Stream<string> = stream(value)
-			const textFieldAttrs: TextFieldAttrs = {
-				label: labelIdOrLabelFunction,
-				helpLabel: () => (infoMsgId ? lang.get(infoMsgId) : ""),
-				value: result,
-				type: TextFieldType.Area,
-			}
+			let result: string = value
 			Dialog.showActionDialog({
 				title: lang.get(titleId),
 				child: {
-					view: () => m(TextFieldN, textFieldAttrs),
+					view: () => m(TextFieldN, {
+						label: labelIdOrLabelFunction,
+						helpLabel: () => (infoMsgId ? lang.get(infoMsgId) : ""),
+						value: result,
+						oninput: (newValue) => result = newValue,
+						type: TextFieldType.Area,
+					}),
 				},
 				okAction: (dialog: Dialog) => {
-					resolve(result())
+					resolve(result)
 					dialog.close()
 				},
 			})
@@ -814,7 +847,7 @@ export class Dialog implements ModalComponent {
 	 * @param label label of the dropdown selector
 	 * @param infoMsgId help label of the dropdown selector
 	 * @param items selection set
-	 * @param selectedValue initial value
+	 * @param initialValue initial value
 	 * @param dropdownWidth width of the dropdown
 	 * @returns A promise resolving to the selected item. The returned promise is only resolved if "ok" is clicked.
 	 */
@@ -823,31 +856,31 @@ export class Dialog implements ModalComponent {
 		label: TranslationKey,
 		infoMsgId: TranslationKey | null,
 		items: SelectorItemList<T>,
-		selectedValue: Stream<T>,
+		initialValue: T,
 		dropdownWidth?: number,
 	): Promise<T> {
+		let selectedValue: T = initialValue
 		return new Promise(resolve => {
 			Dialog.showActionDialog({
 				title: lang.get(titleId),
 				child: {
 					view: () =>
-						m(DropDownSelectorN, {
+						// identity as type assertion
+						m(DropDownSelectorN, identity<DropDownSelectorAttrs<T>>({
 							label,
 							items,
-							selectedValue,
-						}),
+							selectedValue: selectedValue,
+							selectionChangedHandler: (newValue) => selectedValue = newValue,
+						})),
 				},
 				okAction: (dialog: Dialog) => {
-					resolve(selectedValue())
+					resolve(selectedValue)
 					dialog.close()
 				},
 			})
 		})
 	}
 
-	/**
-	 * @deprecated useLargeDialogN instead
-	 */
 	static largeDialog(headerBarAttrs: DialogHeaderBarAttrs, child: Component): Dialog {
 		return new Dialog(DialogType.EditLarge, {
 			view: () => {
@@ -872,43 +905,71 @@ export class Dialog implements ModalComponent {
 
 	/**
 	 * Requests a password from the user. Stays open until the caller sets the error message to "".
-	 * @param errorMessage a stream of error messages that will be shown as the password field help text. should not start with "", but with lang.get("emptyString_msg")
-	 * @returns a stream of entered passwords
+	 * @param props.action will be executed as an attempt to apply new password. Error message is the return value.
 	 */
 	static showRequestPasswordDialog(
-		errorMessage: Stream<string>,
-		props: {allowCancel: boolean} = {allowCancel: true},
-	): Stream<string> {
-		const out: Stream<string> = stream()
-		const value: Stream<string> = stream("")
-		const textFieldAttrs: TextFieldAttrs = {
-			label: "password_label",
-			helpLabel: errorMessage,
-			value: value,
-			preventAutofill: true,
-			type: TextFieldType.Password,
-			keyHandler: (key: KeyPress) => {
-				if (key.keyCode === 13) {
-					//return
-					out(value())
-					return false
-				}
+		props: {
+			action: (pw: string) => Promise<string>
+			cancel: {
+				textId: TranslationKey,
+				action: () => void,
+			} | null
+		},
+	): Dialog {
+		let value = ""
+		let state: {type: "progress"} | {type: "idle", message: string} = {type: "idle", message: ""}
 
-				return true
+		const doAction = async () => {
+			state = {type: "progress"}
+			m.redraw()
+			const errorMessage = await props.action(value)
+			state = {type: "idle", message: errorMessage}
+			m.redraw()
+		}
+
+		const child = {
+			view: () => {
+				const savedState = state
+				return (savedState.type == "idle")
+					? m(TextFieldN, {
+						label: "password_label",
+						helpLabel: () => savedState.message,
+						value: value,
+						oninput: (newValue) => value = newValue,
+						preventAutofill: true,
+						type: TextFieldType.Password,
+						keyHandler: (key: KeyPress) => {
+							if (isKeyPressed(key.keyCode, Keys.RETURN)) {
+								doAction()
+								return false
+							}
+
+							return true
+						},
+					})
+					: m(Icon, {
+						icon: BootIcons.Progress,
+						class: "icon-xl icon-progress block mt mb",
+						style: {
+							marginLeft: 'auto',
+							marginRight: 'auto',
+						}
+					})
 			},
 		}
 		const dialog = Dialog.showActionDialog({
 			title: lang.get("password_label"),
-			child: {
-				view: () => m(TextFieldN, textFieldAttrs),
-			},
+			child: child,
 			allowOkWithReturn: true,
-			okAction: () => out(value()),
-			allowCancel: props.allowCancel,
-			cancelAction: () => dialog.close(),
+			okAction: () => doAction(),
+			cancelActionTextId: props.cancel?.textId,
+			allowCancel: props.cancel != null,
+			cancelAction: () => {
+				props?.cancel?.action?.()
+				dialog.close()
+			},
 		})
-		errorMessage.map(v => (v ? m.redraw() : dialog.close()))
-		return out
+		return dialog
 	}
 
 	static _onKeyboardSizeChanged(newSize: number): void {

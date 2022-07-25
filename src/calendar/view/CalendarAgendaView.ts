@@ -17,7 +17,7 @@ import {isAllDayEvent} from "../../api/common/utils/CommonCalendarUtils"
 import {neverNull} from "@tutao/tutanota-utils"
 import {px, size} from "../../gui/size"
 import {lastThrow} from "@tutao/tutanota-utils"
-import type {CalendarEvent} from "../../api/entities/tutanota/CalendarEvent"
+import type {CalendarEvent} from "../../api/entities/tutanota/TypeRefs.js"
 import {logins} from "../../api/main/LoginController"
 import type {GroupColors} from "./CalendarView"
 import type {CalendarEventBubbleClickHandler} from "./CalendarViewModel"
@@ -42,13 +42,9 @@ export class CalendarAgendaView implements Component<Attrs> {
 		const tomorrow = incrementDate(new Date(today), 1)
 		const days = getNextFourteenDays(today)
 		const lastDay = lastThrow(days)
-		let title: string
-
-		if (days[0].getMonth() === lastDay.getMonth()) {
-			title = `${lang.formats.dateWithWeekdayWoMonth.format(days[0])} - ${lang.formats.dateWithWeekdayAndYear.format(lastDay)}`
-		} else {
-			title = `${lang.formats.dateWithWeekday.format(days[0])} - ${lang.formats.dateWithWeekdayAndYear.format(lastDay)}`
-		}
+		const title = days[0].getFullYear() === lastDay.getFullYear()
+			? `${lang.formats.dateWithWeekday.format(days[0])} - ${lang.formats.dateWithWeekdayAndYear.format(lastDay)}`
+			: `${lang.formats.dateWithWeekdayAndYear.format(days[0])} - ${lang.formats.dateWithWeekdayAndYear.format(lastDay)}`
 
 		const lastDayFormatted = formatDate(lastDay)
 		return m(".fill-absolute.flex.col.margin-are-inset-lr", [
@@ -112,6 +108,8 @@ export class CalendarAgendaView implements Component<Attrs> {
 										: events.map(ev => {
 											const startsBefore = eventStartsBefore(day, zone, ev)
 											const timeFormat = getTimeTextFormatForLongEvent(ev, day, day, zone)
+											const formattedEventTime = timeFormat ? formatEventTime(ev, timeFormat) : ""
+											const eventLocation = ev.location ? (formattedEventTime ? ", " : "") + ev.location : ""
 											return m(
 												".darker-hover.mb-s",
 												{
@@ -119,8 +117,7 @@ export class CalendarAgendaView implements Component<Attrs> {
 												},
 												m(CalendarEventBubble, {
 													text: ev.summary,
-													secondLineText:
-														(timeFormat ? formatEventTime(ev, timeFormat) : "") + (ev.location ? ", " + ev.location : ""),
+													secondLineText: formattedEventTime + eventLocation,
 													color: getEventColor(ev, attrs.groupColors),
 													hasAlarm: !startsBefore && hasAlarmsForTheUser(logins.getUserController().user, ev),
 													click: domEvent => attrs.onEventClicked(ev, domEvent),

@@ -3,7 +3,6 @@ import stream from "mithril/stream"
 import Stream from "mithril/stream"
 import type {TranslationKey} from "../misc/LanguageViewModel"
 import {lang} from "../misc/LanguageViewModel"
-import {isTutanotaMailAddress} from "../api/common/RecipientInfo"
 import {isMailAddress} from "../misc/FormatValidator"
 import {Icons} from "../gui/base/icons/Icons"
 import type {TextFieldAttrs} from "../gui/base/TextFieldN"
@@ -18,6 +17,7 @@ import {Icon} from "../gui/base/Icon"
 import {BootIcons} from "../gui/base/icons/BootIcons"
 import {locator} from "../api/main/MainLocator"
 import {assertMainOrNode} from "../api/common/Env"
+import {isTutanotaMailAddress} from "../mail/model/MailUtils.js";
 
 assertMainOrNode()
 const VALID_MESSAGE_ID = "mailAddressAvailable_msg"
@@ -45,7 +45,7 @@ export class SelectMailAddressForm implements Component<SelectMailAddressFormAtt
 		const preSelectedDomain = firstThrow(attrs.availableDomains)
 		this._domain = stream(preSelectedDomain)
 		this._username = stream("")
-		this._messageId = stream("mailAddressNeutral_msg")
+		this._messageId = stream<TranslationKey | null>("mailAddressNeutral_msg")
 		this.cleanMailAddress = this._createCleanMailAddressStream()
 	}
 
@@ -84,10 +84,13 @@ export class SelectMailAddressForm implements Component<SelectMailAddressFormAtt
 
 		const userNameAttrs: TextFieldAttrs = {
 			label: "mailAddress_label",
-			value: this._username,
+			value: this._username(),
 			alignRight: true,
 			helpLabel: () => this._addressHelpLabel(),
-			oninput: validate,
+			oninput: (value) => {
+				this._username(value)
+				validate()
+			},
 			injectionsRight: () => [
 				m(
 					".flex.items-end.mr-s",

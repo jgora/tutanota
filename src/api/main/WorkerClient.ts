@@ -9,18 +9,13 @@ import {defer, downcast, identity} from "@tutao/tutanota-utils"
 import {objToError} from "../common/utils/Utils"
 import type {InfoMessage} from "../common/CommonTypes"
 import {handleUncaughtError} from "../../misc/ErrorHandler"
-import type {WebsocketLeaderStatus} from "../entities/sys/WebsocketLeaderStatus"
-import {createWebsocketLeaderStatus} from "../entities/sys/WebsocketLeaderStatus"
-import {addSearchIndexDebugEntry} from "../../misc/IndexerDebugLogger"
 import type {MainInterface, WorkerInterface} from "../worker/WorkerImpl"
 import {exposeLocal, exposeRemote} from "../common/WorkerProxy"
-import type {TypeModel} from "../common/EntityTypes"
 import type {EntropySource} from "@tutao/tutanota-crypto"
 import type {CloseEventBusOption} from "../common/TutanotaConstants"
 import stream from "mithril/stream"
-import {User} from "../entities/sys/User"
 import type {RestClient} from "../worker/rest/RestClient"
-import {SuspensionBehavior} from "../worker/rest/RestClient"
+import {createWebsocketLeaderStatus, WebsocketLeaderStatus} from "../entities/sys/TypeRefs"
 
 assertMainOrNode()
 
@@ -37,7 +32,7 @@ export class WorkerClient {
 
 	private _dispatcher!: MessageDispatcher<WorkerRequestType, MainRequestType>
 	private _progressUpdater: ProgressUpdater | null = null
-	readonly _wsConnection: stream<WsConnectionState> = stream(WsConnectionState.terminated)
+	readonly _wsConnection: stream<WsConnectionState> = stream<WsConnectionState>(WsConnectionState.terminated)
 	// Should be empty stream unless there's really a message.
 	readonly infoMessages: stream<InfoMessage> = stream()
 	private _leaderStatus: WebsocketLeaderStatus
@@ -96,7 +91,7 @@ export class WorkerClient {
 
 	queueCommands(locator: IMainLocator): Commands<MainRequestType> {
 		return {
-			execNative: (message: MainRequest) => locator.native.invokeNative(new Request(downcast(message.args[0]), downcast(message.args[1]))),
+			execNative: (message: MainRequest) => locator.native.invokeNative(downcast(message.args[0]), downcast(message.args[1])),
 			entityEvent: (message: MainRequest) => {
 				return locator.eventController.notificationReceived(downcast(message.args[0]), downcast(message.args[1]))
 			},
@@ -146,15 +141,9 @@ export class WorkerClient {
 				monitor && monitor.workDone(workDone)
 				return Promise.resolve()
 			},
-			writeIndexerDebugLog: (message: MainRequest) => {
-				const reason = downcast<string>(message.args[0])
-				const user = downcast<User>(message.args[1])
-				addSearchIndexDebugEntry(reason, user)
-				return Promise.resolve()
-			},
 			facade: exposeLocal<MainInterface, MainRequestType>({
-				get secondFactorAuthenticationHandler() {
-					return locator.secondFactorHandler
+				get loginListener() {
+					return locator.loginListener
 				},
 			}),
 		}
@@ -171,10 +160,6 @@ export class WorkerClient {
 	/** Only used in admin client, */
 	restRequest(...args: Parameters<RestClient["request"]>): Promise<any | null> {
 		return this._postRequest(new Request("restRequest", Array.from(arguments)))
-	}
-
-	resolveSessionKey(typeModel: TypeModel, instance: Record<string, any>): Promise<string | null> {
-		return this._postRequest(new Request("resolveSessionKey", [typeModel, instance]))
 	}
 
 	entropy(entropyCache: {source: EntropySource, entropy: number, data: number}[]): Promise<void> {

@@ -11,7 +11,7 @@ import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
 import {windowFacade} from "../misc/WindowFacade"
 import {DeviceType} from "../misc/ClientConstants"
 import {ButtonAttrs, ButtonN, ButtonType} from "../gui/base/ButtonN"
-import {CurrentView, header} from "../gui/base/Header"
+import {CurrentView, header} from "../gui/Header.js"
 import {AriaLandmarks, landmarkAttrs, liveDataAttrs} from "../gui/AriaUtils"
 import type {ILoginViewModel} from "./LoginViewModel"
 import {DisplayMode, LoginState} from "./LoginViewModel"
@@ -25,7 +25,7 @@ import type {clickHandler} from "../gui/base/GuiUtils"
 assertMainOrNode()
 
 export class LoginView implements CurrentView {
-	readonly view: (vnode: Vnode<unknown>) => Children
+	readonly view: CurrentView["view"]
 	readonly _viewModel: ILoginViewModel
 	readonly _moreExpanded: stream<boolean>
 	// we save the login form because we need access to the password input field inside of it for when "loginWith" is set in the url,
@@ -43,7 +43,7 @@ export class LoginView implements CurrentView {
 		this._targetPath = targetPath
 		this._requestedPath = this._targetPath
 		this.loginForm = defer()
-		this._moreExpanded = stream(false)
+		this._moreExpanded = stream<boolean>(false)
 		let bottomMargin = 0
 
 		const keyboardListener = (keyboardSize: number) => {
@@ -97,13 +97,14 @@ export class LoginView implements CurrentView {
 				".flex-center.pt-l",
 				m(ExpanderButtonN, {
 					label: "more_label",
-					expanded: this._moreExpanded,
+					expanded: this._moreExpanded(),
+					onExpandedChange: this._moreExpanded,
 				}),
 			),
 			m(
 				ExpanderPanelN,
 				{
-					expanded: this._moreExpanded,
+					expanded: this._moreExpanded(),
 				},
 				[
 					m(".flex-center.flex-column", [
@@ -346,6 +347,10 @@ export class LoginView implements CurrentView {
 				m.redraw()
 				return
 			}
+		}
+
+		if (args.loginWith) {
+			this._viewModel.showLoginForm()
 		}
 
 		this._viewModel.mailAddress(args.loginWith ?? "")

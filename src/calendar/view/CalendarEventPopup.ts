@@ -6,7 +6,7 @@ import {Icons} from "../../gui/base/icons/Icons"
 import type {ModalComponent} from "../../gui/base/Modal"
 import {modal} from "../../gui/base/Modal"
 import {EventPreviewView} from "./EventPreviewView"
-import type {CalendarEvent} from "../../api/entities/tutanota/CalendarEvent"
+import type {CalendarEvent} from "../../api/entities/tutanota/TypeRefs.js"
 import {Dialog} from "../../gui/base/Dialog"
 import type {EventCreateResult} from "../date/CalendarEventViewModel"
 import {CalendarEventViewModel} from "../date/CalendarEventViewModel"
@@ -30,7 +30,7 @@ export class CalendarEventPopup implements ModalComponent {
 
 	_isPersistentEvent: boolean
 	_isExternal: boolean
-	view: (arg0: Vnode<unknown>) => Children
+	view: ModalComponent["view"]
 
 	constructor(
 		calendarEvent: CalendarEvent,
@@ -48,7 +48,7 @@ export class CalendarEventPopup implements ModalComponent {
 		this._sanitizedDescription = preparedDescription
 			? htmlSanitizer.sanitizeHTML(preparedDescription, {
 				blockExternalContent: true,
-			}).text
+			}).html
 			: ""
 		this._isPersistentEvent = !!calendarEvent._ownerGroup
 		this._isExternal = !this._viewModel

@@ -6,7 +6,7 @@ own. If you prefer the auto-update feature, you can use the official [mail](http
 #### Pre-requisites:
 
 * An up-to-date version of Git is installed
-* A version of Node.js LTS 14.x is installed
+* Node.js (check package.json `engines` field for the version)
 
 #### Build steps:
 
@@ -23,12 +23,14 @@ own. If you prefer the auto-update feature, you can use the official [mail](http
 ## Building and running your own Tutanota Android app
 
 If you build and install the Tutanota Android app by yourself, keep in mind that you will not get updates automatically.
-If you prefer the auto-update feature, download the app from the Google Play Store or F-Droid.
+If you prefer the auto-update feature, download the app from the Google Play Store or F-Droid. 
+The APK is also published on the GitHub releases page https://github.com/tutao/tutanota/releases.
+You can add https://github.com/tutao/tutanota/releases.atom to your feed reader to get notified about available updates.
 
 #### Pre-requisites:
 
 * An up-to-date version of Git is installed
-* A version of Node.js LTS 16.3.* is installed
+* Node.js (check package.json `engines` field for the version)
 * An up-to-date version of the Android SDK is installed
 
 #### Build steps:
@@ -53,7 +55,7 @@ Keep in mind that your own build of Tutanota Desktop will not update automatical
 ### Pre-requisites:
 
 * An up-to-date version of Git is installed.
-* A version of Node.js LTS 14.x is installed
+* Node.js (check package.json `engines` field for the version)
 
 ### Preparations:
 

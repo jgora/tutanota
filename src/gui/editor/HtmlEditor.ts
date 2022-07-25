@@ -41,8 +41,8 @@ export class HtmlEditor implements Component {
 		if (typeof richToolbarOptions === 'undefined') {
 			richToolbarOptions = {enabled: false}
 		}
-		this._editor = new Editor(null, (html) => htmlSanitizer.sanitizeFragment(html, {blockExternalContent: false}).html)
-		this._mode = stream(HtmlEditorMode.WYSIWYG)
+		this._editor = new Editor(null, (html) => htmlSanitizer.sanitizeFragment(html, {blockExternalContent: false}).fragment)
+		this._mode = stream<HtmlEditorMode>(HtmlEditorMode.WYSIWYG)
 		this._active = false
 		this._disabled = false
 		this._showBorders = false
@@ -193,7 +193,7 @@ export class HtmlEditor implements Component {
 			}
 		} else {
 			if (this._domTextArea) {
-				return htmlSanitizer.sanitizeHTML(this._domTextArea.value, {blockExternalContent: false}).text
+				return htmlSanitizer.sanitizeHTML(this._domTextArea.value, {blockExternalContent: false}).html
 			} else {
 				return this._value()
 			}

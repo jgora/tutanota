@@ -4,10 +4,10 @@ import {lang, languageCodeToTag, languages} from "./misc/LanguageViewModel"
 import {root} from "./RootView"
 import {disableErrorHandlingDuringLogout, handleUncaughtError} from "./misc/ErrorHandler"
 import "./gui/main-styles"
-import {assertMainOrNodeBoot, bootFinished, isApp, isDesktop, isTutanotaDomain} from "./api/common/Env"
+import {assertMainOrNodeBoot, bootFinished, isApp, isDesktop, isOfflineStorageAvailable, isTutanotaDomain} from "./api/common/Env"
 import {logins} from "./api/main/LoginController"
 import type {lazy} from "@tutao/tutanota-utils"
-import {downcast, neverNull} from "@tutao/tutanota-utils"
+import {neverNull} from "@tutao/tutanota-utils"
 import {routeChange} from "./misc/RouteChange"
 import {windowFacade} from "./misc/WindowFacade"
 import {styles} from "./gui/styles"
@@ -16,9 +16,10 @@ import {Logger, replaceNativeLogger} from "./api/common/Logger"
 import {init as initSW} from "./serviceworker/ServiceWorkerClient"
 import {applicationPaths} from "./ApplicationPaths"
 import {ProgrammingError} from "./api/common/error/ProgrammingError"
-import {CurrentView} from "./gui/base/Header"
+import {CurrentView} from "./gui/Header.js"
 import {NativeWebauthnView} from "./login/NativeWebauthnView"
 import {WebauthnNativeBridge} from "./native/main/WebauthnNativeBridge"
+import {PostLoginActions} from "./login/PostLoginActions"
 
 assertMainOrNodeBoot()
 bootFinished()
@@ -37,7 +38,6 @@ if (isApp() || isDesktop()) {
 }
 
 replaceNativeLogger(window, new Logger())
-type View = Record<string, any>
 let currentView: Component<unknown> | null = null
 window.tutao = {
 	client,
@@ -46,7 +46,7 @@ window.tutao = {
 	root,
 	logins,
 	currentView,
-	locator: window.tutao?.locator, // locator is not restored on hot reload otherwise
+	locator: null,
 }
 client.init(navigator.userAgent, navigator.platform)
 
@@ -63,15 +63,10 @@ windowFacade.init()
 export const state: {
 	prefix: string | null
 	prefixWithoutFile: string | null
-} =
-	// @ts-ignore
-	typeof module != "undefined" && module.hot && module.hot.data
-		// @ts-ignore
-		? downcast(module.hot.data.state)
-		: {
-			prefix: null,
-			prefixWithoutFile: null,
-		}
+} = {
+	prefix: null,
+	prefixWithoutFile: null,
+}
 let startRoute = "/"
 
 if (state.prefix == null) {
@@ -127,20 +122,8 @@ import("./translations/en")
 		const {locator} = await import("./api/main/MainLocator")
 		await locator.init()
 
-		if (client.isIE()) {
-			import("./gui/base/NotificationOverlay.js").then(module =>
-				module.show(
-					{
-						view: () => m("", lang.get("unsupportedBrowserOverlay_msg")),
-					},
-					{
-						label: "close_alt",
-					},
-					[],
-				),
-			)
-		} else if (isDesktop()) {
-			import("./native/main/UpdatePrompt.js").then(({registerForUpdates}) => registerForUpdates(locator.native))
+		if (isDesktop()) {
+			import("./native/main/UpdatePrompt.js").then(({registerForUpdates}) => registerForUpdates(locator.desktopSettingsFacade))
 		}
 
 		const userLanguage = deviceConfig.getLanguage() && languages.find(l => l.code === deviceConfig.getLanguage())
@@ -154,8 +137,8 @@ import("./translations/en")
 				console.error("Failed to fetch translation: " + userLanguage.code, e)
 			})
 
-			if (isApp() || isDesktop()) {
-				locator.systemApp.changeSystemLanguage(language)
+			if (isDesktop()) {
+				locator.desktopSettingsFacade.changeLanguage(language.code, language.languageTag)
 			}
 		}
 
@@ -185,7 +168,7 @@ import("./translations/en")
 							promise = Promise.resolve(cache.view)
 						}
 
-						Promise.all([promise, import("./gui/base/Header")]).then(([view, {header}]) => {
+						Promise.all([promise, import("./gui/Header.js")]).then(([view, {header}]) => {
 							view.updateUrl(args, requestedPath)
 							const currentPath = m.route.get()
 							routeChange({
@@ -205,11 +188,15 @@ import("./translations/en")
 			}
 		}
 
-		const loginListener = await import("./login/LoginListener")
-		await loginListener.registerLoginListener(
-			locator.credentialsProvider,
-			locator.secondFactorHandler,
-		)
+		const {PostLoginActions} = await import("./login/PostLoginActions")
+		const {CachePostLoginAction} = await import("./offline/CachePostLoginAction")
+		logins.addPostLoginAction(new PostLoginActions(locator.credentialsProvider, locator.secondFactorHandler))
+		if(isOfflineStorageAvailable()) {
+			logins.addPostLoginAction(new CachePostLoginAction(
+				locator.calendarModel, locator.entityClient, locator.progressTracker, logins,
+			))
+		}
+
 		styles.init()
 		const {usingKeychainAuthentication} = await import("./misc/credentials/CredentialsProviderFactory")
 
@@ -224,8 +211,10 @@ import("./translations/en")
 
 			if (!hasAlreadyMigrated && hasCredentials) {
 				const migrationModule = await import("./misc/credentials/CredentialsMigration")
+				const {NativeCredentialsFacadeSendDispatcher} = await import("./native/common/generatedipc/NativeCredentialsFacadeSendDispatcher.js")
 				await locator.native.init()
-				const migration = new migrationModule.CredentialsMigration(deviceConfig, locator.deviceEncryptionFacade, locator.native)
+				const nativeCredentials = new NativeCredentialsFacadeSendDispatcher(locator.native)
+				const migration = new migrationModule.CredentialsMigration(deviceConfig, locator.deviceEncryptionFacade, nativeCredentials)
 				await migration.migrateCredentials()
 				// Reload the app just to make sure we are in the right state and don't init nativeApp twice
 				windowFacade.reload({})
@@ -240,7 +229,13 @@ import("./translations/en")
 					const {LoginViewModel} = await import("./login/LoginViewModel.js")
 					const {locator} = await import("./api/main/MainLocator")
 					const {DatabaseKeyFactory} = await import("./misc/credentials/DatabaseKeyFactory")
-					const loginViewModel = new LoginViewModel(logins, locator.credentialsProvider, locator.secondFactorHandler, new DatabaseKeyFactory(locator.deviceEncryptionFacade))
+					const loginViewModel = new LoginViewModel(
+						logins,
+						locator.credentialsProvider,
+						locator.secondFactorHandler,
+						new DatabaseKeyFactory(locator.deviceEncryptionFacade),
+						deviceConfig
+					)
 					await loginViewModel.init()
 					return new LoginView(loginViewModel, "/mail")
 				},
@@ -357,6 +352,10 @@ import("./translations/en")
 		if (isApp() || isDesktop()) {
 			await locator.native.init()
 		}
+		if (isDesktop()) {
+			const {exposeNativeInterface} = await import("./api/common/ExposeNativeInterface")
+			logins.addPostLoginAction(exposeNativeInterface(locator.native).postLoginActions)
+		}
 
 		import("./gui/InfoMessageHandler.js").then(module => module.registerInfoMessageHandler())
 		// after we set up prefixWithoutFile
@@ -424,18 +423,3 @@ WWMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM
 
 `)
 }, 5000)
-// @ts-ignore see above
-const hot = typeof module !== "undefined" && module.hot
-
-if (hot) {
-	// Save the state (mostly prefix) before the reload
-	hot.dispose((data: any) => {
-		data.state = state
-	})
-	// Import ourselves again to actually replace ourselves and all the dependencies
-	hot.accept(() => {
-		console.log("Requiring new app.js")
-
-		require(module.id)
-	})
-}

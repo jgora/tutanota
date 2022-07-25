@@ -7,31 +7,31 @@ import {getWhitelabelDomain} from "../../api/common/utils/Utils"
 import {neverNull} from "@tutao/tutanota-utils"
 import {assertMainOrNode} from "../../api/common/Env"
 import {logins} from "../../api/main/LoginController"
-import {CustomerTypeRef} from "../../api/entities/sys/Customer"
-import type {GroupInfo} from "../../api/entities/sys/GroupInfo"
-import {GroupInfoTypeRef} from "../../api/entities/sys/GroupInfo"
+import {CustomerTypeRef} from "../../api/entities/sys/TypeRefs.js"
+import type {GroupInfo} from "../../api/entities/sys/TypeRefs.js"
+import {GroupInfoTypeRef} from "../../api/entities/sys/TypeRefs.js"
 import {DropDownSelector} from "../../gui/base/DropDownSelector"
-import {GroupTypeRef} from "../../api/entities/sys/Group"
+import {GroupTypeRef} from "../../api/entities/sys/TypeRefs.js"
 import type {TableAttrs, TableLineAttrs} from "../../gui/base/TableN"
 import {ColumnWidth, TableN} from "../../gui/base/TableN"
-import type {ContactForm} from "../../api/entities/tutanota/ContactForm"
-import {ContactFormTypeRef, createContactForm} from "../../api/entities/tutanota/ContactForm"
+import type {ContactForm} from "../../api/entities/tutanota/TypeRefs.js"
+import {ContactFormTypeRef, createContactForm} from "../../api/entities/tutanota/TypeRefs.js"
 import {mapAndFilterNull, remove} from "@tutao/tutanota-utils"
 import {getContactFormUrl} from "./ContactFormViewer"
 import {HtmlEditor} from "../../gui/editor/HtmlEditor"
 import {Icons} from "../../gui/base/icons/Icons"
-import {CustomerContactFormGroupRootTypeRef} from "../../api/entities/tutanota/CustomerContactFormGroupRoot"
+import {CustomerContactFormGroupRootTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
 import {NotFoundError} from "../../api/common/error/RestError"
-import {MailboxGroupRootTypeRef} from "../../api/entities/tutanota/MailboxGroupRoot"
-import {UserTypeRef} from "../../api/entities/sys/User"
+import {MailboxGroupRootTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
+import {UserTypeRef} from "../../api/entities/sys/TypeRefs.js"
 import {showProgressDialog} from "../../gui/dialogs/ProgressDialog"
 import stream from "mithril/stream"
-import type {ContactFormLanguage} from "../../api/entities/tutanota/ContactFormLanguage"
-import {createContactFormLanguage} from "../../api/entities/tutanota/ContactFormLanguage"
+import type {ContactFormLanguage} from "../../api/entities/tutanota/TypeRefs.js"
+import {createContactFormLanguage} from "../../api/entities/tutanota/TypeRefs.js"
 import {DefaultAnimationTime} from "../../gui/animation/Animations"
 import {getDefaultContactFormLanguage} from "./ContactFormUtils"
 import {BootIcons} from "../../gui/base/icons/BootIcons"
-import {CustomerInfoTypeRef} from "../../api/entities/sys/CustomerInfo"
+import {CustomerInfoTypeRef} from "../../api/entities/sys/TypeRefs.js"
 import type {DialogHeaderBarAttrs} from "../../gui/base/DialogHeaderBar"
 import {windowFacade} from "../../misc/WindowFacade"
 import {ButtonType} from "../../gui/base/ButtonN"
@@ -428,7 +428,7 @@ export class ContactFormEditor {
 		)
 		return {
 			label: "language_label",
-			value: stream(this._languageDisplayValue),
+			value: this._languageDisplayValue,
 			disabled: true,
 			injectionsRight: () => [m(selectLanguageButton), this._languages.length > 1 ? m(deleteLanguageButton) : null],
 		}
@@ -437,7 +437,7 @@ export class ContactFormEditor {
 	_createPathFieldAttrs(): TextFieldAttrs {
 		return {
 			label: "urlPath_label",
-			value: stream(this._path),
+			value: this._path,
 			oninput: value => (this._path = value),
 			helpLabel: () => getContactFormUrl(this._brandingDomain, this._path),
 		}
@@ -446,7 +446,7 @@ export class ContactFormEditor {
 	_createPageTitleAttrs(): TextFieldAttrs {
 		return {
 			label: "pageTitle_label",
-			value: stream(this._pageTitle),
+			value: this._pageTitle,
 			oninput: value => (this._pageTitle = value),
 		}
 	}
@@ -493,7 +493,7 @@ export class ContactFormEditor {
 
 		return {
 			label: "receivingMailbox_label",
-			value: stream(this._receivingMailboxDisplayValue),
+			value: this._receivingMailboxDisplayValue,
 			disabled: true,
 			injectionsRight: () => (groupsDropdown ? [m(userDropdown), m(groupsDropdown)] : [m(userDropdown)]),
 		}

@@ -6,21 +6,17 @@ import type {DesktopConfig} from "./config/DesktopConfig"
 import {DesktopTray} from "./tray/DesktopTray"
 import type {DesktopNotifier} from "./DesktopNotifier"
 import {LOGIN_TITLE} from "../api/common/Env"
-import type {DesktopDownloadManager} from "./DesktopDownloadManager"
-import type {IPC} from "./IPC"
 import {DesktopContextMenu} from "./DesktopContextMenu"
 import {log} from "./DesktopLog"
 import type {LocalShortcutManager} from "./electron-localshortcut/LocalShortcut"
-import {getExportDirectoryPath} from "./DesktopFileExport"
-import path from "path"
-import {fileExists} from "./PathUtils"
-import type {MailExportMode} from "../mail/export/Exporter"
 import {BuildConfigKey, DesktopConfigEncKey, DesktopConfigKey} from "./config/ConfigKeys"
 import type {SseInfo} from "./sse/DesktopSseClient"
 import {isRectContainedInRect} from "./DesktopUtils"
 import {downcast} from "@tutao/tutanota-utils"
-import {ThemeManager} from "./ThemeManager"
+import {DesktopThemeFacade} from "./DesktopThemeFacade"
 import {ElectronExports, WebContentsEvent} from "./ElectronExportTypes";
+import {OfflineDbFacade} from "./db/OfflineDbFacade"
+import {RemoteBridge} from "./ipc/RemoteBridge.js"
 
 export type WindowBounds = {
 	rect: Rectangle
@@ -35,12 +31,10 @@ export class WindowManager {
 	private readonly _notifier: DesktopNotifier
 	private _contextMenu!: DesktopContextMenu
 	private readonly _electron: ElectronExports
-	private readonly _themeManager: ThemeManager
-	ipc!: IPC
-	readonly dl: DesktopDownloadManager
+	private themeFacade!: DesktopThemeFacade
 	private readonly _newWindowFactory: (noAutoLogin?: boolean) => Promise<ApplicationWindow>
-	private readonly _dragIcons: Record<MailExportMode, NativeImage>
 	private _currentBounds: WindowBounds
+	private remoteBridge!: RemoteBridge
 
 	constructor(
 		conf: DesktopConfig,
@@ -48,8 +42,8 @@ export class WindowManager {
 		notifier: DesktopNotifier,
 		electron: ElectronExports,
 		localShortcut: LocalShortcutManager,
-		dl: DesktopDownloadManager,
-		themeManager: ThemeManager,
+		private readonly icon: NativeImage,
+		private readonly offlineDbFacade: OfflineDbFacade,
 	) {
 		this._conf = conf
 
@@ -60,17 +54,12 @@ export class WindowManager {
 
 		this._tray = tray
 		this._notifier = notifier
-		this.dl = dl
 		this._electron = electron
-		this._themeManager = themeManager
 
 		this._newWindowFactory = noAutoLogin => this._newWindow(electron, localShortcut, noAutoLogin ?? null)
-
-		this._dragIcons = {
-			eml: this._tray.getIconByName("eml.png"),
-			msg: this._tray.getIconByName("msg.png"),
-		}
-		// this is the global default for window placement & scale
+		// this is the old default for window placement & scale
+		// should never be used because the config now contains
+		// a new default value.
 		this._currentBounds = {
 			scale: 1,
 			fullscreen: false,
@@ -86,9 +75,10 @@ export class WindowManager {
 	/**
 	 * Late initialization to break the dependency cycle.
 	 */
-	setIPC(ipc: IPC) {
-		this.ipc = ipc
-		this._contextMenu = new DesktopContextMenu(this._electron, ipc)
+	lateInit(contextMenu: DesktopContextMenu, themeFacade: DesktopThemeFacade, remoteBridge: RemoteBridge) {
+		this.themeFacade = themeFacade
+		this._contextMenu = contextMenu
+		this.remoteBridge = remoteBridge
 	}
 
 	async newWindow(showWhenReady: boolean, noAutoLogin?: boolean): Promise<ApplicationWindow> {
@@ -99,8 +89,8 @@ export class WindowManager {
 			this.saveBounds(w.getBounds())
 		})
 		 .on("closed", () => {
+			 w.setUserId(null)
 			 windows.splice(windows.indexOf(w), 1)
-
 			 this._tray.update(this._notifier)
 		 })
 		 .on("focus", () => {
@@ -113,7 +103,7 @@ export class WindowManager {
 		 })
 		 .on("page-title-updated", ev => {
 			 if (w.getTitle() === LOGIN_TITLE) {
-				 w.setUserInfo(null)
+				 w.setUserId(null)
 			 }
 
 			 this._tray.update(this._notifier)
@@ -171,7 +161,7 @@ export class WindowManager {
 	async invalidateAlarms(windowId?: number): Promise<void> {
 		if (windowId != null) {
 			log.debug("invalidating alarms for window", windowId)
-			await this.ipc.sendRequest(windowId, "invalidateAlarms", [])
+			await this.get(windowId)?.commonNativeFacade.invalidateAlarms()
 		} else {
 			log.debug("invalidating alarms for all windows")
 			await Promise.all(this.getAll().map(w => this.invalidateAlarms(w.id).catch(e => log.debug("couldn't invalidate alarms for window", w.id, e))))
@@ -197,10 +187,6 @@ export class WindowManager {
 
 		this._currentBounds.scale = scale
 		windows.forEach(w => w.setZoomFactor(scale))
-	}
-
-	async getIcon(): Promise<NativeImage> {
-		return this._tray.getIconByName(await this._conf.getConst(BuildConfigKey.iconName))
 	}
 
 	get(id: number): ApplicationWindow | null {
@@ -243,7 +229,7 @@ export class WindowManager {
 	}
 
 	async findWindowWithUserId(userId: string): Promise<ApplicationWindow> {
-		return windows.find(w => w.getUserId() === userId) || windows.find(w => w.getUserInfo() === null) || this.newWindow(true, true)
+		return windows.find(w => w.getUserId() === userId) ?? windows.find(w => w.getUserId() === null) ?? this.newWindow(true, true)
 	}
 
 	/**
@@ -284,24 +270,6 @@ export class WindowManager {
 		const updateUrl = await this._conf.getConst(BuildConfigKey.updateUrl)
 		const dictUrl = updateUrl && updateUrl !== "" ? updateUrl : "https://mail.tutanota.com/desktop/"
 		// custom builds get the dicts from us as well
-		const icon = await this.getIcon()
-		return new ApplicationWindow(this, desktopHtml, icon, electron, localShortcut, this._themeManager, dictUrl, noAutoLogin)
-	}
-
-	async startNativeDrag(filenames: Array<string>, windowId: number) {
-		const exportDir = await getExportDirectoryPath(this.dl)
-		const files = filenames.map(fileName => path.join(exportDir, fileName)).filter(fileExists)
-		const window = this.get(windowId)
-
-		if (window) {
-			const exportMode: MailExportMode = await this._conf.getVar(DesktopConfigKey.mailExportMode)
-			const icon = this._dragIcons[exportMode]
-
-			window._browserWindow.webContents.startDrag({
-				file: '',
-				files,
-				icon,
-			})
-		}
+		return new ApplicationWindow(this, desktopHtml, this.icon, electron, localShortcut, this.themeFacade, this.offlineDbFacade, this.remoteBridge, dictUrl, noAutoLogin)
 	}
 }

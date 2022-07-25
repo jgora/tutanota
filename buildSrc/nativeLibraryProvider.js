@@ -3,7 +3,7 @@
  */
 import path from "path"
 import fs from "fs"
-import options from "commander"
+import {program} from "commander"
 import {fileURLToPath} from "url"
 import {fileExists, getCanonicalPlatformName, getElectronVersion, getInstalledModuleVersion, LogWriter} from "./buildUtils.js"
 import {createRequire} from "module"
@@ -11,7 +11,7 @@ import {createRequire} from "module"
 import {spawn} from "child_process"
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	options
+	await program
 		.usage('<module> [...options]')
 		.description('Utility for ensuring that a built and cached version of a given node module exists. Will build using node-gyp or download the module with prebuild-install as necessary')
 		.arguments('<module>')
@@ -159,7 +159,7 @@ export async function buildNativeModule({nodeModule, environment, rootDir, log})
 						? [
 							"--runtime=electron",
 							'--dist-url=https://www.electronjs.org/headers',
-							`--target=${getElectronVersion(log)}`,
+							`--target=${await getElectronVersion(log)}`,
 						]
 						: []
 				)
@@ -198,7 +198,7 @@ export async function getPrebuiltNativeModuleForWindows(
 		throw new Error("Should not be getting prebuilt native modules in CI")
 	}
 
-	const target = getPrebuildConfiguration(nodeModule, log)
+	const target = await getPrebuildConfiguration(nodeModule, log)
 
 	await callProgram({
 		command: "npm exec",
@@ -227,7 +227,7 @@ export async function getPrebuiltNativeModuleForWindows(
  * So we just define them here and throw an error if we try to obtain a configuration for an unknown module
  * @return {{ runtime: string, version: number} | null}
  */
-function getPrebuildConfiguration(nodeModule, environment, log) {
+async function getPrebuildConfiguration(nodeModule, environment, log) {
 	switch (nodeModule) {
 		// Keytar uses NAPI v3, so we just specify that as our desired prebuild
 		case "keytar":
@@ -241,7 +241,7 @@ function getPrebuildConfiguration(nodeModule, environment, log) {
 			return environment === "electron"
 				? {
 					runtime: "electron",
-					version: getElectronVersion(log)
+					version: await getElectronVersion(log)
 				}
 				: null
 		default:
@@ -293,11 +293,11 @@ function callProgram({command, args, cwd, log}) {
  */
 async function getCachedLibPath({rootDir, nodeModule, environment, platform}, log) {
 	const dir = path.join(rootDir, "native-cache", environment)
-	const libraryVersion = getInstalledModuleVersion(nodeModule, log)
+	const libraryVersion = await getInstalledModuleVersion(nodeModule, log)
 	await fs.promises.mkdir(dir, {recursive: true})
 
 	if (environment === "electron") {
-		return path.resolve(dir, `${nodeModule}-${libraryVersion}-electron-${getInstalledModuleVersion("electron", log)}-${platform}.node`)
+		return path.resolve(dir, `${nodeModule}-${libraryVersion}-electron-${await getInstalledModuleVersion("electron", log)}-${platform}.node`)
 	} else {
 		return path.resolve(dir, `${nodeModule}-${libraryVersion}-${platform}.node`)
 	}

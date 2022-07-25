@@ -3,13 +3,13 @@ import {lang} from "../../misc/LanguageViewModel"
 import {BookingItemFeatureType} from "../../api/common/TutanotaConstants"
 import {ActionBar} from "../../gui/base/ActionBar"
 import * as ContactFormEditor from "./ContactFormEditor"
-import type {ContactForm} from "../../api/entities/tutanota/ContactForm"
-import {createContactForm} from "../../api/entities/tutanota/ContactForm"
+import type {ContactForm} from "../../api/entities/tutanota/TypeRefs.js"
+import {createContactForm} from "../../api/entities/tutanota/TypeRefs.js"
 import {loadGroupInfos} from "../LoadingUtils"
 import {Icons} from "../../gui/base/icons/Icons"
 import {Dialog} from "../../gui/base/Dialog"
 import {isNotNull, neverNull} from "@tutao/tutanota-utils"
-import {GroupInfo, GroupInfoTypeRef} from "../../api/entities/sys/GroupInfo"
+import {GroupInfo, GroupInfoTypeRef} from "../../api/entities/sys/TypeRefs.js"
 import {getDefaultContactFormLanguage} from "./ContactFormUtils.js"
 import {showProgressDialog} from "../../gui/dialogs/ProgressDialog"
 import type {EntityUpdateData} from "../../api/main/EventController"
@@ -20,7 +20,7 @@ import {TextFieldN} from "../../gui/base/TextFieldN"
 import {UpdatableSettingsDetailsViewer} from "../SettingsView"
 import {assertMainOrNode} from "../../api/common/Env"
 import {locator} from "../../api/main/MainLocator"
-import {ContactFormLanguage} from "../../api/entities/tutanota/ContactFormLanguage"
+import {ContactFormLanguage} from "../../api/entities/tutanota/TypeRefs.js"
 import {ButtonAttrs} from "../../gui/base/ButtonN"
 
 assertMainOrNode()
@@ -56,19 +56,19 @@ export class ContactFormViewer implements UpdatableSettingsDetailsViewer {
 				]),
 				m(TextFieldN, {
 					label: "receivingMailbox_label",
-					value: stream(this.mailGroupInfo ? getGroupInfoDisplayName(this.mailGroupInfo) : lang.get("loading_msg")),
+					value: this.mailGroupInfo ? getGroupInfoDisplayName(this.mailGroupInfo) : lang.get("loading_msg"),
 					disabled: true,
 				}),
 				this.renderParticipation(),
 				m(".h4.mt-l", lang.get("display_action")),
 				m(TextFieldN, {
 					label: "url_label",
-					value: stream(getContactFormUrl(this.brandingDomain, this.contactForm.path)),
+					value: getContactFormUrl(this.brandingDomain, this.contactForm.path),
 					disabled: true,
 				} as const),
 				m(TextFieldN, {
 					label: "pageTitle_label",
-					value: stream(this.language.pageTitle),
+					value: this.language.pageTitle,
 					disabled: true,
 				}),
 			]),
@@ -109,7 +109,7 @@ export class ContactFormViewer implements UpdatableSettingsDetailsViewer {
 			const mailGroupNames = this.participationGroupInfos.map(groupInfo => getGroupInfoDisplayName(groupInfo))
 			return m(".mt-l", m(TextFieldN, {
 				label: "responsiblePersons_label",
-				value: stream(mailGroupNames.join("; ")),
+				value: mailGroupNames.join("; "),
 				disabled: true,
 			}))
 		}

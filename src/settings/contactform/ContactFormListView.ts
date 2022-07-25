@@ -9,18 +9,18 @@ import type {SettingsView, UpdatableSettingsViewer} from "../SettingsView"
 import {LazyLoaded, neverNull, ofClass} from "@tutao/tutanota-utils"
 import {ContactFormViewer, getContactFormUrl} from "./ContactFormViewer"
 import * as ContactFormEditor from "./ContactFormEditor"
-import type {ContactForm} from "../../api/entities/tutanota/ContactForm"
-import {ContactFormTypeRef} from "../../api/entities/tutanota/ContactForm"
+import type {ContactForm} from "../../api/entities/tutanota/TypeRefs.js"
+import {ContactFormTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
 import {getWhitelabelDomain} from "../../api/common/utils/Utils"
-import {CustomerTypeRef} from "../../api/entities/sys/Customer"
-import type {CustomerInfo} from "../../api/entities/sys/CustomerInfo"
-import {CustomerInfoTypeRef} from "../../api/entities/sys/CustomerInfo"
+import {CustomerTypeRef} from "../../api/entities/sys/TypeRefs.js"
+import type {CustomerInfo} from "../../api/entities/sys/TypeRefs.js"
+import {CustomerInfoTypeRef} from "../../api/entities/sys/TypeRefs.js"
 import {logins} from "../../api/main/LoginController"
 import {Dialog} from "../../gui/base/Dialog"
 import {OperationType} from "../../api/common/TutanotaConstants"
 import {Icon} from "../../gui/base/Icon"
 import {Icons} from "../../gui/base/icons/Icons"
-import {CustomerContactFormGroupRootTypeRef} from "../../api/entities/tutanota/CustomerContactFormGroupRoot"
+import {CustomerContactFormGroupRootTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
 import {getAdministratedGroupIds, getDefaultContactFormLanguage} from "./ContactFormUtils"
 import type {EntityUpdateData} from "../../api/main/EventController"
 import {isUpdateForTypeRef} from "../../api/main/EventController"
@@ -56,20 +56,15 @@ export class ContactFormListView implements UpdatableSettingsViewer {
 
 		this.list = new List({
 			rowHeight: size.list_row_height,
-			fetch: (startId, count) => {
-				if (startId === GENERATED_MAX_ID) {
-					return this.listId.getAsync().then(listId => {
-						return locator.entityClient.loadAll(ContactFormTypeRef, listId).then(contactForms => {
-							// we have to set loadedCompletely to make sure that fetch is never called again and also that new contact forms are inserted into the list, even at the end
-							this.list.setLoadedCompletely()
-
-							// we return all contact forms because we have already loaded all contact forms and the scroll bar shall have the complete size.
-							return filterContactFormsForLocalAdmin(contactForms)
-						})
-					})
-				} else {
+			fetch: async (startId, count) => {
+				if (startId !== GENERATED_MAX_ID) {
 					throw new Error("fetch user group infos called for specific start id")
 				}
+				const listId = await this.listId.getAsync()
+				// we return all contact forms because we have already loaded all contact forms and the scroll bar shall have the complete size.
+				const contactForms = await locator.entityClient.loadAll(ContactFormTypeRef, listId)
+				const items = await filterContactFormsForLocalAdmin(contactForms)
+				return {items, complete: true}
 			},
 			loadSingle: elementId => {
 				return this.listId.getAsync().then(listId => {
@@ -86,7 +81,6 @@ export class ContactFormListView implements UpdatableSettingsViewer {
 			elementSelected: (entities, elementClicked, selectionChanged, multiSelectionActive) =>
 				this.elementSelected(entities, elementClicked, selectionChanged, multiSelectionActive),
 			createVirtualRow: () => new ContactFormRow(this.customerInfo),
-			showStatus: false,
 			className: className,
 			swipe: {
 				enabled: false,

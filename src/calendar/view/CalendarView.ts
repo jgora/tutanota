@@ -1,14 +1,14 @@
 import m, {Children} from "mithril"
-import type {CurrentView} from "../../gui/base/Header"
+import type {CurrentView} from "../../gui/Header.js"
 import {ColumnType, ViewColumn} from "../../gui/base/ViewColumn"
 import {lang, TranslationKey} from "../../misc/LanguageViewModel"
-import {ViewSlider} from "../../gui/base/ViewSlider"
+import {ViewSlider} from "../../gui/nav/ViewSlider.js"
 import type {Shortcut} from "../../misc/KeyManager"
 import {keyManager} from "../../misc/KeyManager"
 import {Icons} from "../../gui/base/icons/Icons"
 import {downcast, incrementDate, LazyLoaded, memoized, ofClass} from "@tutao/tutanota-utils"
-import type {CalendarEvent} from "../../api/entities/tutanota/CalendarEvent"
-import {CalendarEventTypeRef} from "../../api/entities/tutanota/CalendarEvent"
+import type {CalendarEvent} from "../../api/entities/tutanota/TypeRefs.js"
+import {CalendarEventTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
 import {logins} from "../../api/main/LoginController"
 import {defaultCalendarColor, GroupType, Keys, ShareCapability, TimeFormat} from "../../api/common/TutanotaConstants"
 import {locator} from "../../api/main/MainLocator"
@@ -20,17 +20,17 @@ import {CalendarMonthView} from "./CalendarMonthView"
 import {DateTime} from "luxon"
 import {NotFoundError} from "../../api/common/error/RestError"
 import {CalendarAgendaView} from "./CalendarAgendaView"
-import type {GroupInfo} from "../../api/entities/sys/GroupInfo"
+import type {GroupInfo} from "../../api/entities/sys/TypeRefs.js"
 import {showEditCalendarDialog} from "./EditCalendarDialog"
-import type {GroupSettings} from "../../api/entities/tutanota/GroupSettings"
-import {createGroupSettings} from "../../api/entities/tutanota/GroupSettings"
+import type {GroupSettings} from "../../api/entities/tutanota/TypeRefs.js"
+import {createGroupSettings} from "../../api/entities/tutanota/TypeRefs.js"
 import {styles} from "../../gui/styles"
 import {MultiDayCalendarView} from "./MultiDayCalendarView"
 import {Dialog} from "../../gui/base/Dialog"
 import {isApp} from "../../api/common/Env"
-import type {UserSettingsGroupRoot} from "../../api/entities/tutanota/UserSettingsGroupRoot"
+import type {UserSettingsGroupRoot} from "../../api/entities/tutanota/TypeRefs.js"
 import {size} from "../../gui/size"
-import {FolderColumnView} from "../../gui/base/FolderColumnView"
+import {FolderColumnView} from "../../gui/FolderColumnView.js"
 import {deviceConfig} from "../../misc/DeviceConfig"
 import {exportCalendar, showCalendarImportDialog} from "../export/CalendarImporterDialog"
 import {CalendarEventViewModel, createCalendarEventViewModel} from "../date/CalendarEventViewModel"
@@ -51,6 +51,7 @@ import type {CalendarInfo} from "../model/CalendarModel"
 import {ReceivedGroupInvitationsModel} from "../../sharing/model/ReceivedGroupInvitationsModel"
 import {client} from "../../misc/ClientDetector"
 import type Stream from "mithril/stream"
+import {header} from "../../gui/Header.js"
 
 export const SELECTED_DATE_INDICATOR_THICKNESS = 4
 export type GroupColors = Map<Id, string>
@@ -290,7 +291,7 @@ export class CalendarView implements CurrentView {
 				}[this._currentViewType]
 			},
 		)
-		this.viewSlider = new ViewSlider([this.sidebarColumn, this.contentColumn], "CalendarView")
+		this.viewSlider = new ViewSlider(header,[this.sidebarColumn, this.contentColumn], "CalendarView")
 
 		const shortcuts = this._setupShortcuts()
 

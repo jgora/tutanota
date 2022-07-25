@@ -2,11 +2,28 @@ import {CacheStorage, Range} from "./EntityRestCache"
 import {ProgrammingError} from "../../common/error/ProgrammingError"
 import {ListElementEntity, SomeEntity} from "../../common/EntityTypes"
 import {TypeRef} from "@tutao/tutanota-utils"
+import {OfflineStorage} from "../offline/OfflineStorage.js"
+import {WorkerImpl} from "../WorkerImpl"
+import {uint8ArrayToKey} from "@tutao/tutanota-crypto"
+import {EphemeralCacheStorage} from "./EphemeralCacheStorage"
+import {EntityRestClient} from "./EntityRestClient.js"
+import {CustomCacheHandlerMap} from "./CustomCacheHandler.js"
 
-export type StorageInitArgs = {persistent: true, databaseKey: Uint8Array, userId: Id} | {persistent: false}
+interface OfflineStorageInitArgs {
+	userId: Id
+	databaseKey: Uint8Array
+	timeRangeDays: number | null
+}
+
+interface CacheStorageInitReturn {
+	/** If the created storage is an OfflineStorage */
+	isPersistent: boolean
+	/** If a OfflineStorage was created, whether or not the backing database was created fresh or already existed */
+	isNewOfflineDb: boolean
+}
 
 export interface LateInitializedCacheStorage extends CacheStorage {
-	initialize(args: StorageInitArgs): Promise<void>;
+	initialize(args: OfflineStorageInitArgs | null): Promise<CacheStorageInitReturn>;
 }
 
 /**
@@ -25,8 +42,10 @@ export class LateInitializedCacheStorageImpl implements LateInitializedCacheStor
 	private _inner: CacheStorage | null = null
 
 	constructor(
-		private factory: (args: StorageInitArgs) => Promise<CacheStorage>
-	) {}
+		private readonly worker: WorkerImpl,
+		private readonly offlineStorageProvider: () => Promise<null | OfflineStorage>,
+	) {
+	}
 
 	private get inner(): CacheStorage {
 		if (this._inner == null) {
@@ -36,11 +55,40 @@ export class LateInitializedCacheStorageImpl implements LateInitializedCacheStor
 		return this._inner
 	}
 
-	async initialize(args: StorageInitArgs): Promise<void> {
-		if (this._inner != null) {
-			throw new ProgrammingError("Tried to initialize storage  twice!")
+	async initialize(args: OfflineStorageInitArgs | null): Promise<CacheStorageInitReturn> {
+		// We might call this multiple times.
+		// This happens when persistent credentials login fails and we need to start with new cache for new login.
+		const {storage, isPersistent, isNewOfflineDb} = await this.getStorage(args)
+		this._inner = storage
+		return {
+			isPersistent,
+			isNewOfflineDb
 		}
-		this._inner = await this.factory(args)
+	}
+
+	private async getStorage(args: OfflineStorageInitArgs | null): Promise<{storage: CacheStorage, isPersistent: boolean, isNewOfflineDb: boolean}> {
+		if (args != null) {
+			try {
+				const storage = await this.offlineStorageProvider()
+				if (storage != null) {
+					const isNewOfflineDb = await storage.init(args.userId, uint8ArrayToKey(args.databaseKey), args.timeRangeDays)
+					return {
+						storage,
+						isPersistent: true,
+						isNewOfflineDb
+					}
+				}
+			} catch (e) {
+				// Precaution in case something bad happens to offline database. We want users to still be able to log in.
+				console.error("Error while initializing offline cache storage", e)
+				this.worker.sendError(e)
+			}
+		}
+		return {
+			storage: new EphemeralCacheStorage(),
+			isPersistent: false,
+			isNewOfflineDb: false
+		}
 	}
 
 	deleteIfExists<T extends SomeEntity>(typeRef: TypeRef<T>, listId: Id | null, id: Id): Promise<void> {
@@ -75,6 +123,10 @@ export class LateInitializedCacheStorageImpl implements LateInitializedCacheStor
 		return this.inner.provideFromRange(typeRef, listId, start, count, reverse)
 	}
 
+	getWholeList<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id): Promise<Array<T>> {
+		return this.inner.getWholeList(typeRef, listId)
+	}
+
 	purgeStorage(): Promise<void> {
 		return this.inner.purgeStorage()
 	}
@@ -102,5 +154,9 @@ export class LateInitializedCacheStorageImpl implements LateInitializedCacheStor
 
 	setUpperRangeForList<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id, id: Id): Promise<void> {
 		return this.inner.setUpperRangeForList(typeRef, listId, id)
+	}
+
+	getCustomCacheHandlerMap(entityRestClient: EntityRestClient): CustomCacheHandlerMap {
+		return this.inner.getCustomCacheHandlerMap(entityRestClient)
 	}
 }

@@ -30,7 +30,7 @@ export function showShortcutDialog(shortcuts: Array<Shortcut>): Promise<void> {
 			resolve()
 		}
 
-		const headerAttrs = {
+		const headerAttrs: DialogHeaderBarAttrs = {
 			left: [
 				{
 					label: "close_alt",
@@ -39,7 +39,7 @@ export function showShortcutDialog(shortcuts: Array<Shortcut>): Promise<void> {
 				},
 			],
 			middle: () => lang.get("keyboardShortcuts_title"),
-		} as DialogHeaderBarAttrs
+		}
 		dialog = Dialog.largeDialogN(headerAttrs, ShortcutDialog, {
 			shortcuts,
 		})
@@ -69,7 +69,7 @@ class ShortcutDialog implements Component<ShortcutDialogAttrs> {
 			.filter(shortcut => shortcut.enabled == null || shortcut.enabled())
 			.map(shortcut => ({
 				label: () => makeShortcutName(shortcut),
-				value: stream(lang.get(shortcut.help)),
+				value: lang.get(shortcut.help),
 				disabled: true,
 			}))
 		return m(

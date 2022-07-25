@@ -6,7 +6,7 @@ import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
 import {isDomainName} from "../misc/FormatValidator"
 import stream from "mithril/stream"
 import {getWhitelabelDomain} from "../api/common/utils/Utils"
-import type {CustomerInfo} from "../api/entities/sys/CustomerInfo"
+import type {CustomerInfo} from "../api/entities/sys/TypeRefs.js"
 import {TextFieldN} from "../gui/base/TextFieldN"
 import {ofClass} from "@tutao/tutanota-utils"
 import {locator} from "../api/main/MainLocator"
@@ -60,14 +60,14 @@ export function show(customerInfo: CustomerInfo): void {
 	// only show a dropdown if a domain is already selected for tutanota login or if there is exactly one domain available
 	const whitelabelDomainInfo = getWhitelabelDomain(customerInfo)
 	const domain = whitelabelDomainInfo ? stream(whitelabelDomainInfo.domain) : stream("")
-	const domainFieldAttrs = {
-		label: "whitelabelDomain_label",
-		value: domain,
-		disabled: whitelabelDomainInfo ? true : false,
-	} as const
 	let form = {
 		view: () => {
-			return [m(TextFieldN, domainFieldAttrs)]
+			return m(TextFieldN, {
+				label: "whitelabelDomain_label",
+				value: domain(),
+				oninput: domain,
+				disabled: whitelabelDomainInfo ? true : false,
+			})
 		},
 	}
 	let dialog = Dialog.showActionDialog({

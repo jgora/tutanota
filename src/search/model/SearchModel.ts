@@ -1,5 +1,5 @@
 import stream from "mithril/stream"
-import {MailTypeRef} from "../../api/entities/tutanota/Mail"
+import {MailTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
 import {NOTHING_INDEXED_TIMESTAMP} from "../../api/common/TutanotaConstants"
 import {DbError} from "../../api/common/error/DbError"
 import type {SearchIndexStateInfo, SearchRestriction, SearchResult} from "../../api/worker/search/SearchTypes"
@@ -30,9 +30,9 @@ export class SearchModel {
 	constructor(searchFacade: SearchFacade) {
 		this._searchFacade = searchFacade
 		this.result = stream()
-		this.lastQuery = stream("")
+		this.lastQuery = stream<string | null>("")
 		this.indexingSupported = true
-		this.indexState = stream({
+		this.indexState = stream<SearchIndexStateInfo>({
 			initializing: true,
 			mailIndexEnabled: false,
 			progress: 0,

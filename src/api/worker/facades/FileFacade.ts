@@ -1,15 +1,11 @@
-import {_TypeModel as FileDataDataGetTypModel, createFileDataDataGet} from "../../entities/tutanota/FileDataDataGet"
 import {addParamsToUrl, isSuspensionResponse, RestClient} from "../rest/RestClient"
-import {encryptBytes, resolveSessionKey} from "../crypto/CryptoFacade"
-import type {File as TutanotaFile} from "../../entities/tutanota/File"
-import {_TypeModel as FileTypeModel} from "../../entities/tutanota/File"
+import {CryptoFacade, encryptBytes} from "../crypto/CryptoFacade"
+import type {File as TutanotaFile} from "../../entities/tutanota/TypeRefs.js"
+import {createFileDataDataGet, createFileDataDataPost, FileDataDataGetTypeRef, FileTypeRef} from "../../entities/tutanota/TypeRefs.js"
 import {assert, assertNotNull, filterInt, neverNull} from "@tutao/tutanota-utils"
-import {LoginFacadeImpl} from "./LoginFacade"
-import {createFileDataDataPost} from "../../entities/tutanota/FileDataDataPost"
 import {GroupType} from "../../common/TutanotaConstants"
-import {_TypeModel as FileDataDataReturnTypeModel} from "../../entities/tutanota/FileDataDataReturn"
 
-import {HttpMethod, MediaType} from "../../common/EntityFunctions"
+import {HttpMethod, MediaType, resolveTypeReference} from "../../common/EntityFunctions"
 import {assertWorkerOrNode, getHttpOrigin, Mode} from "../../common/Env"
 import {handleRestError} from "../../common/error/RestError"
 import {convertToDataFile, DataFile} from "../../common/DataFile"
@@ -21,75 +17,63 @@ import {InstanceMapper} from "../crypto/InstanceMapper"
 import {FileReference} from "../../common/utils/FileUtils";
 import {IServiceExecutor} from "../../common/ServiceRequest"
 import {FileDataService} from "../../entities/tutanota/Services"
+import modelInfo from "../../entities/tutanota/ModelInfo"
+import {UserFacade} from "./UserFacade"
 
 assertWorkerOrNode()
 const REST_PATH = "/rest/tutanota/filedataservice"
 
 export class FileFacade {
-	_login: LoginFacadeImpl
-	_restClient: RestClient
-	_suspensionHandler: SuspensionHandler
-	_fileApp: NativeFileApp
-	_aesApp: AesApp
-	_instanceMapper: InstanceMapper
 
 	constructor(
-		login: LoginFacadeImpl,
-		restClient: RestClient,
-		suspensionHandler: SuspensionHandler,
-		fileApp: NativeFileApp,
-		aesApp: AesApp,
-		instanceMapper: InstanceMapper,
+		private readonly user: UserFacade,
+		private readonly restClient: RestClient,
+		private readonly suspensionHandler: SuspensionHandler,
+		private readonly fileApp: NativeFileApp,
+		private readonly aesApp: AesApp,
+		private readonly instanceMapper: InstanceMapper,
 		private readonly serviceExecutor: IServiceExecutor,
-	) {
-		this._login = login
-		this._restClient = restClient
-		this._suspensionHandler = suspensionHandler
-		this._fileApp = fileApp
-		this._aesApp = aesApp
-		this._instanceMapper = instanceMapper
-	}
+		private readonly cryptoFacade: CryptoFacade,
+	) {}
 
 	clearFileData(): Promise<void> {
-		return this._fileApp.clearFileData()
+		return this.fileApp.clearFileData()
 	}
 
-	downloadFileContent(file: TutanotaFile): Promise<DataFile> {
+	async downloadFileContent(file: TutanotaFile): Promise<DataFile> {
 		let requestData = createFileDataDataGet()
 		requestData.file = file._id
 		requestData.base64 = false
-		return resolveSessionKey(FileTypeModel, file).then(sessionKey => {
-			return this._instanceMapper.encryptAndMapToLiteral(FileDataDataGetTypModel, requestData, null).then(entityToSend => {
-				let headers = this._login.createAuthHeaders()
+		const sessionKey = await this.cryptoFacade.resolveSessionKeyForInstance(file)
+		const entityToSend = await this.instanceMapper.encryptAndMapToLiteral(await resolveTypeReference(FileDataDataGetTypeRef), requestData, null)
+		let headers = this.user.createAuthHeaders()
 
-				headers["v"] = FileDataDataGetTypModel.version
-				let body = JSON.stringify(entityToSend)
-				return this._restClient.request(REST_PATH, HttpMethod.GET, {body, responseType: MediaType.Binary, headers}).then(data => {
-					return convertToDataFile(file, aes128Decrypt(neverNull(sessionKey), data))
-				})
-			})
-		})
+		headers["v"] = String(modelInfo.version)
+		let body = JSON.stringify(entityToSend)
+		const data = await this.restClient.request(REST_PATH, HttpMethod.GET, {body, responseType: MediaType.Binary, headers})
+		return convertToDataFile(file, aes128Decrypt(neverNull(sessionKey), data))
 	}
 
 	async downloadFileContentNative(file: TutanotaFile): Promise<FileReference> {
 		assert(env.mode === Mode.App || env.mode === Mode.Desktop, "Environment is not app or Desktop!")
 
-		if (this._suspensionHandler.isSuspended()) {
-			return this._suspensionHandler.deferRequest(() => this.downloadFileContentNative(file))
+		if (this.suspensionHandler.isSuspended()) {
+			return this.suspensionHandler.deferRequest(() => this.downloadFileContentNative(file))
 		}
 
-		const sessionKey = assertNotNull(await resolveSessionKey(FileTypeModel, file), "Session key for TutanotaFile is null")
+		const sessionKey = assertNotNull(await this.cryptoFacade.resolveSessionKeyForInstance(file), "Session key for TutanotaFile is null")
 
 		const requestData = createFileDataDataGet({
 			file: file._id,
 			base64: false,
 		})
 
-		const entityToSend = await this._instanceMapper.encryptAndMapToLiteral(FileDataDataGetTypModel, requestData, null)
+		const FileDataDataGetTypModel = await resolveTypeReference(FileDataDataGetTypeRef)
+		const entityToSend = await this.instanceMapper.encryptAndMapToLiteral(FileDataDataGetTypModel, requestData, null)
 
-		const headers = this._login.createAuthHeaders()
+		const headers = this.user.createAuthHeaders()
 
-		headers["v"] = FileDataDataGetTypModel.version
+		headers["v"] = String(modelInfo.version)
 		const body = JSON.stringify(entityToSend)
 		const queryParams = {
 			_body: body,
@@ -101,17 +85,17 @@ export class FileFacade {
 			errorId,
 			precondition,
 			suspensionTime
-		} = await this._fileApp.download(url.toString(), file.name, headers)
+		} = await this.fileApp.download(url.toString(), file.name, headers)
 
 		if (suspensionTime && isSuspensionResponse(statusCode, suspensionTime)) {
-			this._suspensionHandler.activateSuspensionIfInactive(Number(suspensionTime))
+			this.suspensionHandler.activateSuspensionIfInactive(Number(suspensionTime))
 
-			return this._suspensionHandler.deferRequest(() => this.downloadFileContentNative(file))
+			return this.suspensionHandler.deferRequest(() => this.downloadFileContentNative(file))
 		} else if (statusCode === 200 && encryptedFileUri != null) {
-			const decryptedFileUri = await this._aesApp.aesDecryptFile(neverNull(sessionKey), encryptedFileUri)
+			const decryptedFileUri = await this.aesApp.aesDecryptFile(neverNull(sessionKey), encryptedFileUri)
 
 			try {
-				await this._fileApp.deleteFile(encryptedFileUri)
+				await this.fileApp.deleteFile(encryptedFileUri)
 			} catch (e) {
 				console.warn("Failed to delete encrypted file", encryptedFileUri)
 			}
@@ -132,15 +116,15 @@ export class FileFacade {
 		const encryptedData = encryptBytes(sessionKey, dataFile.data)
 		const fileData = createFileDataDataPost({
 			size: dataFile.data.byteLength.toString(),
-			group: this._login.getGroupId(GroupType.Mail)  // currently only used for attachments
+			group: this.user.getGroupId(GroupType.Mail)  // currently only used for attachments
 		})
 		const fileDataPostReturn = await this.serviceExecutor.post(FileDataService, fileData, {sessionKey})
 		// upload the file content
 		let fileDataId = fileDataPostReturn.fileData
 
-		const headers = this._login.createAuthHeaders()
-		headers["v"] = FileDataDataReturnTypeModel.version
-		await this._restClient
+		const headers = this.user.createAuthHeaders()
+		headers["v"] = String(modelInfo.version)
+		await this.restClient
 				  .request(
 					  REST_PATH,
 					  HttpMethod.PUT,
@@ -160,21 +144,21 @@ export class FileFacade {
 	 * Does not cleanup uploaded files. This is a responsibility of the caller
 	 */
 	async uploadFileDataNative(fileReference: FileReference, sessionKey: Aes128Key): Promise<Id> {
-		if (this._suspensionHandler.isSuspended()) {
-			return this._suspensionHandler.deferRequest(() => this.uploadFileDataNative(fileReference, sessionKey))
+		if (this.suspensionHandler.isSuspended()) {
+			return this.suspensionHandler.deferRequest(() => this.uploadFileDataNative(fileReference, sessionKey))
 		}
 
-		const encryptedFileInfo = await this._aesApp.aesEncryptFile(sessionKey, fileReference.location, random.generateRandomData(16))
+		const encryptedFileInfo = await this.aesApp.aesEncryptFile(sessionKey, fileReference.location)
 		const fileData = createFileDataDataPost({
-			size: encryptedFileInfo.unencSize.toString(),
-			group: this._login.getGroupId(GroupType.Mail), // currently only used for attachments
+			size: encryptedFileInfo.unencryptedSize.toString(),
+			group: this.user.getGroupId(GroupType.Mail), // currently only used for attachments
 		})
 		const fileDataPostReturn = await this.serviceExecutor.post(FileDataService, fileData, {sessionKey})
 		const fileDataId = fileDataPostReturn.fileData
 
-		const headers = this._login.createAuthHeaders()
+		const headers = this.user.createAuthHeaders()
 
-		headers["v"] = FileDataDataReturnTypeModel.version
+		headers["v"] = String(modelInfo.version)
 		const url = addParamsToUrl(new URL(getHttpOrigin() + "/rest/tutanota/filedataservice"), {
 			fileDataId,
 		})
@@ -183,14 +167,14 @@ export class FileFacade {
 			errorId,
 			precondition,
 			suspensionTime
-		} = await this._fileApp.upload(encryptedFileInfo.uri, url.toString(), HttpMethod.PUT, headers)
+		} = await this.fileApp.upload(encryptedFileInfo.uri, url.toString(), HttpMethod.PUT, headers)
 
 		if (statusCode === 200) {
 			return fileDataId
 		} else if (suspensionTime && isSuspensionResponse(statusCode, suspensionTime)) {
-			this._suspensionHandler.activateSuspensionIfInactive(Number(suspensionTime))
+			this.suspensionHandler.activateSuspensionIfInactive(Number(suspensionTime))
 
-			return this._suspensionHandler.deferRequest(() => this.uploadFileDataNative(fileReference, sessionKey))
+			return this.suspensionHandler.deferRequest(() => this.uploadFileDataNative(fileReference, sessionKey))
 		} else {
 			throw handleRestError(statusCode, ` | PUT ${url.toString()} failed to natively upload attachment`, errorId, precondition)
 		}

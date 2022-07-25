@@ -1,24 +1,25 @@
 import m, {Children} from "mithril"
 import {assertMainOrNode} from "../api/common/Env"
 import {AccountType, AccountTypeNames, BookingItemFeatureType, Const, OperationType} from "../api/common/TutanotaConstants"
-import type {Customer} from "../api/entities/sys/Customer"
-import {CustomerTypeRef} from "../api/entities/sys/Customer"
+import type {AccountingInfo, Booking, Customer, CustomerInfo, GiftCard, OrderProcessingAgreement} from "../api/entities/sys/TypeRefs.js"
+import {
+	AccountingInfoTypeRef,
+	BookingTypeRef,
+	CustomerInfoTypeRef,
+	CustomerTypeRef,
+	GiftCardTypeRef,
+	GroupInfoTypeRef,
+	OrderProcessingAgreementTypeRef,
+	UserTypeRef
+} from "../api/entities/sys/TypeRefs.js"
 import {assertNotNull, downcast, incrementDate, neverNull, noOp, ofClass, promiseMap} from "@tutao/tutanota-utils"
-import type {CustomerInfo} from "../api/entities/sys/CustomerInfo"
-import {CustomerInfoTypeRef} from "../api/entities/sys/CustomerInfo"
 import {logins} from "../api/main/LoginController"
 import {lang, TranslationKey} from "../misc/LanguageViewModel"
 import {Button} from "../gui/base/Button"
 import {Icons} from "../gui/base/icons/Icons"
-import type {AccountingInfo} from "../api/entities/sys/AccountingInfo"
-import {AccountingInfoTypeRef} from "../api/entities/sys/AccountingInfo"
-import {UserTypeRef} from "../api/entities/sys/User"
 import {formatPrice, formatPriceDataWithInfo, getCurrentCount} from "./PriceUtils"
 import {formatDate, formatNameAndAddress, formatStorageSize} from "../misc/Formatter"
 import {getByAbbreviation} from "../api/common/CountryList"
-import type {Booking} from "../api/entities/sys/Booking"
-import {BookingTypeRef} from "../api/entities/sys/Booking"
-import {MailAddressAliasServiceReturnTypeRef} from "../api/entities/sys/MailAddressAliasServiceReturn"
 import * as AddUserDialog from "../settings/AddUserDialog"
 import * as EmailAliasOptionsDialog from "./EmailAliasOptionsDialog"
 import * as AddGroupDialog from "../settings/AddGroupDialog"
@@ -28,10 +29,7 @@ import {showSwitchDialog} from "./SwitchSubscriptionDialog"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
 import {showDeleteAccountDialog} from "./DeleteAccountDialog"
-import type {OrderProcessingAgreement} from "../api/entities/sys/OrderProcessingAgreement"
-import {OrderProcessingAgreementTypeRef} from "../api/entities/sys/OrderProcessingAgreement"
 import * as SignOrderAgreementDialog from "./SignOrderProcessingAgreementDialog"
-import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
 import * as SwitchToBusinessInvoiceDataDialog from "./SwitchToBusinessInvoiceDataDialog"
 import {NotFoundError} from "../api/common/error/RestError"
 import type {EntityUpdateData} from "../api/main/EventController"
@@ -45,17 +43,13 @@ import {
 	isBusinessFeatureActive,
 	isSharingActive,
 	isWhitelabelActive,
-
 } from "./SubscriptionUtils"
 import {ButtonN, ButtonType} from "../gui/base/ButtonN"
 import {TextFieldN} from "../gui/base/TextFieldN"
-import {DropDownSelectorN} from "../gui/base/DropDownSelectorN"
 import {Dialog, DialogType} from "../gui/base/Dialog"
 import {ColumnWidth, TableN} from "../gui/base/TableN"
 import {showPurchaseGiftCardDialog} from "./giftcards/PurchaseGiftCardDialog"
-import {loadGiftCards, showGiftCardToShare} from "./giftcards/GiftCardUtils"
-import type {GiftCard} from "../api/entities/sys/GiftCard"
-import {GiftCardTypeRef} from "../api/entities/sys/GiftCard"
+import {GiftCardStatus, loadGiftCards, showGiftCardToShare} from "./giftcards/GiftCardUtils"
 import {locator} from "../api/main/MainLocator"
 import {GiftCardMessageEditorField} from "./giftcards/GiftCardMessageEditorField"
 import {attachDropdown} from "../gui/base/DropdownN"
@@ -63,7 +57,6 @@ import {showBusinessBuyDialog, showSharingBuyDialog, showWhitelabelBuyDialog} fr
 import {createNotAvailableForFreeClickHandler} from "../misc/SubscriptionDialogs"
 import {SettingsExpander} from "../settings/SettingsExpander"
 import {elementIdPart, GENERATED_MAX_ID, getEtId} from "../api/common/utils/EntityUtils"
-import {HttpMethod} from "../api/common/EntityFunctions"
 import {showStorageCapacityOptionsDialog} from "./StorageCapacityOptionsDialog"
 import type {UpdatableSettingsViewer} from "../settings/SettingsView"
 import {
@@ -74,6 +67,7 @@ import {
 	TermsSection
 } from "./TermsAndConditions"
 import {MailAddressAliasService} from "../api/entities/sys/Services"
+import {DropDownSelectorN} from "../gui/base/DropDownSelectorN"
 
 assertMainOrNode()
 const DAY = 1000 * 60 * 60 * 24
@@ -116,195 +110,52 @@ export class SubscriptionViewer implements UpdatableSettingsViewer {
 			},
 			() => Icons.Edit,
 		)
-		const upgradeActionAttrs = {
-			label: "upgrade_action",
-			click: showUpgradeWizard,
-			icon: () => Icons.Edit,
-		} as const
-		const usageTypeActionAttrs = {
-			label: "pricing.businessUse_label",
-			click: () => this._switchToBusinessUse(),
-			icon: () => Icons.Edit,
-		} as const
-		const signOrderAgreementActionAttrs = {
-			label: "sign_action",
-			click: () => SignOrderAgreementDialog.showForSigning(neverNull(this._customer), neverNull(this._accountingInfo)),
-			icon: () => Icons.Edit,
-		} as const
-		const showOrderAgreementActionAttrs = {
-			label: "show_action",
-			click: () =>
-				locator.entityClient
-					   .load(GroupInfoTypeRef, neverNull(this._orderAgreement).signerUserGroupInfo)
-					   .then(signerUserGroupInfo => SignOrderAgreementDialog.showForViewing(neverNull(this._orderAgreement), signerUserGroupInfo)),
-			icon: () => Icons.Download,
-		} as const
-		let subscriptionPeriods = [
-			{
-				name: lang.get("pricing.yearly_label"),
-				value: 12,
-			},
-			{
-				name: lang.get("pricing.monthly_label"),
-				value: 1,
-			},
-		]
 
 		const isPremiumPredicate = () => logins.getUserController().isPremiumAccount()
 
-		const addUserButtonAttrs = {
-			label: "addUsers_action",
-			click: createNotAvailableForFreeClickHandler(false, AddUserDialog.show, isPremiumPredicate),
-			icon: () => Icons.Add,
-			type: ButtonType.Action,
-		} as const
-		const editUsersButtonAttrs = {
-			label: "bookingItemUsers_label",
-			click: createNotAvailableForFreeClickHandler(false, () => m.route.set("/settings/users"), isPremiumPredicate),
-			icon: () => Icons.Edit,
-			type: ButtonType.Action,
-		} as const
-		const changeStorageCapacityButtonAttrs = {
-			label: "storageCapacity_label",
-			click: createNotAvailableForFreeClickHandler(false, () => showStorageCapacityOptionsDialog(), isPremiumPredicate),
-			icon: () => Icons.Edit,
-			type: ButtonType.Action,
-		} as const
-		const changeEmailAliasPackageButtonAttrs = {
-			label: "emailAlias_label",
-			click: createNotAvailableForFreeClickHandler(true, EmailAliasOptionsDialog.show, isPremiumPredicate),
-			icon: () => Icons.Edit,
-		} as const
-		const addGroupsActionAttrs = {
-			label: "addGroup_label",
-			click: createNotAvailableForFreeClickHandler(false, AddGroupDialog.show, isPremiumPredicate),
-			icon: () => Icons.Add,
-		} as const
-		const editGroupsActionAttrs = {
-			label: "groups_label",
-			click: createNotAvailableForFreeClickHandler(false, () => m.route.set("/settings/groups"), isPremiumPredicate),
-			icon: () => Icons.Edit,
-		} as const
-		const addContactFormActionAttrs = {
-			label: "createContactForm_label",
-			click: createNotAvailableForFreeClickHandler(false, () => ContactFormEditor.show(null, true, noOp), isPremiumPredicate),
-			icon: () => Icons.Add,
-		} as const
-		const editContactFormsActionAttrs = {
-			label: "contactForms_label",
-			click: createNotAvailableForFreeClickHandler(false, () => m.route.set("/settings/contactforms"), isPremiumPredicate),
-			icon: () => Icons.Edit,
-		} as const
-		const enableWhiteLabelActionAttrs = {
-			label: "activate_action",
-			click: createNotAvailableForFreeClickHandler(false, () => showWhitelabelBuyDialog(true), isPremiumPredicate),
-			icon: () => Icons.Edit,
-		} as const
-		const disableWhiteLabelActionAttrs = {
-			label: "deactivate_action",
-			click: createNotAvailableForFreeClickHandler(false, () => showWhitelabelBuyDialog(false), isPremiumPredicate),
-			icon: () => Icons.Cancel,
-		} as const
-		const enableSharingActionAttrs = {
-			label: "activate_action",
-			click: createNotAvailableForFreeClickHandler(false, () => showSharingBuyDialog(true), isPremiumPredicate),
-			icon: () => Icons.Edit,
-		} as const
-		const disableSharingActionAttrs = {
-			label: "deactivate_action",
-			click: createNotAvailableForFreeClickHandler(false, () => showSharingBuyDialog(false), isPremiumPredicate),
-			icon: () => Icons.Cancel,
-		} as const
-		const enableBusinessActionAttrs = {
-			label: "activate_action",
-			click: createNotAvailableForFreeClickHandler(false, () => showBusinessBuyDialog(true), isPremiumPredicate),
-			icon: () => Icons.Edit,
-		} as const
-		const disableBusinessActionAttrs = {
-			label: "deactivate_action",
-			click: createNotAvailableForFreeClickHandler(false, () => showBusinessBuyDialog(false), isPremiumPredicate),
-			icon: () => Icons.Cancel,
-		} as const
-		const deleteButtonAttrs = {
-			label: "adminDeleteAccount_action",
-			click: showDeleteAccountDialog,
-			type: ButtonType.Login,
-		} as const
 		const deleteAccountExpanded = stream(false)
 		this._giftCards = new Map()
 		loadGiftCards(assertNotNull(logins.getUserController().user.customer)).then(giftCards => {
 			giftCards.forEach(giftCard => this._giftCards.set(elementIdPart(giftCard._id), giftCard))
 		})
-		this._giftCardsExpanded = stream(false)
+		this._giftCardsExpanded = stream<boolean>(false)
 
 		this.view = (): Children => {
 			return m("#subscription-settings.fill-absolute.scroll.plr-l", [
 				m(".h4.mt-l", lang.get("currentlyBooked_label")),
 				m(TextFieldN, {
 					label: "subscription_label",
-					value: this._subscriptionFieldValue,
+					value: this._subscriptionFieldValue(),
+					oninput: this._subscriptionFieldValue,
 					disabled: true,
 					injectionsRight: () =>
-						logins.getUserController().isFreeAccount() ? m(ButtonN, upgradeActionAttrs) : !this._isCancelled ? [m(subscriptionAction)] : null,
+						logins.getUserController().isFreeAccount() ? m(ButtonN, {
+							label: "upgrade_action",
+							click: showUpgradeWizard,
+							icon: () => Icons.Edit,
+						} as const) : !this._isCancelled ? [m(subscriptionAction)] : null,
 				}),
 				this._showPriceData()
 					? m(TextFieldN, {
 						label: "businessOrPrivateUsage_label",
-						value: this._usageTypeFieldValue,
+						value: this._usageTypeFieldValue(),
+						oninput: this._usageTypeFieldValue,
 						disabled: true,
 						injectionsRight: () =>
 							this._customer && this._customer.businessUse === false && !this._customer.canceledPremiumAccount
-								? m(ButtonN, usageTypeActionAttrs)
+								? m(ButtonN, {
+									label: "pricing.businessUse_label",
+									click: () => this._switchToBusinessUse(),
+									icon: () => Icons.Edit,
+								} as const)
 								: null,
 					})
 					: null,
 				this._showOrderAgreement()
-					? m(TextFieldN, {
-						label: "orderProcessingAgreement_label",
-						helpLabel: () => lang.get("orderProcessingAgreementInfo_msg"),
-						value: this._orderAgreementFieldValue,
-						disabled: true,
-						injectionsRight: () => {
-							if (this._orderAgreement && this._customer && this._customer.orderProcessingAgreementNeeded) {
-								return [m(ButtonN, signOrderAgreementActionAttrs), m(ButtonN, showOrderAgreementActionAttrs)]
-							} else if (this._orderAgreement) {
-								return [m(ButtonN, showOrderAgreementActionAttrs)]
-							} else if (this._customer && this._customer.orderProcessingAgreementNeeded) {
-								return [m(ButtonN, signOrderAgreementActionAttrs)]
-							} else {
-								return []
-							}
-						},
-					})
+					? this.renderAgreement()
 					: null,
 				this._showPriceData()
-					? m(DropDownSelectorN, {
-						label: "paymentInterval_label",
-						helpLabel: () => this.getChargeDateText(),
-						items: subscriptionPeriods,
-						selectedValue: this._selectedSubscriptionInterval,
-						dropdownWidth: 300,
-						selectionChangedHandler: (value: number) => {
-							if (this._accountingInfo) {
-								changeSubscriptionInterval(this._accountingInfo, value, this._periodEndDate)
-							}
-						},
-					})
-					: null,
-				this._showPriceData()
-					? m(TextFieldN, {
-						label: () =>
-							this._nextPeriodPriceVisible && this._periodEndDate
-								? lang.get("priceTill_label", {
-									"{date}": formatDate(this._periodEndDate),
-								})
-								: lang.get("price_label"),
-						value: this._currentPriceFieldValue,
-						disabled: true,
-						helpLabel: () => this._customer && this._customer.businessUse === true
-							? lang.get("subscriptionPeriodInfoBusiness_msg")
-							: null,
-					})
+					? this.renderIntervals()
 					: null,
 				this._showPriceData() && this._nextPeriodPriceVisible && this._periodEndDate
 					? m(TextFieldN, {
@@ -313,7 +164,8 @@ export class SubscriptionViewer implements UpdatableSettingsViewer {
 								"{date}": formatDate(new Date(neverNull(this._periodEndDate).getTime() + DAY)),
 							}),
 						helpLabel: () => lang.get("nextSubscriptionPrice_msg"),
-						value: this._nextPriceFieldValue,
+						value: this._nextPriceFieldValue(),
+						oninput: this._nextPriceFieldValue,
 						disabled: true,
 					})
 					: null,
@@ -331,84 +183,149 @@ export class SubscriptionViewer implements UpdatableSettingsViewer {
 				m(".h4.mt-l", lang.get("adminPremiumFeatures_action")),
 				m(TextFieldN, {
 					label: "bookingItemUsers_label",
-					value: this._usersFieldValue,
+					value: this._usersFieldValue(),
+					oninput: this._usersFieldValue,
 					disabled: true,
-					injectionsRight: () => [m(ButtonN, addUserButtonAttrs), m(ButtonN, editUsersButtonAttrs)],
+					injectionsRight: () => [m(ButtonN, {
+						label: "addUsers_action",
+						click: createNotAvailableForFreeClickHandler(false, AddUserDialog.show, isPremiumPredicate),
+						icon: () => Icons.Add,
+						type: ButtonType.Action,
+					} as const), m(ButtonN, {
+						label: "bookingItemUsers_label",
+						click: createNotAvailableForFreeClickHandler(false, () => m.route.set("/settings/users"), isPremiumPredicate),
+						icon: () => Icons.Edit,
+						type: ButtonType.Action,
+					} as const)],
 				}),
 				m(TextFieldN, {
 					label: "storageCapacity_label",
-					value: this._storageFieldValue,
+					value: this._storageFieldValue(),
+					oninput: this._storageFieldValue,
 					disabled: true,
-					injectionsRight: () => m(ButtonN, changeStorageCapacityButtonAttrs),
+					injectionsRight: () => m(ButtonN, {
+						label: "storageCapacity_label",
+						click: createNotAvailableForFreeClickHandler(false, () => showStorageCapacityOptionsDialog(), isPremiumPredicate),
+						icon: () => Icons.Edit,
+						type: ButtonType.Action,
+					} as const),
 				}),
 				m(TextFieldN, {
 					label: "mailAddressAliases_label",
-					value: this._emailAliasFieldValue,
+					value: this._emailAliasFieldValue(),
+					oninput: this._emailAliasFieldValue,
 					disabled: true,
-					injectionsRight: () => m(ButtonN, changeEmailAliasPackageButtonAttrs),
+					injectionsRight: () => m(ButtonN, {
+						label: "emailAlias_label",
+						click: createNotAvailableForFreeClickHandler(true, EmailAliasOptionsDialog.show, isPremiumPredicate),
+						icon: () => Icons.Edit,
+					} as const),
 				}),
 				m(TextFieldN, {
 					label: "groups_label",
-					value: this._groupsFieldValue,
+					value: this._groupsFieldValue(),
+					oninput: this._groupsFieldValue,
 					disabled: true,
-					injectionsRight: () => [m(ButtonN, addGroupsActionAttrs), m(ButtonN, editGroupsActionAttrs)],
+					injectionsRight: () => [m(ButtonN, {
+						label: "addGroup_label",
+						click: createNotAvailableForFreeClickHandler(false, AddGroupDialog.show, isPremiumPredicate),
+						icon: () => Icons.Add,
+					} as const), m(ButtonN, {
+						label: "groups_label",
+						click: createNotAvailableForFreeClickHandler(false, () => m.route.set("/settings/groups"), isPremiumPredicate),
+						icon: () => Icons.Edit,
+					} as const)],
 				}),
 				m(TextFieldN, {
 					label: "whitelabelFeature_label",
-					value: this._whitelabelFieldValue,
+					value: this._whitelabelFieldValue(),
+					oninput: this._whitelabelFieldValue,
 					disabled: true,
 					injectionsRight: () =>
 						getCurrentCount(BookingItemFeatureType.Whitelabel, this._lastBooking) === 0
-							? m(ButtonN, enableWhiteLabelActionAttrs)
-							: m(ButtonN, disableWhiteLabelActionAttrs),
+							? m(ButtonN, {
+								label: "activate_action",
+								click: createNotAvailableForFreeClickHandler(false, () => showWhitelabelBuyDialog(true), isPremiumPredicate),
+								icon: () => Icons.Edit,
+							} as const)
+							: m(ButtonN, {
+								label: "deactivate_action",
+								click: createNotAvailableForFreeClickHandler(false, () => showWhitelabelBuyDialog(false), isPremiumPredicate),
+								icon: () => Icons.Cancel,
+							} as const),
 				}),
 				m(TextFieldN, {
 					label: "sharingFeature_label",
-					value: this._sharingFieldValue,
+					value: this._sharingFieldValue(),
+					oninput: this._sharingFieldValue,
 					disabled: true,
 					injectionsRight: () =>
 						getCurrentCount(BookingItemFeatureType.Sharing, this._lastBooking) === 0
-							? m(ButtonN, enableSharingActionAttrs)
-							: m(ButtonN, disableSharingActionAttrs),
+							? m(ButtonN, {
+								label: "activate_action",
+								click: createNotAvailableForFreeClickHandler(false, () => showSharingBuyDialog(true), isPremiumPredicate),
+								icon: () => Icons.Edit,
+							} as const)
+							: m(ButtonN, {
+								label: "deactivate_action",
+								click: createNotAvailableForFreeClickHandler(false, () => showSharingBuyDialog(false), isPremiumPredicate),
+								icon: () => Icons.Cancel,
+							} as const),
 				}),
 				m(TextFieldN, {
 					label: "businessFeature_label",
-					value: this._businessFeatureFieldValue,
+					value: this._businessFeatureFieldValue(),
+					oninput: this._businessFeatureFieldValue,
 					disabled: true,
 					injectionsRight: () => {
 						if (!this._customer || (this._customer.businessUse && isBusinessFeatureActive(this._lastBooking))) {
 							// viewer not initialized yet or customer is business customer as they are not allowed to disable business feature
 							return null
 						} else if (isBusinessFeatureActive(this._lastBooking)) {
-							return m(ButtonN, disableBusinessActionAttrs)
+							return m(ButtonN, {
+								label: "deactivate_action",
+								click: createNotAvailableForFreeClickHandler(false, () => showBusinessBuyDialog(false), isPremiumPredicate),
+								icon: () => Icons.Cancel,
+							} as const)
 						} else {
-							return m(ButtonN, enableBusinessActionAttrs)
+							return m(ButtonN, {
+								label: "activate_action",
+								click: createNotAvailableForFreeClickHandler(false, () => showBusinessBuyDialog(true), isPremiumPredicate),
+								icon: () => Icons.Edit,
+							} as const)
 						}
 					},
 				}),
 				m(TextFieldN, {
 					label: "contactForms_label",
-					value: this._contactFormsFieldValue,
+					value: this._contactFormsFieldValue(),
+					oninput: this._contactFormsFieldValue,
 					disabled: true,
-					injectionsRight: () => [m(ButtonN, addContactFormActionAttrs), m(ButtonN, editContactFormsActionAttrs)],
+					injectionsRight: () => [m(ButtonN, {
+						label: "createContactForm_label",
+						click: createNotAvailableForFreeClickHandler(false, () => ContactFormEditor.show(null, true, noOp), isPremiumPredicate),
+						icon: () => Icons.Add,
+					} as const), m(ButtonN, {
+						label: "contactForms_label",
+						click: createNotAvailableForFreeClickHandler(false, () => m.route.set("/settings/contactforms"), isPremiumPredicate),
+						icon: () => Icons.Edit,
+					} as const)],
 				}),
-				m(
-					".mb-l",
-					m(
-						SettingsExpander,
-						{
+				m(".mb-l", m(SettingsExpander, {
 							title: "adminDeleteAccount_action",
 							buttonText: "adminDeleteAccount_action",
 							expanded: deleteAccountExpanded,
 						},
-						m(".flex-center", m(
-								"",
-								{
+						m(".flex-center", m("", {
 									style: {
 										width: "200px",
 									},
 								},
-								m(ButtonN, deleteButtonAttrs),
+								m(ButtonN, {
+									label: "adminDeleteAccount_action",
+									click: showDeleteAccountDialog,
+									type: ButtonType.Login,
+								} as const),
 							),
 						),
 					),
@@ -444,11 +361,95 @@ export class SubscriptionViewer implements UpdatableSettingsViewer {
 		this._sharingFieldValue = stream(loadingString)
 		this._businessFeatureFieldValue = stream(loadingString)
 		this._contactFormsFieldValue = stream(loadingString)
-		this._selectedSubscriptionInterval = stream(null)
+		this._selectedSubscriptionInterval = stream<number | null>(null)
 
 		this._updatePriceInfo()
 
 		this._updateBookings()
+	}
+
+	private renderIntervals() {
+		const subscriptionPeriods = [
+			{
+				name: lang.get("pricing.yearly_label"),
+				value: 12,
+			},
+			{
+				name: lang.get("pricing.monthly_label"),
+				value: 1,
+			},
+		]
+		return [
+			m(DropDownSelectorN, {
+				label: "paymentInterval_label",
+				helpLabel: () => this.getChargeDateText(),
+				items: subscriptionPeriods,
+				selectedValue: this._selectedSubscriptionInterval(),
+				dropdownWidth: 300,
+				selectionChangedHandler: (value: number) => {
+					if (this._accountingInfo) {
+						changeSubscriptionInterval(this._accountingInfo, value, this._periodEndDate)
+					}
+				},
+			}),
+			m(TextFieldN, {
+				label: () =>
+					this._nextPeriodPriceVisible && this._periodEndDate
+						? lang.get("priceTill_label", {
+							"{date}": formatDate(this._periodEndDate),
+						})
+						: lang.get("price_label"),
+				value: this._currentPriceFieldValue(),
+				oninput: this._currentPriceFieldValue,
+				disabled: true,
+				helpLabel: () => this._customer && this._customer.businessUse === true
+					? lang.get("subscriptionPeriodInfoBusiness_msg")
+					: null,
+			})
+		]
+	}
+
+	private renderAgreement() {
+		return m(TextFieldN, {
+			label: "orderProcessingAgreement_label",
+			helpLabel: () => lang.get("orderProcessingAgreementInfo_msg"),
+			value: this._orderAgreementFieldValue(),
+			oninput: this._orderAgreementFieldValue,
+			disabled: true,
+			injectionsRight: () => {
+				if (this._orderAgreement && this._customer && this._customer.orderProcessingAgreementNeeded) {
+					return [m(ButtonN, {
+						label: "sign_action",
+						click: () => SignOrderAgreementDialog.showForSigning(neverNull(this._customer), neverNull(this._accountingInfo)),
+						icon: () => Icons.Edit,
+					} as const), m(ButtonN, {
+						label: "show_action",
+						click: () =>
+							locator.entityClient
+								   .load(GroupInfoTypeRef, neverNull(this._orderAgreement).signerUserGroupInfo)
+								   .then(signerUserGroupInfo => SignOrderAgreementDialog.showForViewing(neverNull(this._orderAgreement), signerUserGroupInfo)),
+						icon: () => Icons.Download,
+					} as const)]
+				} else if (this._orderAgreement) {
+					return [m(ButtonN, {
+						label: "show_action",
+						click: () =>
+							locator.entityClient
+								   .load(GroupInfoTypeRef, neverNull(this._orderAgreement).signerUserGroupInfo)
+								   .then(signerUserGroupInfo => SignOrderAgreementDialog.showForViewing(neverNull(this._orderAgreement), signerUserGroupInfo)),
+						icon: () => Icons.Download,
+					} as const)]
+				} else if (this._customer && this._customer.orderProcessingAgreementNeeded) {
+					return [m(ButtonN, {
+						label: "sign_action",
+						click: () => SignOrderAgreementDialog.showForSigning(neverNull(this._customer), neverNull(this._accountingInfo)),
+						icon: () => Icons.Edit,
+					} as const)]
+				} else {
+					return []
+				}
+			},
+		})
 	}
 
 	private getChargeDateText(): string {
@@ -637,16 +638,16 @@ export class SubscriptionViewer implements UpdatableSettingsViewer {
 			return Promise.resolve()
 		} else {
 			return locator.serviceExecutor.get(MailAddressAliasService, null)
-				.then(aliasServiceReturn => {
-					this._emailAliasFieldValue(
-						lang.get("amountUsedAndActivatedOf_label", {
-							"{used}": aliasServiceReturn.usedAliases,
-							"{active}": aliasServiceReturn.enabledAliases,
-							"{totalAmount}": totalAmount,
-						}),
-					)
-				})
-				.then(noOp)
+						  .then(aliasServiceReturn => {
+							  this._emailAliasFieldValue(
+								  lang.get("amountUsedAndActivatedOf_label", {
+									  "{used}": aliasServiceReturn.usedAliases,
+									  "{active}": aliasServiceReturn.enabledAliases,
+									  "{totalAmount}": totalAmount,
+								  }),
+							  )
+						  })
+						  .then(noOp)
 		}
 	}
 
@@ -793,52 +794,53 @@ function renderGiftCardTable(giftCards: GiftCard[], isPremiumPredicate: () => bo
 	const columnHeading: [TranslationKey, TranslationKey] = ["purchaseDate_label", "value_label"]
 	const columnWidths = [ColumnWidth.Largest, ColumnWidth.Small, ColumnWidth.Small]
 	const lines = giftCards
-		.filter(giftCard => giftCard.usable)
+		.filter(giftCard => giftCard.status === GiftCardStatus.Usable)
 		.map(giftCard => {
 			return {
 				cells: [formatDate(giftCard.orderDate), formatPrice(parseFloat(giftCard.value), true)],
 				actionButtonAttrs: attachDropdown(
 					{
-                        mainButtonAttrs: {
-                            label: "options_action",
-                            click: () => showGiftCardToShare(giftCard),
-                            icon: () => Icons.More,
-                            type: ButtonType.Dropdown,
-                        }, childAttrs: () => [
-                            {
-                                label: "view_label",
-                                click: () => showGiftCardToShare(giftCard),
-                                type: ButtonType.Dropdown,
-                            },
-                            {
-                                label: "edit_action",
-                                click: () => {
-                                    let message = stream(giftCard.message)
-                                    Dialog.showActionDialog({
-                                        title: lang.get("editMessage_label"),
-                                        child: () =>
-                                            m(
-                                                ".flex-center",
-                                                m(GiftCardMessageEditorField, {
-                                                    message,
-                                                }),
-                                            ),
-                                        okAction: (dialog: Dialog) => {
-                                            giftCard.message = message()
-                                            locator.entityClient
-                                                .update(giftCard)
-                                                .then(() => dialog.close())
-                                                .catch(() => Dialog.message("giftCardUpdateError_msg"))
-                                            showGiftCardToShare(giftCard)
-                                        },
-                                        okActionTextId: "save_action",
-                                        type: DialogType.EditSmall,
-                                    })
-                                },
-                                type: ButtonType.Dropdown,
-                            },
-                        ]
-                    },
+						mainButtonAttrs: {
+							label: "options_action",
+							click: () => showGiftCardToShare(giftCard),
+							icon: () => Icons.More,
+							type: ButtonType.Dropdown,
+						}, childAttrs: () => [
+							{
+								label: "view_label",
+								click: () => showGiftCardToShare(giftCard),
+								type: ButtonType.Dropdown,
+							},
+							{
+								label: "edit_action",
+								click: () => {
+									let message = stream(giftCard.message)
+									Dialog.showActionDialog({
+										title: lang.get("editMessage_label"),
+										child: () =>
+											m(
+												".flex-center",
+												m(GiftCardMessageEditorField, {
+													message: message(),
+													onMessageChanged: message
+												}),
+											),
+										okAction: (dialog: Dialog) => {
+											giftCard.message = message()
+											locator.entityClient
+												   .update(giftCard)
+												   .then(() => dialog.close())
+												   .catch(() => Dialog.message("giftCardUpdateError_msg"))
+											showGiftCardToShare(giftCard)
+										},
+										okActionTextId: "save_action",
+										type: DialogType.EditSmall,
+									})
+								},
+								type: ButtonType.Dropdown,
+							},
+						]
+					},
 				),
 			}
 		})

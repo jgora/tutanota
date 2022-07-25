@@ -11,12 +11,13 @@ import {ButtonN} from "../../gui/base/ButtonN"
 import {TextFieldAttrs, TextFieldN} from "../../gui/base/TextFieldN"
 import * as EditCustomColorsDialog from "./EditCustomColorsDialog"
 import {CustomColorsEditorViewModel} from "./CustomColorsEditorViewModel"
-import type {WhitelabelConfig} from "../../api/entities/sys/WhitelabelConfig"
-import type {DomainInfo} from "../../api/entities/sys/DomainInfo"
+import type {WhitelabelConfig} from "../../api/entities/sys/TypeRefs.js"
+import type {DomainInfo} from "../../api/entities/sys/TypeRefs.js"
 import type {ThemeCustomizations} from "../../misc/WhitelabelCustomizations"
 import {locator} from "../../api/main/MainLocator"
 import {logins} from "../../api/main/LoginController"
 import Stream from "mithril/stream";
+import {showFileChooser} from "../../file/FileController.js"
 
 export type WhitelabelData = {
 	customTheme: ThemeCustomizations
@@ -36,11 +37,9 @@ export class WhitelabelThemeSettings implements Component<WhitelabelThemeSetting
 	_renderCustomColorsField(data: WhitelabelData | null): Children {
 		return m(TextFieldN, {
 			label: "customColors_label",
-			value: Stream(
-				this.areCustomColorsDefined(data?.customTheme ?? null)
-					? lang.get("activated_label")
-					: lang.get("deactivated_label")
-			),
+			value: this.areCustomColorsDefined(data?.customTheme ?? null)
+				? lang.get("activated_label")
+				: lang.get("deactivated_label"),
 			disabled: true,
 			injectionsRight: () => (data ? this.renderCustomColorsFieldButtons(data) : null),
 		})
@@ -82,7 +81,7 @@ export class WhitelabelThemeSettings implements Component<WhitelabelThemeSetting
 		const customLogoTextfieldAttrs: TextFieldAttrs = {
 			label: "customLogo_label",
 			helpLabel: () => lang.get("customLogoInfo_msg"),
-			value: Stream(lang.get(data?.customTheme.logo != null ? "activated_label" : "deactivated_label")),
+			value: lang.get(data?.customTheme.logo != null ? "activated_label" : "deactivated_label"),
 			disabled: true,
 			injectionsRight: () => (data ? this.renderCustomLogoFieldButtons(data) : null),
 		}
@@ -112,7 +111,7 @@ export class WhitelabelThemeSettings implements Component<WhitelabelThemeSetting
 			m(ButtonN, {
 				label: "edit_action",
 				click: async () => {
-					const files = await locator.fileController.showFileChooser(false)
+					const files = await showFileChooser(false)
 					let extension = files[0].name.toLowerCase().substring(files[0].name.lastIndexOf(".") + 1)
 
 					if (files[0].size > MAX_LOGO_SIZE || !contains(ALLOWED_IMAGE_FORMATS, extension)) {

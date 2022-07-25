@@ -3,8 +3,8 @@ import stream from "mithril/stream"
 import {ContactView} from "./ContactView"
 import type {VirtualRow} from "../../gui/base/List"
 import {List} from "../../gui/base/List"
-import type {Contact} from "../../api/entities/tutanota/Contact"
-import {ContactTypeRef} from "../../api/entities/tutanota/Contact"
+import type {Contact} from "../../api/entities/tutanota/TypeRefs.js"
+import {ContactTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
 import {getContactListName} from "../model/ContactUtils"
 import {lang} from "../../misc/LanguageViewModel"
 import {NotFoundError} from "../../api/common/error/RestError"
@@ -34,18 +34,12 @@ export class ContactListView {
 		const sortByFirstName = stream(true)
 		this.list = new List({
 			rowHeight: size.list_row_height,
-			fetch: (startId, count) => {
+			fetch: async (startId, count) => {
 				if (startId === GENERATED_MAX_ID) {
-					return locator.contactModel.contactListId().then(contactListId => {
-						if (!contactListId) return []
-						// we have to load all contacts in order to sort them by name
-						return locator.entityClient.loadAll(ContactTypeRef, contactListId).then(allContacts => {
-							// we have to set loadedCompletely to make sure that fetch is never called again and also that new received contacts are inserted into the list, even at the end
-							this._setLoadedCompletely()
-
-							return allContacts
-						})
-					})
+					const contactListId = await locator.contactModel.contactListId()
+					if (contactListId == null) return {items: [], complete: true}
+					const allContacts = await locator.entityClient.loadAll(ContactTypeRef, contactListId)
+					return {items: allContacts, complete: true}
 				} else {
 					throw new Error("fetch contact called for specific start id")
 				}
@@ -64,7 +58,6 @@ export class ContactListView {
 			elementSelected: (entities, elementClicked, selectionChanged, multiSelectionActive) =>
 				contactView.elementSelected(entities, elementClicked, selectionChanged, multiSelectionActive),
 			createVirtualRow: () => new ContactRow(),
-			showStatus: false,
 			className: className,
 			swipe: {
 				renderLeftSpacer: () => [],
@@ -83,7 +76,8 @@ export class ContactListView {
 				{
 					headerContent: m(DropDownSelectorN, {
 						label: "sortBy_label",
-						selectedValue: sortByFirstName,
+						selectedValue: sortByFirstName(),
+						selectionChangedHandler: sortByFirstName,
 						items: [
 							{
 								name: lang.get("firstName_placeholder"),
@@ -103,7 +97,7 @@ export class ContactListView {
 			)
 		}
 
-		let sortModeChangedListener: stream<unknown>
+		let sortModeChangedListener: stream<void>
 
 		this.oncreate = () => {
 			sortModeChangedListener = sortByFirstName.map(() => this.list.sort())
@@ -112,10 +106,6 @@ export class ContactListView {
 		this.onbeforeremove = () => {
 			sortModeChangedListener.end(true)
 		}
-	}
-
-	_setLoadedCompletely() {
-		this.list.setLoadedCompletely()
 	}
 }
 

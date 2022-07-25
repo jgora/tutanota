@@ -9,8 +9,8 @@ import {NotFoundError} from "../../api/common/error/RestError"
 import {BootIcons} from "../../gui/base/icons/BootIcons"
 import type {ContactAddressType} from "../../api/common/TutanotaConstants"
 import {ContactSocialType, getContactSocialType, Keys} from "../../api/common/TutanotaConstants"
-import type {Contact} from "../../api/entities/tutanota/Contact"
-import type {ContactSocialId} from "../../api/entities/tutanota/ContactSocialId"
+import type {Contact} from "../../api/entities/tutanota/TypeRefs.js"
+import type {ContactSocialId} from "../../api/entities/tutanota/TypeRefs.js"
 import {locator} from "../../api/main/MainLocator"
 import {newMailEditorFromTemplate} from "../../mail/editor/MailEditor"
 import {logins} from "../../api/main/LoginController"
@@ -20,9 +20,9 @@ import {getContactAddressTypeLabel, getContactPhoneNumberTypeLabel, getContactSo
 import {appendEmailSignature} from "../../mail/signature/Signature"
 import {formatBirthdayOfContact} from "../model/ContactUtils"
 import stream from "mithril/stream"
-import type {ContactAddress} from "../../api/entities/tutanota/ContactAddress"
+import type {ContactAddress} from "../../api/entities/tutanota/TypeRefs.js"
 import {ButtonAttrs, ButtonN} from "../../gui/base/ButtonN"
-import type {ContactPhoneNumber} from "../../api/entities/tutanota/ContactPhoneNumber"
+import type {ContactPhoneNumber} from "../../api/entities/tutanota/TypeRefs.js"
 import {assertMainOrNode} from "../../api/common/Env"
 
 assertMainOrNode()
@@ -160,7 +160,7 @@ export class ContactViewer implements ClassComponent {
 		})
 		return m(TextFieldN, {
 			label: () => getContactSocialTypeLabel(getContactSocialType(contactSocialId), contactSocialId.customTypeName),
-			value: stream(contactSocialId.socialId),
+			value: contactSocialId.socialId,
 			disabled: true,
 			injectionsRight: () => m(`a[href=${this.getSocialUrl(contactSocialId)}][target=_blank]`, showButton),
 		})
@@ -174,7 +174,7 @@ export class ContactViewer implements ClassComponent {
 		})
 		return m(TextFieldN, {
 			label: () => getContactAddressTypeLabel(address.type as any, address.customTypeName),
-			value: stream(address.address),
+			value: address.address,
 			disabled: true,
 			injectionsRight: () => [newMailButton],
 		})
@@ -188,7 +188,7 @@ export class ContactViewer implements ClassComponent {
 		})
 		return m(TextFieldN, {
 			label: () => getContactPhoneNumberTypeLabel(phone.type as any, phone.customTypeName),
-			value: stream(phone.number),
+			value: phone.number,
 			disabled: true,
 			injectionsRight: () => m(`a[href="tel:${phone.number}"][target=_blank]`, callButton),
 		})
@@ -210,7 +210,7 @@ export class ContactViewer implements ClassComponent {
 		})
 		return m(TextFieldN, {
 			label: () => getContactAddressTypeLabel(downcast<ContactAddressType>(address.type), address.customTypeName),
-			value: stream(address.address),
+			value: address.address,
 			disabled: true,
 			type: TextFieldType.Area,
 			injectionsRight: () => m(`a[href="https://www.openstreetmap.org/search?query=${prepAddress}"][target=_blank]`, showButton),

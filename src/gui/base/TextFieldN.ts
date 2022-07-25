@@ -1,20 +1,19 @@
-import m, {Children, Component, Vnode} from "mithril"
+import m, {Children, ClassComponent, Component, CVnode, Vnode} from "mithril"
 import {px, size} from "../size"
 import {DefaultAnimationTime} from "../animation/Animations"
 import {theme} from "../theme"
 import type {TranslationKey} from "../../misc/LanguageViewModel"
 import {lang} from "../../misc/LanguageViewModel"
+import type {lazy} from "@tutao/tutanota-utils"
 import {repeat} from "@tutao/tutanota-utils"
 import type {keyHandler} from "../../misc/KeyManager"
 import {TabIndex} from "../../api/common/TutanotaConstants"
-import type {lazy} from "@tutao/tutanota-utils"
 import type {clickHandler} from "./GuiUtils"
-import Stream from "mithril/stream";
 
 export type TextFieldAttrs = {
 	id?: string
 	label: TranslationKey | lazy<string>
-	value: Stream<string>
+	value: string
 	preventAutofill?: boolean
 	type?: TextFieldType
 	helpLabel?: lazy<Children> | null
@@ -23,6 +22,7 @@ export type TextFieldAttrs = {
 	// only used by the BubbleTextField (-> uses old TextField) to display bubbles and out of office notification
 	injectionsRight?: lazy<Children>
 	keyHandler?: keyHandler
+	onDomInputCreated?: (dom: HTMLInputElement) => void,
 	// interceptor used by the BubbleTextField to react on certain keys
 	onfocus?: (dom: HTMLElement, input: HTMLInputElement) => unknown
 	onblur?: (...args: Array<any>) => any
@@ -48,7 +48,7 @@ export const inputLineHeight: number = size.font_size_base + 8
 const inputMarginTop = size.font_size_small + size.hpad_small + 3
 export const baseLabelPosition = size.text_field_label_top
 
-export class TextFieldN implements Component<TextFieldAttrs> {
+export class TextFieldN implements ClassComponent<TextFieldAttrs> {
 	active: boolean
 	onblur: EventListener | null = null
 	domInput!: HTMLInputElement
@@ -61,10 +61,10 @@ export class TextFieldN implements Component<TextFieldAttrs> {
 		this.active = false
 	}
 
-	view(vnode: Vnode<TextFieldAttrs>): Children {
+	view(vnode: CVnode<TextFieldAttrs>): Children {
 		const a = vnode.attrs
 		const maxWidth = a.maxWidth
-		const labelBase = !this.active && a.value() === "" && !a.disabled && !this._didAutofill && !a.injectionsLeft
+		const labelBase = !this.active && a.value === "" && !a.disabled && !this._didAutofill && !a.injectionsLeft
 		const labelTransitionSpeed = DefaultAnimationTime / 2
 		const doShowBorder = a.doShowBorder !== false
 		const borderWidth = this.active ? "2px" : "1px"
@@ -101,7 +101,7 @@ export class TextFieldN implements Component<TextFieldAttrs> {
 				m(".flex.flex-column", [
 					// another wrapper to fix IE 11 min-height bug https://github.com/philipwalton/flexbugs#3-min-height-on-a-flex-container-wont-apply-to-its-flex-items
 					m(
-						".flex.items-end",
+						".flex.items-end.flex-wrap",
 						{
 							// .flex-wrap
 							style: {
@@ -151,7 +151,7 @@ export class TextFieldN implements Component<TextFieldAttrs> {
 						lineHeight: px(inputLineHeight),
 					},
 				},
-				a.value(),
+				a.value,
 			)
 		} else {
 			// Due to modern browser's 'smart' password managers that try to autofill everything
@@ -199,11 +199,12 @@ export class TextFieldN implements Component<TextFieldAttrs> {
 						"aria-label": lang.getMaybeLazy(a.label),
 						oncreate: vnode => {
 							this.domInput = vnode.dom as HTMLInputElement
+							vnode.attrs.onDomInputCreated?.(this.domInput)
 							this.domInput.style.opacity = this._shouldShowPasswordOverlay(a) ? "0" : "1"
-							this.domInput.value = a.value()
+							this.domInput.value = a.value
 
 							if (a.type !== TextFieldType.Area) {
-								vnode.dom.addEventListener("animationstart", (e: AnimationEvent) => {
+								(vnode.dom as HTMLElement).addEventListener("animationstart", (e: AnimationEvent) => {
 									if (e.animationName === "onAutoFillStart") {
 										this._didAutofill = true
 										m.redraw()
@@ -233,13 +234,11 @@ export class TextFieldN implements Component<TextFieldAttrs> {
 							this.domInput.style.opacity = this._shouldShowPasswordOverlay(a) ? "0" : "1"
 
 							// only change the value if the value has changed otherwise the cursor in Safari and in the iOS App cannot be positioned.
-							if (this.domInput.value !== a.value()) {
-								this.domInput.value = a.value()
+							if (this.domInput.value !== a.value) {
+								this.domInput.value = a.value
 							}
 						},
 						oninput: () => {
-							a.value(this.domInput.value) // update the input on each change
-
 							a.oninput && a.oninput(this.domInput.value, this.domInput)
 						},
 						onremove: () => {
@@ -263,7 +262,7 @@ export class TextFieldN implements Component<TextFieldAttrs> {
 									lineHeight: size.line_height,
 								},
 							},
-							repeat("•", a.value().length),
+							repeat("•", a.value.length),
 						)
 						: null,
 				]),
@@ -285,15 +284,15 @@ export class TextFieldN implements Component<TextFieldAttrs> {
 						lineHeight: px(inputLineHeight),
 					},
 				},
-				a.value(),
+				a.value,
 			)
 		} else {
 			return m("textarea.input-area.text-pre", {
 				"aria-label": lang.getMaybeLazy(a.label),
 				oncreate: vnode => {
 					this.domInput = vnode.dom as HTMLInputElement
-					this.domInput.value = a.value()
-					this.domInput.style.height = px(Math.max(a.value().split("\n").length, 1) * inputLineHeight) // display all lines on creation of text area
+					this.domInput.value = a.value
+					this.domInput.style.height = px(Math.max(a.value.split("\n").length, 1) * inputLineHeight) // display all lines on creation of text area
 				},
 				onfocus: (e: FocusEvent) => this.focus(e, a),
 				onblur: (e: FocusEvent) => this.blur(e, a),
@@ -309,14 +308,12 @@ export class TextFieldN implements Component<TextFieldAttrs> {
 				oninput: () => {
 					this.domInput.style.height = "0px"
 					this.domInput.style.height = px(this.domInput.scrollHeight)
-					a.value(this.domInput.value) // update the input on each change
-
 					a.oninput && a.oninput(this.domInput.value, this.domInput)
 				},
 				onupdate: () => {
 					// only change the value if the value has changed otherwise the cursor in Safari and in the iOS App cannot be positioned.
-					if (this.domInput.value !== a.value()) {
-						this.domInput.value = a.value()
+					if (this.domInput.value !== a.value) {
+						this.domInput.value = a.value
 					}
 				},
 				style: {

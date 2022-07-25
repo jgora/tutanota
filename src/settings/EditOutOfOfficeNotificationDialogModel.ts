@@ -1,10 +1,10 @@
-import type {OutOfOfficeNotification} from "../api/entities/tutanota/OutOfOfficeNotification"
-import {createOutOfOfficeNotification} from "../api/entities/tutanota/OutOfOfficeNotification"
+import type {OutOfOfficeNotification} from "../api/entities/tutanota/TypeRefs.js"
+import {createOutOfOfficeNotification} from "../api/entities/tutanota/TypeRefs.js"
 import stream from "mithril/stream"
 import {getDayShifted, getStartOfDay, getStartOfNextDay} from "@tutao/tutanota-utils"
 import {OutOfOfficeNotificationMessageType} from "../api/common/TutanotaConstants"
-import type {OutOfOfficeNotificationMessage} from "../api/entities/tutanota/OutOfOfficeNotificationMessage"
-import {createOutOfOfficeNotificationMessage} from "../api/entities/tutanota/OutOfOfficeNotificationMessage"
+import type {OutOfOfficeNotificationMessage} from "../api/entities/tutanota/TypeRefs.js"
+import {createOutOfOfficeNotificationMessage} from "../api/entities/tutanota/TypeRefs.js"
 import {InvalidDataError, PreconditionFailedError} from "../api/common/error/RestError"
 import {BusinessFeatureRequiredError} from "../api/main/BusinessFeatureRequiredError"
 import type {EntityClient} from "../api/common/EntityClient"
@@ -25,16 +25,16 @@ const FAILURE_BUSINESS_FEATURE_REQUIRED = "outofoffice.business_feature_required
 
 export class EditOutOfOfficeNotificationDialogModel {
 	outOfOfficeNotification: OutOfOfficeNotification
-	enabled: Stream<boolean> = stream(false)
+	enabled: Stream<boolean> = stream<boolean>(false)
 	startDate: Stream<Date> = stream(new Date())
 	endDate: Stream<Date> = stream(new Date())
-	indefiniteTimeRange: Stream<boolean> = stream(true)
-	timeRangeEnabled: Stream<boolean> = stream(false)
+	indefiniteTimeRange: Stream<boolean> = stream<boolean>(true)
+	timeRangeEnabled: Stream<boolean> = stream<boolean>(false)
 	organizationSubject: Stream<string> = stream("")
 	organizationMessage: Stream<string> = stream("")
 	defaultSubject: Stream<string> = stream("")
 	defaultMessage: Stream<string> = stream("")
-	recipientMessageTypes: Stream<RecipientMessageType> = stream(RecipientMessageType.EXTERNAL_TO_EVERYONE)
+	recipientMessageTypes: Stream<RecipientMessageType> = stream<RecipientMessageType>(RecipientMessageType.EXTERNAL_TO_EVERYONE)
 	_entityClient: EntityClient
 	_userController: IUserController
 	_languageViewModel: LanguageViewModel

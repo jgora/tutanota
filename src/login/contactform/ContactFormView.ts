@@ -11,10 +11,10 @@ import {getDefaultContactFormLanguage} from "../../settings/contactform/ContactF
 import {htmlSanitizer} from "../../misc/HtmlSanitizer"
 import {renderPrivacyAndImprintLinks} from "../LoginView"
 import type {DialogHeaderBarAttrs} from "../../gui/base/DialogHeaderBar"
-import {CurrentView, header} from "../../gui/base/Header"
+import {CurrentView, header} from "../../gui/Header.js"
 import {ButtonN, ButtonType} from "../../gui/base/ButtonN"
 import {Keys} from "../../api/common/TutanotaConstants"
-import type {ContactForm} from "../../api/entities/tutanota/ContactForm"
+import type {ContactForm} from "../../api/entities/tutanota/TypeRefs.js"
 import {locator} from "../../api/main/MainLocator"
 import {assertMainOrNode} from "../../api/common/Env"
 
@@ -151,13 +151,13 @@ class ContactFormView implements CurrentView {
 						   document.title = language.pageTitle
 						   this._headerHtml = htmlSanitizer.sanitizeHTML(language.headerHtml, {
 							   blockExternalContent: false,
-						   }).text
+						   }).html
 						   this._footerHtml = htmlSanitizer.sanitizeHTML(language.footerHtml, {
 							   blockExternalContent: false,
-						   }).text
+						   }).html
 						   this._helpHtml = htmlSanitizer.sanitizeHTML(language.helpHtml, {
 							   blockExternalContent: false,
-						   }).text
+						   }).html
 						   this._loading = false
 						   m.redraw()
 					   })

@@ -14,6 +14,7 @@ import util from 'util'
 import typescript from "@rollup/plugin-typescript"
 import {keytarNativePlugin, sqliteNativeBannerPlugin} from "./nativeLibraryRollupPlugin.js"
 import {fileURLToPath} from "url"
+import {getCanonicalPlatformName} from "./buildUtils.js"
 
 const exec = util.promisify(cp.exec)
 const buildSrc = dirname(fileURLToPath(import.meta.url))
@@ -40,6 +41,7 @@ export async function buildDesktop(
 		notarize,
 		outDir,
 		unpacked,
+		disableMinify,
 	}
 ) {
 	// The idea is that we
@@ -60,7 +62,7 @@ export async function buildDesktop(
 	// and downloads everything it needs. Usually dependencies build themselves in post-install script.
 	// Currently we have keytar which avoids building itself if possible and only build
 	console.log("Updating electron-builder config...")
-	const content = generatePackageJson({
+	const content = await generatePackageJson({
 		nameSuffix,
 		version,
 		updateUrl,
@@ -83,7 +85,7 @@ export async function buildDesktop(
 	}
 
 	console.log("Bundling desktop client")
-	await rollupDesktop(dirname, path.join(distDir, "desktop"), version, platform)
+	await rollupDesktop(dirname, path.join(distDir, "desktop"), version, platform, disableMinify)
 
 	console.log("Starting installer build...")
 	if (process.platform.startsWith("darwin")) {
@@ -123,9 +125,13 @@ export async function buildDesktop(
 	])
 }
 
-async function rollupDesktop(dirname, outDir, version, platform) {
+async function rollupDesktop(dirname, outDir, version, platform, disableMinify) {
+	platform = getCanonicalPlatformName(platform)
 	const mainBundle = await rollup({
 		input: path.join(dirname, "src/desktop/DesktopMain.ts"),
+		// some transitive dep of a transitive dev-dep requires https://www.npmjs.com/package/url
+		// which rollup for some reason won't distinguish from the node builtin.
+		external: ['url', 'util', 'path', 'fs', 'os', 'http', 'https', 'crypto', 'child_process'],
 		preserveEntrySignatures: false,
 		plugins: [
 			typescript({
@@ -145,16 +151,17 @@ async function rollupDesktop(dirname, outDir, version, platform) {
 				requireReturnsDefault: "preferred",
 				ignoreDynamicRequires: true,
 			}),
-			terser(),
+			disableMinify ? undefined : terser(),
 			preludeEnvPlugin(createEnv({staticUrl: null, version, mode: "Desktop", dist: true})),
 			sqliteNativeBannerPlugin(
 				{
 					environment: "electron",
 					rootDir: projectRoot,
 					dstPath: "./build/dist/desktop/better_sqlite3.node",
-					// Relative to the source file from which the .node file is loaded
-					// In our case it will be desktop/DesktopMain.js, which is located in the same directory
-					// This depends on the changes we made in our own fork of better_sqlite3
+					// Relative to the source file from which the .node file is loaded.
+					// In our case it will be desktop/DesktopMain.js, which is located in the same directory.
+					// This depends on the changes we made in our own fork of better_sqlite3.
+					// It's okay to use forward slash here, it is passed to require which can deal with it.
 					nativeBindingPath: "./better_sqlite3.node",
 					platform,
 				}
@@ -196,20 +203,29 @@ async function getMapirs(distDir) {
  * @returns {Promise<void>}
  */
 async function downloadLatestMapirs(dllName, dllTrg) {
-	const {Octokit} = await import("@octokit/rest")
-	const octokit = new Octokit();
-	const opts = {
-		owner: "tutao",
-		repo: "mapirs"
-	}
-	const res = await octokit.request('GET /repos/{owner}/{repo}/releases/latest', opts)
-	const asset_id = res.data.assets.find(a => a.name.startsWith(dllName)).id
-	const asset = await octokit.repos.getReleaseAsset(Object.assign(opts, {
-		asset_id,
-		headers: {
-			"Accept": "application/octet-stream"
+	try {
+		const {Octokit} = await import("@octokit/rest")
+		const octokit = new Octokit();
+		const opts = {
+			owner: "tutao",
+			repo: "mapirs"
 		}
-	}))
-
-	await fs.promises.writeFile(dllTrg, Buffer.from(asset.data))
+		console.log("getting latest mapirs release")
+		const res = await octokit.request('GET /repos/{owner}/{repo}/releases/latest', opts)
+		console.log("latest mapirs release", res.url)
+		const asset_id = res.data.assets.find(a => a.name.startsWith(dllName)).id
+		console.log("Downloading mapirs asset", asset_id)
+		const asset = await octokit.repos.getReleaseAsset(Object.assign(opts, {
+			asset_id,
+			headers: {
+				"Accept": "application/octet-stream"
+			}
+		}))
+		console.log("Writing mapirs asset")
+		await fs.promises.writeFile(dllTrg, Buffer.from(asset.data))
+		console.log("Mapirs downloaded")
+	} catch (e) {
+		console.error("Failed to download mapirs!", e)
+		throw e
+	}
 }

@@ -1,58 +1,30 @@
 import child_process from "child_process"
-import {BuildServerClient} from "@tutao/tutanota-build-server"
-import path from "path"
-import {build} from "./TestBuilder.js"
-import {getTutanotaAppVersion} from "../buildSrc/buildUtils.js"
+import {runTestBuild} from "./TestBuilder.js"
+import {Option, program} from "commander"
 
-run()
-
-async function run() {
-	console.log("testing version:", getTutanotaAppVersion())
-
-	let project
-	if (process.argv.indexOf("api") !== -1) {
-		project = "api"
-	} else if (process.argv.indexOf("client") !== -1) {
-		project = "client"
-	} else {
-		console.error("must provide 'api' or 'client' to run the tests")
-		process.exit(1)
-	}
-	const clean = process.argv.includes("-c")
-
-
-	try {
-		const buildServerClient = new BuildServerClient("test")
-		const buildServerOpts = {
-			forceRestart: clean,
-			builderPath: path.resolve("TestBuilder.js"),
-			watchFolders: [path.resolve("api"), path.resolve("client"), path.resolve("../src")],
-			autoRebuild: false
-		}
-		const buildOpts = {clean: false, stage: null, host: null}
-		await buildServerClient.buildWithServer(buildServerOpts, buildOpts)
-		// await buildWithoutServer(buildOpts, buildServerOpts)
+await program
+	.addOption(new Option("-i, --integration", "Include integration tests (requires local server)"))
+	.addOption(new Option("-c, --clean"))
+	.action(async ({clean, integration}) => {
+		await runTestBuild({clean})
 		console.log("build finished!")
-		const code = await runTest(project)
-		process.exit(code)
-	} catch (e) {
-		console.error("Build failed", e)
-		process.exit(1)
-	}
+
+		await runTestsAndExit(integration)
+	})
+	.parseAsync(process.argv)
+
+/** Function which runs tests and exits with the exit code afterwards. */
+async function runTestsAndExit(integration) {
+	const code = await runTest(integration)
+	process.exit(code)
 }
 
-async function buildWithoutServer(buildOptions, serverOptions) {
-	const bundleWrappers = await build(buildOptions, serverOptions, console.log.bind(console))
-	for (const wrapper of bundleWrappers) {
-		await wrapper.generate()
-	}
-}
-
-function runTest(project) {
+function runTest(integration) {
 	return new Promise((resolve) => {
-		let testRunner = child_process.fork(`./build/bootstrapTests-${project}.js`)
-		testRunner.on('exit', (code) => {
-			resolve(code)
-		})
+		console.log("running tests")
+		const args = integration ? ["-i"] : []
+		// We fork because ospec is very weird and doesn't just let you wait for the results unless you do something with report
+		const testProcess = child_process.fork(`./build/bootstrapTests.js`, args)
+		testProcess.on('exit', resolve)
 	})
 }

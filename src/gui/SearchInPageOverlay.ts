@@ -5,13 +5,12 @@ import {displayOverlay} from "./base/Overlay"
 import {px, size} from "./size"
 import {Icons} from "./base/icons/Icons"
 import {assertMainOrNode} from "../api/common/Env"
-import {Request} from "../api/common/MessageDispatcher"
 import {lang} from "../misc/LanguageViewModel"
 import {transform, TransformEnum} from "./animation/Animations"
 import {ButtonN, ButtonType} from "./base/ButtonN"
 import {Keys} from "../api/common/TutanotaConstants"
 import {locator} from "../api/main/MainLocator"
-import type {Result} from "electron"
+import {ElectronResult} from "../native/common/generatedipc/ElectronResult.js"
 
 assertMainOrNode()
 
@@ -56,8 +55,7 @@ export class SearchInPageOverlay {
 	close() {
 		if (this._closeFunction) {
 			this._closeFunction()
-
-			locator.native.invokeNative(new Request("stopFindInPage", []))
+			locator.searchTextFacade.stopFindInPage()
 			this._closeFunction = null
 		}
 
@@ -89,10 +87,10 @@ export class SearchInPageOverlay {
 
 						this._domInput.focus()
 					} else {
-						locator.native.invokeNative(new Request("setSearchOverlayState", [false, false]))
+						locator.searchTextFacade.setSearchOverlayState(false, false)
 					}
 				},
-				onfocus: () => locator.native.invokeNative(new Request("setSearchOverlayState", [true, false])),
+				onfocus: () => locator.searchTextFacade.setSearchOverlayState(true, false),
 				oninput: () => this._find(true, true),
 				style: {
 					width: px(250),
@@ -104,23 +102,13 @@ export class SearchInPageOverlay {
 			"",
 		)
 	}
-	_find: (forward: boolean, findNext: boolean) => Promise<void> = (forward, findNext) => {
+	_find: (forward: boolean, findNext: boolean) => Promise<void> = async (forward, findNext) => {
 		this._skipNextBlur = true
-		return locator.native
-					  .invokeNative(
-						  new Request("findInPage", [
-							  this._domInput.value,
-							  {
-								  forward,
-								  matchCase: this._matchCase,
-								  findNext,
-							  },
-						  ]),
-					  )
-					  .then(r => this.applyNextResult(r))
+		const r = await locator.searchTextFacade.findInPage(this._domInput.value, forward, this._matchCase, findNext)
+		this.applyNextResult(r)
 	}
 
-	applyNextResult(result: Result | null): void {
+	applyNextResult(result: ElectronResult | null): void {
 		if (result == null) {
 			this._numberOfMatches = 0
 			this._currentMatch = 0
@@ -228,7 +216,7 @@ export class SearchInPageOverlay {
 	 */
 	handleMouseUp(e: Event) {
 		if (!(e.target instanceof Element && e.target.id !== "search-overlay-input")) return
-		locator.native.invokeNative(new Request("setSearchOverlayState", [false, true]))
+		locator.searchTextFacade.setSearchOverlayState(false, true)
 	}
 }
 

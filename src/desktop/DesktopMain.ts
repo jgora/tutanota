@@ -4,18 +4,16 @@ import {DesktopConfig} from "./config/DesktopConfig"
 import * as electron from "electron"
 import {app} from "electron"
 import {DesktopUtils} from "./DesktopUtils"
-import {IPC} from "./IPC"
 import {WindowManager} from "./DesktopWindowManager"
 import {DesktopNotifier} from "./DesktopNotifier"
-import {ElectronUpdater} from "./ElectronUpdater"
+import {ElectronUpdater} from "./ElectronUpdater.js"
 import {DesktopSseClient} from "./sse/DesktopSseClient"
 import {Socketeer} from "./Socketeer"
 import {DesktopAlarmStorage} from "./sse/DesktopAlarmStorage"
 import {DesktopAlarmScheduler} from "./sse/DesktopAlarmScheduler"
 import {lang} from "../misc/LanguageViewModel"
-import en from "../translations/en"
 import {DesktopNetworkClient} from "./DesktopNetworkClient"
-import {DesktopCryptoFacade} from "./DesktopCryptoFacade"
+import {DesktopNativeCryptoFacade} from "./DesktopNativeCryptoFacade"
 import {DesktopDownloadManager} from "./DesktopDownloadManager"
 import {DesktopTray} from "./tray/DesktopTray"
 import {log} from "./DesktopLog"
@@ -34,15 +32,30 @@ import {KeyStoreFacadeImpl} from "./KeyStoreFacadeImpl"
 import {AlarmSchedulerImpl} from "../calendar/date/AlarmScheduler"
 import {SchedulerImpl} from "../api/common/utils/Scheduler.js"
 import {DateProviderImpl} from "../calendar/date/CalendarUtils"
-import {ThemeManager} from "./ThemeManager"
+import {DesktopThemeFacade} from "./DesktopThemeFacade"
 import {BuildConfigKey, DesktopConfigKey} from "./config/ConfigKeys";
-import {DektopCredentialsEncryption, DesktopCredentialsEncryptionImpl} from "./credentials/DektopCredentialsEncryption"
-import {DesktopWebauthn} from "./2fa/DesktopWebauthn.js"
+import {DesktopNativeCredentialsFacade} from "./credentials/DesktopNativeCredentialsFacade.js"
 import {webauthnIpcHandler, WebDialogController} from "./WebDialog.js"
-import {ExposedNativeInterface} from "../native/common/NativeInterface.js"
 import path from "path"
-import {OfflineDbFacade} from "./db/OfflineDbFacade"
+import {OfflineDbFacade, OfflineDbFactory} from "./db/OfflineDbFacade"
 import {OfflineDb} from "./db/OfflineDb"
+import {DesktopContextMenu} from "./DesktopContextMenu.js"
+import {DesktopNativePushFacade} from "./sse/DesktopNativePushFacade.js"
+import {NativeCredentialsFacade} from "../native/common/generatedipc/NativeCredentialsFacade.js"
+import {FacadeHandler, RemoteBridge} from "./ipc/RemoteBridge.js"
+import {DesktopSettingsFacade} from "./config/DesktopSettingsFacade.js"
+import {ApplicationWindow} from "./ApplicationWindow.js"
+import {DesktopCommonSystemFacade} from "./DesktopCommonSystemFacade.js"
+import {DesktopGlobalDispatcher} from "../native/common/generatedipc/DesktopGlobalDispatcher.js"
+import {DesktopDesktopSystemFacade} from "./DesktopDesktopSystemFacade.js"
+import {DesktopExportFacade} from "./DesktopExportFacade.js"
+import {DesktopFileFacade} from "./DesktopFileFacade.js"
+import {DesktopSearchTextInAppFacade} from "./DesktopSearchTextInAppFacade.js"
+import {exposeLocal} from "../api/common/WorkerProxy.js"
+import {ExposedNativeInterface} from "../native/common/NativeInterface.js"
+import {DesktopWebauthn} from "./2fa/DesktopWebauthn.js"
+import {DesktopInterWindowEventSender} from "./ipc/DesktopInterWindowEventSender.js"
+import {DesktopPostLoginActions} from "./DesktopPostLoginActions.js"
 
 /**
  * Should be injected during build time.
@@ -55,7 +68,6 @@ declare const buildOptions: {
 mp()
 type Components = {
 	readonly wm: WindowManager
-	readonly ipc: IPC
 	readonly dl: DesktopDownloadManager
 	readonly sse: DesktopSseClient
 	readonly conf: DesktopConfig
@@ -65,11 +77,11 @@ type Components = {
 	readonly updater: ElectronUpdater
 	readonly integrator: DesktopIntegrator
 	readonly tray: DesktopTray
-	readonly themeManager: ThemeManager
-	readonly credentialsEncryption: DektopCredentialsEncryption
+	readonly desktopThemeFacade: DesktopThemeFacade
+	readonly credentialsEncryption: NativeCredentialsFacade
 }
-const desktopCrypto = new DesktopCryptoFacade(fs, cryptoFns)
-const desktopUtils = new DesktopUtils(fs, electron, desktopCrypto)
+const desktopUtils = new DesktopUtils(fs, electron, cryptoFns)
+const desktopCrypto = new DesktopNativeCryptoFacade(fs, cryptoFns, desktopUtils)
 const opts = {
 	registerAsMailHandler: process.argv.some(arg => arg === "-r"),
 	unregisterAsMailHandler: process.argv.some(arg => arg === "-u"),
@@ -105,6 +117,7 @@ if (opts.registerAsMailHandler && opts.unregisterAsMailHandler) {
 }
 
 async function createComponents(): Promise<Components> {
+	const en = (await import("../translations/en.js")).default
 	lang.init(en)
 	const secretStorage = new KeytarSecretStorage()
 	const keyStoreFacade = new KeyStoreFacadeImpl(secretStorage, desktopCrypto)
@@ -115,6 +128,7 @@ async function createComponents(): Promise<Components> {
 		console.error("Could not load config", e)
 		process.exit(1)
 	})
+	const appIcon = desktopUtils.getIconByName(await conf.getConst(BuildConfigKey.iconName))
 	const desktopNet = new DesktopNetworkClient()
 	const sock = new Socketeer(net, app)
 	const tray = new DesktopTray(conf)
@@ -122,11 +136,41 @@ async function createComponents(): Promise<Components> {
 	const dateProvider = new DateProviderImpl()
 	const dl = new DesktopDownloadManager(conf, desktopNet, desktopUtils, dateProvider, fs, electron)
 	const alarmStorage = new DesktopAlarmStorage(conf, desktopCrypto, keyStoreFacade)
-	const updater = new ElectronUpdater(conf, notifier, desktopCrypto, app, tray, new UpdaterWrapperImpl())
+	const updater = new ElectronUpdater(conf, notifier, desktopCrypto, app, appIcon, new UpdaterWrapperImpl())
 	const shortcutManager = new LocalShortcutManager()
-	const themeManager = new ThemeManager(conf)
-	const credentialsEncryption = new DesktopCredentialsEncryptionImpl(keyStoreFacade, desktopCrypto)
-	const wm = new WindowManager(conf, tray, notifier, electron, shortcutManager, dl, themeManager)
+	const nativeCredentialsFacade = new DesktopNativeCredentialsFacade(keyStoreFacade, desktopCrypto)
+
+	updater.setUpdateDownloadedListener(() => {
+		for (let applicationWindow of wm.getAll()) {
+			applicationWindow.desktopFacade.appUpdateDownloaded()
+		}
+	})
+
+	const offlineDbFactory: OfflineDbFactory = {
+		async create(userid: string, key: Aes256Key): Promise<OfflineDb> {
+			const db = new OfflineDb(buildOptions.sqliteNativePath)
+			const dbPath = makeDbPath(userid)
+			await db.init(dbPath, key)
+			return db
+		},
+		async delete(userId: string): Promise<void> {
+			const dbPath = makeDbPath(userId)
+			try {
+				await fs.promises.rm(dbPath)
+			} catch (e) {
+				if (e.code === "ENOENT") {
+					// No database, no problems
+				} else {
+					throw e
+				}
+			}
+		}
+	}
+
+	const offlineDbFacade = new OfflineDbFacade(offlineDbFactory)
+
+	const wm = new WindowManager(conf, tray, notifier, electron, shortcutManager, appIcon, offlineDbFacade)
+	const themeFacade = new DesktopThemeFacade(conf, wm)
 	const alarmScheduler = new AlarmSchedulerImpl(dateProvider, new SchedulerImpl(dateProvider, global, global))
 	const desktopAlarmScheduler = new DesktopAlarmScheduler(wm, notifier, alarmStorage, desktopCrypto, alarmScheduler)
 	desktopAlarmScheduler.rescheduleAll().catch(e => {
@@ -140,49 +184,59 @@ async function createComponents(): Promise<Components> {
 	// It should be ok to await this, all we are waiting for is dynamic imports
 	const integrator = await getDesktopIntegratorForPlatform(electron, fs, child_process, () => import("winreg"))
 
-	const offlineDbFactory = async (userId: Id, key: Aes256Key) => {
-		const db = new OfflineDb(buildOptions.sqliteNativePath)
-		const dbPath = path.join(app.getPath("userData"), `offline_${userId}.sqlite`)
-		await db.init(dbPath, key)
-		return db
+	const dragIcons = {
+		eml: desktopUtils.getIconByName("eml.png"),
+		msg: desktopUtils.getIconByName("msg.png"),
+	}
+	const pushFacade = new DesktopNativePushFacade(sse, desktopAlarmScheduler, alarmStorage)
+	const settingsFacade = new DesktopSettingsFacade(conf, desktopUtils, integrator, updater, lang)
+	const fileFacade = new DesktopFileFacade(dl, electron)
+
+	const dispatcherFactory = (window: ApplicationWindow) => {
+		// @ts-ignore
+		const logger: Logger = global.logger
+		const desktopCommonSystemFacade = new DesktopCommonSystemFacade(window, logger)
+		const dispatcher = new DesktopGlobalDispatcher(
+			desktopCommonSystemFacade,
+			new DesktopDesktopSystemFacade(wm, window, sock),
+			new DesktopExportFacade(desktopUtils, conf, window, dragIcons),
+			fileFacade,
+			nativeCredentialsFacade,
+			desktopCrypto,
+			pushFacade,
+			new DesktopSearchTextInAppFacade(window),
+			settingsFacade,
+			themeFacade
+		)
+		return {desktopCommonSystemFacade, dispatcher}
 	}
 
-	const offlineDbFacade = new OfflineDbFacade(offlineDbFactory)
-
-	const exposedInterfaceFactory = (windowId: number): ExposedNativeInterface => {
-		return {
-			webauthn: new DesktopWebauthn(windowId, webDialogController),
-			offlineDbFacade: offlineDbFacade
-		}
+	const facadeHandlerFactory = (window: ApplicationWindow): FacadeHandler => {
+		return exposeLocal<ExposedNativeInterface, "facade">({
+			webauthn: new DesktopWebauthn(window.id, webDialogController),
+			offlineDbFacade: offlineDbFacade,
+			interWindowEventSender: new DesktopInterWindowEventSender(wm, window.id),
+			postLoginActions: new DesktopPostLoginActions(wm, err, notifier, window.id)
+		})
 	}
 
-	const ipc = new IPC(
-		conf,
-		notifier,
-		sse,
-		wm,
-		sock,
-		alarmStorage,
-		desktopCrypto,
-		dl,
-		updater,
-		electron,
-		desktopUtils,
-		err,
-		integrator,
-		desktopAlarmScheduler,
-		themeManager,
-		credentialsEncryption,
-		exposedInterfaceFactory
+	const remoteBridge = new RemoteBridge(
+		dispatcherFactory,
+		facadeHandlerFactory,
 	)
-	wm.setIPC(ipc)
+
+	function makeDbPath(userId: string): string {
+		return path.join(app.getPath("userData"), `offline_${userId}.sqlite`)
+	}
+
+	const contextMenu = new DesktopContextMenu(electron, wm)
+	wm.lateInit(contextMenu, themeFacade, remoteBridge)
 	conf.getConst(BuildConfigKey.appUserModelId).then(appUserModelId => {
 		app.setAppUserModelId(appUserModelId)
 	})
 	log.debug("version:  ", app.getVersion())
 	return {
 		wm,
-		ipc,
 		dl,
 		sse,
 		conf,
@@ -192,8 +246,8 @@ async function createComponents(): Promise<Components> {
 		updater,
 		integrator,
 		tray,
-		themeManager,
-		credentialsEncryption
+		desktopThemeFacade: themeFacade,
+		credentialsEncryption: nativeCredentialsFacade
 	}
 }
 
@@ -236,7 +290,7 @@ async function startupInstance(components: Components) {
 }
 
 async function onAppReady(components: Components) {
-	const {ipc, wm, keyStoreFacade, conf} = components
+	const {wm, keyStoreFacade, conf} = components
 	keyStoreFacade.getDeviceKey().catch(() => {
 		electron.dialog.showErrorBox("Could not access secret storage", "Please see the FAQ at tutanota.com/faq/#secretstorage")
 	})
@@ -245,12 +299,12 @@ async function onAppReady(components: Components) {
 			app.quit()
 		}
 	})
-	err.init(wm, ipc)
+	err.init(wm)
 	// only create a window if there are none (may already have created one, e.g. for mailto handling)
 	// also don't show the window when we're an autolaunched tray app
 	const w = await wm.getLastFocused(!((await conf.getVar(DesktopConfigKey.runAsTrayApp)) && opts.wasAutoLaunched))
 	log.debug("default mailto handler:", app.isDefaultProtocolClient("mailto"))
-	ipc.initialized(w.id).then(() => main(components))
+	main(components)
 }
 
 async function main(components: Components) {
@@ -282,10 +336,10 @@ function findMailToUrlInArgv(argv: string[]): string | null {
 	return argv.find(arg => arg.startsWith("mailto")) ?? null
 }
 
-async function handleMailto(mailtoArg: string | null, {wm, ipc}: Components) {
+async function handleMailto(mailtoArg: string | null, {wm}: Components) {
 	if (mailtoArg) {
 		/*[filesUris, text, addresses, subject, mailToUrl]*/
 		const w = await wm.getLastFocused(true)
-		return ipc.sendRequest(w.id, "createMailEditor", [[], "", "", "", mailtoArg])
+		return w.commonNativeFacade.createMailEditor([], "", [], "", mailtoArg)
 	}
 }

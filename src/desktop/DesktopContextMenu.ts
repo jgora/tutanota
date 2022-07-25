@@ -1,73 +1,72 @@
 import type {ContextMenuParams, Menu, WebContents} from "electron"
 import {lang} from "../misc/LanguageViewModel"
-import type {IPC} from "./IPC"
+import {WindowManager} from "./DesktopWindowManager.js"
 
 type Electron = typeof Electron.CrossProcessExports
 
 export class DesktopContextMenu {
-	_ipc: IPC
-	_electron: Electron
 
-	constructor(electron: Electron, ipc: IPC) {
-		this._electron = electron
-		this._ipc = ipc
+	constructor(
+		private readonly electron: Electron,
+		private readonly windowManager: WindowManager,
+	) {
 	}
 
 	open(params: ContextMenuParams) {
 		const {linkURL, editFlags, misspelledWord, dictionarySuggestions} = params
-		const menu = new this._electron.Menu()
-		const pasteItem = new this._electron.MenuItem({
+		const menu = new this.electron.Menu()
+		const pasteItem = new this.electron.MenuItem({
 			label: lang.get("paste_action"),
 			accelerator: "CmdOrCtrl+V",
 			click: (mi, bw) => bw && bw.webContents && bw.webContents.paste(),
 			enabled: editFlags.canPaste,
 		})
-		const copyItem = new this._electron.MenuItem({
+		const copyItem = new this.electron.MenuItem({
 			label: lang.get("copy_action"),
 			accelerator: "CmdOrCtrl+C",
 			click: (mi, bw) => bw && bw.webContents && bw.webContents.copy(),
 			enabled: editFlags.canCopy,
 		})
-		const cutItem = new this._electron.MenuItem({
+		const cutItem = new this.electron.MenuItem({
 			label: lang.get("cut_action"),
 			accelerator: "CmdOrCtrl+X",
 			click: (mi, bw) => bw && bw.webContents && bw.webContents.cut(),
 			enabled: editFlags.canCut,
 		})
-		const copyLinkItem = new this._electron.MenuItem({
+		const copyLinkItem = new this.electron.MenuItem({
 			label: lang.get("copyLink_action"),
-			click: () => !!linkURL && this._electron.clipboard.writeText(linkURL),
+			click: () => !!linkURL && this.electron.clipboard.writeText(linkURL),
 			enabled: !!linkURL,
 		})
-		const undoItem = new this._electron.MenuItem({
+		const undoItem = new this.electron.MenuItem({
 			label: lang.get("undo_action"),
 			accelerator: "CmdOrCtrl+Z",
 			click: (mi, bw) => bw && bw.webContents && bw.webContents.undo(),
 			enabled: editFlags.canUndo,
 		})
-		const redoItem = new this._electron.MenuItem({
+		const redoItem = new this.electron.MenuItem({
 			label: lang.get("redo_action"),
 			accelerator: "CmdOrCtrl+Shift+Z",
 			click: (mi, bw) => bw && bw.webContents && bw.webContents.redo(),
 			enabled: editFlags.canRedo,
 		})
-		const spellingItem = new this._electron.MenuItem({
+		const spellingItem = new this.electron.MenuItem({
 			label: lang.get("spelling_label"),
-			submenu: this._spellingSubmenu(misspelledWord, dictionarySuggestions),
+			submenu: this.spellingSubmenu(misspelledWord, dictionarySuggestions),
 		})
 		menu.append(copyItem)
 		menu.append(cutItem)
 		menu.append(copyLinkItem)
 		menu.append(pasteItem)
 		menu.append(
-			new this._electron.MenuItem({
+			new this.electron.MenuItem({
 				type: "separator",
 			}),
 		)
 		menu.append(undoItem)
 		menu.append(redoItem)
 		menu.append(
-			new this._electron.MenuItem({
+			new this.electron.MenuItem({
 				type: "separator",
 			}),
 		)
@@ -80,26 +79,26 @@ export class DesktopContextMenu {
 		menu.popup()
 	}
 
-	_spellingSubmenu(misspelledWord: string, dictionarySuggestions: Array<string>): Menu {
-		const submenu = new this._electron.Menu()
+	private spellingSubmenu(misspelledWord: string, dictionarySuggestions: Array<string>): Menu {
+		const submenu = new this.electron.Menu()
 
 		if (misspelledWord !== "") {
 			dictionarySuggestions
 				.map(
 					s =>
-						new this._electron.MenuItem({
+						new this.electron.MenuItem({
 							label: s,
 							click: (mi, bw) => bw && bw.webContents && bw.webContents.replaceMisspelling(s),
 						}),
 				)
 				.forEach(mi => submenu.append(mi))
 			submenu.append(
-				new this._electron.MenuItem({
+				new this.electron.MenuItem({
 					type: "separator",
 				}),
 			)
 			submenu.append(
-				new this._electron.MenuItem({
+				new this.electron.MenuItem({
 					label: lang.get("addToDict_action", {
 						"{word}": misspelledWord,
 					}),
@@ -111,9 +110,9 @@ export class DesktopContextMenu {
 		// the spellcheck API uses the OS spell checker on MacOs, the language is set in the OS settings.
 		if (process.platform !== "darwin") {
 			submenu.append(
-				new this._electron.MenuItem({
+				new this.electron.MenuItem({
 					label: lang.get("changeSpellCheckLang_action"),
-					click: (mi, bw) => bw && bw.webContents && this._changeSpellcheckLanguage(bw.webContents),
+					click: (mi, bw) => bw && bw.webContents && this.changeSpellcheckLanguage(bw.webContents),
 				}),
 			)
 		}
@@ -121,11 +120,10 @@ export class DesktopContextMenu {
 		return submenu
 	}
 
-	_changeSpellcheckLanguage(wc: WebContents) {
-		const window = this._electron.BrowserWindow.fromWebContents(wc)
-
-		if (window) {
-			this._ipc.sendRequest(window.id, "showSpellcheckDropdown", []).then()
-		}
+	private async changeSpellcheckLanguage(wc: WebContents) {
+		const windowId = this.electron.BrowserWindow.fromWebContents(wc)?.id
+		if (windowId == null) return
+		const window = this.windowManager.get(windowId)
+		window?.desktopFacade.showSpellcheckDropdown()
 	}
 }

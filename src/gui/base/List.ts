@@ -4,13 +4,13 @@ import {px, size} from "../size"
 import {client} from "../../misc/ClientDetector"
 import {Keys, OperationType, TabIndex} from "../../api/common/TutanotaConstants"
 import type {DeferredObject, MaybeLazy} from "@tutao/tutanota-utils"
-import {addAll, arrayEquals, assertNotNull, debounceStart, defer, last, lastThrow, mapLazily, neverNull, ofClass, remove} from "@tutao/tutanota-utils"
+import {addAll, arrayEquals, assertNotNull, debounceStart, defer, last, lastThrow, mapLazily, neverNull, remove} from "@tutao/tutanota-utils"
 import ColumnEmptyMessageBox from "./ColumnEmptyMessageBox"
 import {progressIcon} from "./Icon"
 import {animations, DefaultAnimationTime, opacity, transform, TransformEnum} from "../animation/Animations"
 import {ease} from "../animation/Easing"
 import {windowFacade} from "../../misc/WindowFacade"
-import {BadRequestError, ConnectionError} from "../../api/common/error/RestError"
+import {BadRequestError} from "../../api/common/error/RestError"
 import {SwipeHandler} from "./SwipeHandler"
 import {applySafeAreaInsetMarginLR} from "../HtmlUtils"
 import {theme} from "../theme"
@@ -23,6 +23,7 @@ import {ButtonN, ButtonType} from "./ButtonN"
 import {LoadingState, LoadingStateTracker} from "../../offline/LoadingState"
 import {lang} from "../../misc/LanguageViewModel"
 import {PosRect} from "./Dropdown"
+import {isOfflineError} from "../../api/common/utils/ErrorCheckUtils.js"
 
 assertMainOrNode()
 export const ScrollBuffer = 15 // virtual elements that are used as scroll buffer in both directions
@@ -51,13 +52,19 @@ export interface VirtualRow<T> {
 	domElement: HTMLElement | null
 }
 
+export interface ListFetchResult<T> {
+	items: Array<T>
+	/** Complete means that we loaded the whole list and additional requests will not yield any results. */
+	complete: boolean
+}
+
 export interface ListConfig<T, R extends VirtualRow<T>> {
 	rowHeight: number
 
 	/**
 	 * Get the given number of entities starting after the given id. May return more elements than requested, e.g. if all elements are available on first fetch.
 	 */
-	fetch(startId: Id, count: number): Promise<Array<T>>
+	fetch(startId: Id, count: number): Promise<ListFetchResult<T>>
 
 	/**
 	 * Returns null if the given element could not be loaded
@@ -97,8 +104,6 @@ export interface ListConfig<T, R extends VirtualRow<T>> {
 
 	createVirtualRow(): R
 
-	listLoadedCompletly?: () => void
-	showStatus: boolean
 	className: string
 	swipe: SwipeConfiguration<T>
 
@@ -110,14 +115,6 @@ export interface ListConfig<T, R extends VirtualRow<T>> {
 	emptyMessage: string
 }
 
-interface DomStatus {
-	bufferUp: HTMLElement | null
-	bufferDown: HTMLElement | null
-	speed: HTMLElement | null
-	scrollDiff: HTMLElement | null
-	timeDiff: HTMLElement | null
-}
-
 /**
  * A list that renders only a few dom elements (virtual list) to represent the items of even very large lists.
  *
@@ -126,37 +123,34 @@ interface DomStatus {
  * * R is the type of the Row
  */
 export class List<T extends ListElement, R extends VirtualRow<T>> implements Component {
-	ready: boolean = false
+	/** Whether we have rendered DOM elements for the list and updated them at least once. */
+	private ready: boolean = false
 
 	loading: Promise<void> = Promise.resolve()
 	currentPosition: number = 0
-	lastPosition: number = 0
-	lastUpdateTime!: number
+	private lastPosition: number = 0
+	private lastUpdateTime!: number
 	width = 0
-
-	// if set, paint operations are executed later, when the scroll speed becomes slower
+	/**
+	 * Set when scrolling list so fast that it doesn't make sense to try to updateDomElements elements.
+	 * If set, paint operations are executed later, when the scroll speed becomes slower.
+	 */
 	updateLater: boolean = false
-
-	repositionTimeout: TimeoutID | null // the id of the timeout to reposition if updateLater == true and scrolling stops abruptly (e.g. end of list or user touch)
-
+	/**
+	 * The id of the timeout to updateDomElements if updateLater == true.
+	 */
+	private repositionTimeout: TimeoutID | null
 	/** sorted with _config.sortCompare */
 	readonly loadedEntities: T[] = []
 
-	/**  // displays a part of the page, VirtualRows map 1:1 to DOM-Elements */
+	/** Displays a part of the page, VirtualRows map 1:1 to DOM-Elements */
 	virtualList: R[] = []
 
 	private domListContainer!: HTMLElement
 	private domList!: HTMLElement
 	private domDeferred: DeferredObject<void> = defer<void>()
+	private messageBoxDom: HTMLElement | null = null
 	private loadedCompletely = false
-
-	private domStatus: DomStatus = {
-		bufferUp: null,
-		bufferDown: null,
-		speed: null,
-		scrollDiff: null,
-		timeDiff: null,
-	}
 
 	private visibleElementsHeight: number = 0
 	private bufferHeight: number
@@ -164,17 +158,17 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	domSwipeSpacerLeft!: HTMLElement
 	domSwipeSpacerRight!: HTMLElement
 
-	/** the selected entities must be sorted the same way the loaded entities are sorted */
+	/** The selected entities must be sorted the same way the loaded entities are sorted */
 	private selectedEntities: T[] = []
-
+	/** We remember the last selected entities and only invoke callback from config if there was an actual difference. */
 	private lastSelectedEntitiesForCallback: T[] = []
-
 	/** true if the last key multi selection action was selecting the previous entity, false if it was selecting the next entity */
 	private lastMultiSelectWasKeyUp = false
-
+	/**
+	 * When we call scrollToIdAndSelectWhenReceived we wait for the item to be added to the list and then scroll to it.
+	 * This field remembers what we are waiting for.
+	 */
 	private idOfEntityToSelectWhenReceived: Id | null = null
-	private messageBoxDom: HTMLElement | null = null
-
 	/** Can be activated by holding on element in a list. When active, elements can be selected just by tapping them */
 	private mobileMultiSelectionActive: boolean = false
 
@@ -214,13 +208,13 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	}
 
 	view(): Children {
-		let list = m(".list-container.fill-absolute.scroll.list-bg.nofocus.overflow-x-hidden", {
+		return m(".list-container.fill-absolute.scroll.list-bg.nofocus.overflow-x-hidden", {
 			tabindex: TabIndex.Programmatic,
 			oncreate: vnode => {
 				this.domListContainer = vnode.dom as HTMLElement
 				this.width = this.domListContainer.clientWidth
 
-				this.createVirtualRows()
+				this._createVirtualRows()
 
 				// On mobile, we want to wait for the side menu animation to end before doing any heavy things to keep the animation smooth
 				const execute = (callback: () => void) => client.isMobileDevice()
@@ -228,66 +222,18 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 					: window.requestAnimationFrame(callback)
 
 				execute(() => {
+					// We synchronously render into the dom element so that we have full control over when it is done.
 					m.render(vnode.dom, this.renderList())
 					this.domDeferred.resolve()
-					this.init()
+					this._init()
 				})
 			},
 		})
-
-		if (this.config.showStatus) {
-			return m(".status-wrapper", [
-				m(
-					".status.flex.justify-between.fill-absolute",
-					{
-						style: {
-							height: px(60),
-						},
-					},
-					[
-						m("div", [
-							m(".bufferUp", {
-								oncreate: vnode => (this.domStatus.bufferUp = vnode.dom as HTMLElement),
-							}),
-							m(".bufferDown", {
-								oncreate: vnode => (this.domStatus.bufferDown = vnode.dom as HTMLElement),
-							}),
-						]),
-						m("div", [
-							m(".scrollDiff", {
-								oncreate: vnode => (this.domStatus.scrollDiff = vnode.dom as HTMLElement),
-							}),
-						]),
-						m("div", [
-							m(".speed", {
-								oncreate: vnode => (this.domStatus.speed = vnode.dom as HTMLElement),
-							}),
-							m(".time", {
-								oncreate: vnode => (this.domStatus.timeDiff = vnode.dom as HTMLElement),
-							}),
-						]),
-					],
-				),
-				m(
-					".list-wrapper.fill-absolute",
-					{
-						style: {
-							top: px(60),
-						},
-					},
-					list,
-				),
-			])
-		} else {
-			return list
-		}
 	}
 
 	private renderList(): Children {
 		return [
-			m(
-				".swipe-spacer.flex.items-center.justify-end.pr-l.blue",
-				{
+			m(".swipe-spacer.flex.items-center.justify-end.pr-l.blue", {
 					oncreate: vnode => (this.domSwipeSpacerLeft = vnode.dom as HTMLElement),
 					tabindex: TabIndex.Programmatic,
 					"aria-hidden": "true",
@@ -301,9 +247,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				},
 				this.config.swipe.renderLeftSpacer(),
 			),
-			m(
-				".swipe-spacer.flex.items-center.pl-l.red",
-				{
+			m(".swipe-spacer.flex.items-center.pl-l.red", {
 					oncreate: vnode => (this.domSwipeSpacerRight = vnode.dom as HTMLElement),
 					tabindex: TabIndex.Programmatic,
 					"aria-hidden": "true",
@@ -317,59 +261,16 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				},
 				this.config.swipe.renderRightSpacer(),
 			),
-			m(
-				"ul.list.list-alternate-background.fill-absolute.click",
-				{
-					oncreate: vnode => this.setDomList(vnode.dom as HTMLElement),
+			m("ul.list.list-alternate-background.fill-absolute.click", {
+					oncreate: vnode => this._setDomList(vnode.dom as HTMLElement),
 					style: {
 						height: this.calculateListHeight(),
 					},
 					className: this.config.className,
 				},
 				[
-					this.virtualList.map(virtualRow => {
-						return m(
-							"li.list-row.pl.pr-l" + (this.config.dragStart ? '[draggable="true"]' : ""),
-							{
-								tabindex: TabIndex.Default,
-								oncreate: vnode => this.initRow(virtualRow, vnode.dom as HTMLElement),
-								style: {
-									transform: `translateY(-${this.config.rowHeight}px)`,
-									paddingTop: px(15),
-									paddingBottom: px(15),
-								},
-								ondragstart: (event: DragEvent) => {
-									if (this.config.dragStart) {
-										this.config.dragStart(event, virtualRow, this.selectedEntities)
-									}
-								},
-							},
-							virtualRow.render(),
-						)
-					}),
-					// odd-row is toggled manually on the dom element when the number of elements changes
-					m("li.list-row.odd-row", {
-							oncreate: vnode => {
-								this.loadingIndicatorDom.resolve(vnode.dom as HTMLElement)
-							},
-							style: {
-								bottom: 0,
-								height: px(size.list_row_height),
-								display: this.loadingState.isIdle() ? "none" : ""
-							}
-						}, m("",
-							{
-								oncreate: vnode => {
-									this.loadingIndicatorChildDom.resolve(vnode.dom as HTMLElement)
-								}
-							},
-							this.loadingState.isLoading()
-								? this.renderLoadingIndicator()
-								: this.loadingState.isConnectionLost()
-									? this.renderConnectionLostIndicator()
-									: null
-						)
-					)
+					this.virtualList.map(virtualRow => this.renderVirtualRow(virtualRow)),
+					this.renderStatusRow()
 				],
 			), // We cannot render it conditionally because it's rendered once, we must manipulate DOM afterwards
 			m(ColumnEmptyMessageBox, {
@@ -382,6 +283,52 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				},
 			}),
 		]
+	}
+
+	private renderVirtualRow(virtualRow: R): Children {
+		return m("li.list-row.pl.pr-l", {
+				draggable: this.config.dragStart ? "true" : undefined,
+				tabindex: TabIndex.Default,
+				oncreate: vnode => this.initRow(virtualRow, vnode.dom as HTMLElement),
+				style: {
+					transform: `translateY(-${this.config.rowHeight}px)`,
+					paddingTop: px(15),
+					paddingBottom: px(15),
+				},
+				ondragstart: (event: DragEvent) => {
+					if (this.config.dragStart) {
+						this.config.dragStart(event, virtualRow, this.selectedEntities)
+					}
+				},
+			},
+			virtualRow.render(),
+		)
+	}
+
+	private renderStatusRow(): Children {
+		// odd-row is toggled manually on the dom element when the number of elements changes
+		return m("li.list-row.odd-row", {
+				oncreate: (vnode) => {
+					this.loadingIndicatorDom.resolve(vnode.dom as HTMLElement)
+				},
+				style: {
+					bottom: 0,
+					height: px(size.list_row_height),
+					display: this.loadingState.isIdle() ? "none" : ""
+				}
+			}, m("",
+				{
+					oncreate: vnode => {
+						this.loadingIndicatorChildDom.resolve(vnode.dom as HTMLElement)
+					}
+				},
+				this.loadingState.isLoading()
+					? this.renderLoadingIndicator()
+					: this.loadingState.isConnectionLost()
+						? this.renderConnectionLostIndicator()
+						: null
+			)
+		)
 	}
 
 	private reset() {
@@ -429,7 +376,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		this.loadedCompletely = false
 
 		if (this.domList) {
-			this.domList.style.height = this.calculateListHeight()
+			this.updateListHeight()
 
 			for (let row of this.virtualList) {
 				if (row.domElement) {
@@ -440,9 +387,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	}
 
 	private async handleLoadingStateChanged(newState: LoadingState): Promise<void> {
-
 		const [loadingStateDom, loadingStateDomChild] = await Promise.all([this.loadingIndicatorDom.promise, this.loadingIndicatorChildDom.promise])
-
 
 		switch (newState) {
 			case LoadingState.Idle:
@@ -510,13 +455,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 
 		let timeoutId: TimeoutID | null
-		let touchStartCoords:
-			| {
-			x: number
-			y: number
-		}
-			| null
-			| undefined
+		let touchStartCoords: | {x: number, y: number} | null = null
 		domElement.addEventListener("touchstart", (e: TouchEvent) => {
 			touchStartTime = Date.now()
 
@@ -531,7 +470,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 
 						this.elementClicked(virtualRow.entity, e)
 					} else {
-						m.redraw() // only header changes we don't need reposition here
+						m.redraw() // only header changes we don't need updateDomElements here
 					}
 				}, 400)
 				touchStartCoords = {
@@ -640,7 +579,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 			// the selected entities must be sorted the same way the loaded entities are sorted
 			this.selectedEntities.sort(this.config.sortCompare)
 
-			this.reposition()
+			this.updateDomElements()
 		}
 
 		if (this.selectedEntities.length === 0) {
@@ -669,7 +608,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				// the selected entities must be sorted the same way the loaded entities are sorted
 				this.selectedEntities.sort(this.config.sortCompare)
 
-				this.reposition()
+				this.updateDomElements()
 
 				this.elementSelected(this.getSelectedEntities(), false, true)
 			}
@@ -679,7 +618,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 			if (selectionChanged) {
 				this.selectedEntities = [entity]
 
-				this.reposition()
+				this.updateDomElements()
 			}
 
 			if (this.selectedEntities.length === 0) {
@@ -710,7 +649,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 			// we have to remove the selection from the top
 			this.selectedEntities.splice(0, 1)
 
-			this.reposition()
+			this.updateDomElements()
 
 			this.elementSelected(this.getSelectedEntities(), false, true)
 
@@ -744,7 +683,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 			// we have to remove the selection from the bottom
 			this.selectedEntities.splice(-1, 1)
 
-			this.reposition()
+			this.updateDomElements()
 
 			this.elementSelected(this.getSelectedEntities(), false, true)
 
@@ -776,7 +715,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		if (this.selectedEntities.length > 0) {
 			this.selectedEntities = []
 
-			this.reposition()
+			this.updateDomElements()
 
 			this.elementSelected([], false, false)
 		}
@@ -826,40 +765,46 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 		await this.loadMore()
 		await this.domDeferred.promise
-		this.domList.style.height = this.calculateListHeight()
+		this.updateListHeight()
 	}
 
 	private async loadMore(): Promise<void> {
-		await this.loadingState.trackPromise(this.doLoadMore())
-				  .catch(ofClass(ConnectionError, (e) => console.log("connection error in loadMore")))
-				  .finally(() => m.redraw())
+		try {
+			await this.loadingState.trackPromise(this.loadAndAppendAnotherChunk())
+			// If we fetched just a few items we might want to try again.
+			// Start this async.
+			this.loadMoreIfNecessary()
+		} catch (e) {
+			if (isOfflineError(e)) {
+				console.log("connection error in loadMore", e)
+			} else {
+				throw e
+			}
+		} finally {
+			m.redraw()
+		}
 	}
 
-	private async doLoadMore(): Promise<void> {
+	private async loadAndAppendAnotherChunk(): Promise<void> {
 		let startId
-
 		if (this.loadedEntities.length === 0) {
 			startId = GENERATED_MAX_ID
 		} else {
 			startId = getLetId(this.loadedEntities[this.loadedEntities.length - 1])[1]
 		}
 
-		let count = PageSize
-
 		this.loading = this.config
-						   .fetch(startId, count)
-						   .then(newItems => {
-							   this.loadedEntities.push(...newItems)
+						   .fetch(startId, PageSize)
+						   .then(({items, complete}) => {
+							   this.loadedEntities.push(...items)
 							   this.loadedEntities.sort(this.config.sortCompare)
-							   if (newItems.length < count) {
+							   if (complete) {
 								   // ensure that all elements are added to the loaded entities before calling setLoadedCompletely
 								   this.setLoadedCompletely()
 							   }
 						   })
 						   .finally(() => {
-							   if (this.ready) {
-								   this.reposition()
-							   }
+							   this.updateDomElements()
 						   })
 		return this.loading
 	}
@@ -871,32 +816,24 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	setLoadedCompletely() {
 		this.loadedCompletely = true
 		this.loadingState.setIdle()
-		if (this.config.listLoadedCompletly) {
-			this.config.listLoadedCompletly()
-		}
 	}
 
 	displaySpinner() {
 		this.loadingState.set(LoadingState.Loading)
 	}
 
-	init() {
+	// Visible for testing
+	_init() {
 		this.domListContainer.addEventListener(
 			"scroll",
 			this.scrollListener,
-			client.passive()
-				? {
-					passive: true,
-				}
-				: false,
+			{passive: true},
 		)
 
 		window.requestAnimationFrame(() => {
-			this.domList.style.height = this.calculateListHeight()
-
-			this.reposition()
-
 			this.ready = true
+			this.updateListHeight()
+			this.updateDomElements()
 
 			if (client.isTouchSupported() && this.config.swipe.enabled) {
 				this.swipeHandler = new ListSwipeHandler(this.domListContainer, this)
@@ -904,11 +841,13 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		})
 	}
 
-	setDomList(domElement: HTMLElement) {
+	// Visible for testing
+	_setDomList(domElement: HTMLElement) {
 		this.domList = domElement
 	}
 
-	createVirtualRows() {
+	// Visible for testing
+	_createVirtualRows() {
 		let visibleElements = 2 * Math.ceil(this.domListContainer.clientHeight / this.config.rowHeight / 2) // divide and multiply by two to get an even number (because of alternating row backgrounds)
 
 		this.virtualList.length = visibleElements + ScrollBuffer * 2
@@ -942,11 +881,10 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 			scrollDiff: scrollDiff,
 			timeDiff: timeDiff,
 		}
-		this.updateStatus(status)
 		this.lastPosition = this.currentPosition
 
 		if (this.updateLater) {
-			// only happens for non desktop devices
+			// Only happens for non-desktop devices (see condition below)
 			if (
 				scrollDiff < 50 ||
 				this.currentPosition === 0 ||
@@ -955,14 +893,14 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				// completely reposition the elements as scrolling becomes slower or the top / bottom of the list has been reached
 				this.repositionTimeout && clearTimeout(this.repositionTimeout)
 
-				this.reposition()
+				this.updateDomElements()
 			}
 		} else if (
 			(status.bufferDown <= 5 && this.currentPosition + this.visibleElementsHeight < this.loadedEntities.length * rowHeight - 6 * rowHeight) ||
 			(status.bufferUp <= 5 && this.currentPosition > 6 * rowHeight)
 		) {
 			if (client.isDesktopDevice()) {
-				this.reposition()
+				this.updateDomElements()
 			} else {
 				log(Cat.debug, "list > update later (scrolling too fast)")
 				// scrolling is too fast, the buffer will be eaten up: stop painting until scrolling becomes slower
@@ -977,7 +915,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				let nextPosition = this.virtualList[this.virtualList.length - 1].top + rowHeight
 
 				if (nextPosition < this.currentPosition) {
-					this.reposition()
+					this.updateDomElements()
 				} else {
 					topElement.top = nextPosition
 
@@ -1001,7 +939,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				let nextPosition = this.virtualList[0].top - rowHeight
 
 				if (nextPosition > this.currentPosition) {
-					this.reposition()
+					this.updateDomElements()
 				} else {
 					bottomElement.top = nextPosition
 
@@ -1023,17 +961,21 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 	}
 
-	private loadMoreIfNecessary() {
-		let lastBunchVisible = this.currentPosition > this.loadedEntities.length * this.config.rowHeight - this.visibleElementsHeight * 2
+	private async loadMoreIfNecessary() {
+		// WARNING this is hacky:
+		// lastBunchVisible depends on visibleElementsHeight which is set inside _createVirtualRows which might not have completed by the time we
+		// reach here, so waiting for domDeferred guarantees that oncreate has finished running, and in turn that _createVirtualRows has completed
+		await this.domDeferred.promise
+
+		const lastBunchVisible = this.currentPosition > this.loadedEntities.length * this.config.rowHeight - this.visibleElementsHeight * 2
 
 		if (lastBunchVisible &&
 			!this.loadingState.isLoading() &&
 			!this.loadedCompletely &&
 			!this.loadingState.isConnectionLost()
 		) {
-			this.loadMore().then(() => {
-				this.domList.style.height = this.calculateListHeight()
-			})
+			await this.loadMore()
+			this.updateListHeight()
 		}
 	}
 
@@ -1041,13 +983,13 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		if (this.loadingState.isConnectionLost()) {
 			await this.loadMore()
 			// We might need to remove extra space for the "retry" list item.
-			this.domList.style.height = this.calculateListHeight()
+			this.updateListHeight()
 		}
 	}
 
 	private repositionAfterScrollStop() {
 		if (window.performance.now() - this.lastUpdateTime > 100) {
-			window.requestAnimationFrame(() => this.reposition())
+			window.requestAnimationFrame(() => this.updateDomElements())
 		} else {
 			this.repositionTimeout = setTimeout(() => this.repositionAfterScrollStop(), 110)
 		}
@@ -1059,7 +1001,20 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 	}
 
-	private reposition() {
+	/**
+	 * Go over each list element and give it correct:
+	 *  - offset
+	 *  - background
+	 *  - visibility
+	 *  - selection indicator
+	 *
+	 *  Also updates message box visibility
+	 */
+	private updateDomElements() {
+		if (!this.ready) {
+			// If the list is not ready it will do this automatically on the first render.
+			return
+		}
 		this.updateMessageBoxVisibility()
 
 		this.currentPosition = this.domListContainer.scrollTop
@@ -1102,8 +1057,16 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		this.updateLater = false
 	}
 
+	private updateListHeight() {
+		if (!this.ready) {
+			// If the list is not ready it will do this automatically on the first render.
+			return
+		}
+		this.domList.style.height = this.calculateListHeight()
+	}
+
 	redraw(): void {
-		this.reposition()
+		this.updateDomElements()
 	}
 
 	private updateVirtualRow(row: VirtualRow<T>, entity: T | null, odd: boolean) {
@@ -1125,20 +1088,12 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 	}
 
-	private updateStatus(status: {bufferUp: number; bufferDown: number; speed: number; scrollDiff: number; timeDiff: number}) {
-		if (this.domStatus.bufferUp) this.domStatus.bufferUp.textContent = status.bufferUp + ""
-		if (this.domStatus.bufferDown) this.domStatus.bufferDown.textContent = status.bufferDown + ""
-		if (this.domStatus.speed) this.domStatus.speed.textContent = status.speed + ""
-		if (this.domStatus.scrollDiff) this.domStatus.scrollDiff.textContent = status.scrollDiff + ""
-		if (this.domStatus.timeDiff) this.domStatus.timeDiff.textContent = status.timeDiff + ""
-	}
-
 	/**
 	 * Selects the element with the given id and scrolls to it so it becomes visible.
 	 * Immediately selects the element if it is already existing in the list, otherwise waits until it is received via websocket, then selects it.
 	 */
 	scrollToIdAndSelectWhenReceived(listElementId: Id): void {
-		let entity = this.getEntity(listElementId)
+		const entity = this.getEntity(listElementId)
 
 		if (entity) {
 			this.scrollToLoadedEntityAndSelect(entity, false)
@@ -1152,12 +1107,12 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	 * @return The entity or null if the entity is not in this list.
 	 */
 	async scrollToIdAndSelect(listElementId: Id): Promise<T | null> {
-		let entity = this.getEntity(listElementId)
+		const entity = this.getEntity(listElementId)
 
 		if (entity) {
 			this.scrollToLoadedEntityAndSelect(entity, false)
 
-			return Promise.resolve(entity)
+			return entity
 		} else {
 			try {
 				// first check if the element can be loaded
@@ -1167,7 +1122,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				}
 				const scrollTarget = await this.loadUntil(listElementId)
 				await this.domDeferred.promise
-				this.domList.style.height = this.calculateListHeight()
+				this.updateListHeight()
 
 				if (scrollTarget != null) {
 					this.scrollToLoadedEntityAndSelect(scrollTarget, false)
@@ -1211,57 +1166,63 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		})
 	}
 
-	private async loadUntil(listElementId: Id): Promise<T | null> {
-		let scrollTarget = this.loadedEntities.find(e => getLetId(e)[1] === listElementId)
+	private async loadUntil(targetElementId: Id): Promise<T | null> {
+		const scrollTarget = this.loadedEntities.find(e => getElementId(e) === targetElementId)
 
 		// also stop loading if the list element id is bigger than the loaded ones
 		if (
 			scrollTarget != null ||
 			this.loadedCompletely ||
-			(this.loadedEntities.length > 0 && firstBiggerThanSecond(listElementId, getLetId(this.loadedEntities[this.loadedEntities.length - 1])[1]))
+			(this.loadedEntities.length > 0 && firstBiggerThanSecond(targetElementId, getElementId(lastThrow(this.loadedEntities))))
 		) {
-			return Promise.resolve(scrollTarget ?? null)
+			return scrollTarget ?? null
 		} else {
-			return this.loadingState.trackPromise(
-				this.doLoadMore().then(() => this.loadUntil(listElementId))
-			).catch(ofClass(ConnectionError, () => null)).finally(() => m.redraw())
+			try {
+				return await this.loadingState.trackPromise(
+					this.loadAndAppendAnotherChunk().then(() => this.loadUntil(targetElementId))
+				)
+			} catch (e) {
+				if (isOfflineError(e)) {
+					return null
+				} else {
+					throw e
+				}
+			} finally {
+				m.redraw()
+			}
 		}
 	}
 
-	entityEventReceived(elementId: Id, operation: OperationType): Promise<void> {
+	async entityEventReceived(elementId: Id, operation: OperationType): Promise<void> {
 		if (operation === OperationType.CREATE || operation === OperationType.UPDATE) {
 			// load the element without range checks for now
-			return this.config.loadSingle(elementId).then(entity => {
-				if (!entity) {
-					return
-				}
+			const entity = await this.config.loadSingle(elementId)
+			if (!entity) {
+				return
+			}
 
-				let newEntity: T = neverNull(entity)
-				// wait for any pending loading
-				return resolvedThen(this.loading, () => {
-					if (operation === OperationType.CREATE) {
-						if (this.loadedCompletely) {
-							this.addToLoadedEntities(newEntity)
-						} else if (this.loadedEntities.length > 0 && this.config.sortCompare(newEntity, neverNull(last(this.loadedEntities))) < 0) {
-							// new element is in the loaded range or newer than the first element
-							this.addToLoadedEntities(newEntity)
-						}
-					} else if (operation === OperationType.UPDATE) {
-						this.updateLoadedEntity(newEntity)
+			// Wait for any pending loading
+			return settledThen(this.loading, () => {
+				if (operation === OperationType.CREATE) {
+					if (this.loadedCompletely) {
+						this.addToLoadedEntities(entity)
+					} else if (this.loadedEntities.length > 0 && this.config.sortCompare(entity, lastThrow(this.loadedEntities)) < 0) {
+						// new element is in the loaded range or newer than the first element
+						this.addToLoadedEntities(entity)
 					}
-				})
+				} else if (operation === OperationType.UPDATE) {
+					this.updateLoadedEntity(entity)
+				}
 			})
 		} else if (operation === OperationType.DELETE) {
-			let swipeAnimation = this.swipeHandler ? this.swipeHandler.animating : Promise.resolve()
-			return swipeAnimation.then(() => this.deleteLoadedEntity(elementId))
-		} else {
-			return Promise.resolve()
+			await this.swipeHandler?.animating
+			await this.deleteLoadedEntity(elementId)
 		}
 	}
 
 	private addToLoadedEntities(entity: T) {
 		for (let i = 0; i < this.loadedEntities.length; i++) {
-			if (getLetId(entity)[1] === getLetId(this.loadedEntities[i])[1]) {
+			if (getElementId(entity) === getElementId(this.loadedEntities[i])) {
 				return
 			}
 		}
@@ -1270,13 +1231,10 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 
 		this.loadedEntities.sort(this.config.sortCompare)
 
-		if (this.ready) {
-			this.domList.style.height = this.calculateListHeight()
+		this.updateListHeight()
+		this.updateDomElements()
 
-			this.reposition()
-		}
-
-		if (this.idOfEntityToSelectWhenReceived && this.idOfEntityToSelectWhenReceived === getLetId(entity)[1]) {
+		if (this.idOfEntityToSelectWhenReceived && this.idOfEntityToSelectWhenReceived === getElementId(entity)) {
 			this.idOfEntityToSelectWhenReceived = null
 
 			this.scrollToLoadedEntityAndSelect(entity, false)
@@ -1285,21 +1243,19 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 
 	private updateLoadedEntity(entity: T) {
 		for (let positionToUpdate = 0; positionToUpdate < this.loadedEntities.length; positionToUpdate++) {
-			if (getLetId(entity)[1] === getLetId(this.loadedEntities[positionToUpdate])[1]) {
-				this.loadedEntities.splice(positionToUpdate, 1, entity as any)
+			if (getElementId(entity) === getElementId(this.loadedEntities[positionToUpdate])) {
+				this.loadedEntities.splice(positionToUpdate, 1, entity)
 
 				this.loadedEntities.sort(this.config.sortCompare)
 
-				if (this.ready) {
-					this.reposition()
-				}
+				this.updateDomElements()
 
 				break
 			}
 		}
 
 		for (let i = 0; i < this.selectedEntities.length; i++) {
-			if (getLetId(entity)[1] === getLetId(this.selectedEntities[i])[1]) {
+			if (getElementId(entity) === getElementId(this.selectedEntities[i])) {
 				this.selectedEntities[i] = entity
 				break
 			}
@@ -1308,16 +1264,14 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 
 	deleteLoadedEntity(elementId: Id): Promise<void> {
 		// wait for any pending loading
-		return resolvedThen(this.loading, () => {
-			let entity = this.loadedEntities.find(e => {
-				return getLetId(e)[1] === elementId
-			})
+		return settledThen(this.loading, () => {
+			const entity = this.loadedEntities.find(e => getElementId(e) === elementId)
 
 			if (entity) {
 				let nextElementSelected = false
 
 				if (this.selectedEntities.length === 1 && this.selectedEntities[0] === entity && this.loadedEntities.length > 1) {
-					let nextSelection =
+					const nextSelection =
 						entity === last(this.loadedEntities)
 							? this.loadedEntities[this.loadedEntities.length - 2]
 							: this.loadedEntities[this.loadedEntities.indexOf(entity) + 1]
@@ -1328,13 +1282,10 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				}
 
 				remove(this.loadedEntities, entity)
-				let selectionChanged = remove(this.selectedEntities, entity)
+				const selectionChanged = remove(this.selectedEntities, entity)
 
-				if (this.ready) {
-					this.domList.style.height = this.calculateListHeight()
-
-					this.reposition()
-				}
+				this.updateListHeight()
+				this.updateDomElements()
 
 				if (selectionChanged) {
 					this.elementSelected(this.getSelectedEntities(), false, !nextElementSelected)
@@ -1357,14 +1308,16 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 
 export const ACTION_DISTANCE = 150
 
-function resolvedThen<T, R>(promise: Promise<T>, handler: () => R): Promise<R> {
+/** Call the handler for both resolution and rejection. Unlike finally() will not propagate the error. */
+function settledThen<T, R>(promise: Promise<T>, handler: () => R): Promise<R> {
 	return promise.then(handler, handler)
 }
 
+/** Detects swipe gestures for list elements. On mobile some lists have actions on swiping, e.g. deleting an email. */
 class ListSwipeHandler<T extends ListElement, R extends VirtualRow<T>> extends SwipeHandler {
-	virtualElement: VirtualRow<T> | null = null
-	list: List<T, R>
-	xoffset!: number
+	private virtualElement: VirtualRow<T> | null = null
+	private list: List<T, R>
+	private xoffset!: number
 
 	constructor(touchArea: HTMLElement, list: List<any, any>) {
 		super(touchArea)
@@ -1407,7 +1360,7 @@ class ListSwipeHandler<T extends ListElement, R extends VirtualRow<T>> extends S
 		}
 	}
 
-	finish(
+	private finish(
 		id: Id,
 		swipeActionPromise: Promise<any>,
 		delta: {
@@ -1498,7 +1451,7 @@ class ListSwipeHandler<T extends ListElement, R extends VirtualRow<T>> extends S
 		}
 	}
 
-	getVirtualElement(): VirtualRow<T> {
+	private getVirtualElement(): VirtualRow<T> {
 		if (!this.virtualElement) {
 			let touchAreaOffset = this.touchArea.getBoundingClientRect().top
 			let relativeYposition = this.list.currentPosition + this.startPos.y - touchAreaOffset

@@ -1,7 +1,7 @@
-import type {CalendarGroupRoot} from "../../api/entities/tutanota/CalendarGroupRoot"
-import {CALENDAR_MIME_TYPE} from "../../file/FileController"
-import type {CalendarEvent} from "../../api/entities/tutanota/CalendarEvent"
-import {CalendarEventTypeRef} from "../../api/entities/tutanota/CalendarEvent"
+import type {CalendarGroupRoot} from "../../api/entities/tutanota/TypeRefs.js"
+import {CALENDAR_MIME_TYPE, showFileChooser} from "../../file/FileController"
+import type {CalendarEvent} from "../../api/entities/tutanota/TypeRefs.js"
+import {CalendarEventTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
 import {generateEventElementId} from "../../api/common/utils/CommonCalendarUtils"
 import {showProgressDialog, showWorkerProgressDialog} from "../../gui/dialogs/ProgressDialog"
 import {ParserError} from "../../misc/parsing/ParserCombinator"
@@ -9,9 +9,9 @@ import {Dialog} from "../../gui/base/Dialog"
 import {lang} from "../../misc/LanguageViewModel"
 import {parseCalendarFile, ParsedEvent, serializeCalendar} from "./CalendarImporter"
 import {elementIdPart, isSameId, listIdPart} from "../../api/common/utils/EntityUtils"
-import type {UserAlarmInfo} from "../../api/entities/sys/UserAlarmInfo"
-import {UserAlarmInfoTypeRef} from "../../api/entities/sys/UserAlarmInfo"
-import {createFile} from "../../api/entities/tutanota/File"
+import type {UserAlarmInfo} from "../../api/entities/sys/TypeRefs.js"
+import {UserAlarmInfoTypeRef} from "../../api/entities/sys/TypeRefs.js"
+import {createFile} from "../../api/entities/tutanota/TypeRefs.js"
 import {convertToDataFile} from "../../api/common/DataFile"
 import {locator} from "../../api/main/MainLocator"
 import {flat, ofClass, promiseMap, stringToUtf8Uint8Array} from "@tutao/tutanota-utils"
@@ -22,7 +22,7 @@ export async function showCalendarImportDialog(calendarGroupRoot: CalendarGroupR
 	let parsedEvents: ParsedEvent[][]
 
 	try {
-		const dataFiles = await locator.fileController.showFileChooser(true, ["ical", "ics", "ifb", "icalendar"])
+		const dataFiles = await showFileChooser(true, ["ical", "ics", "ifb", "icalendar"])
 		parsedEvents = dataFiles.map(file => parseCalendarFile(file).contents)
 	} catch (e) {
 		if (e instanceof ParserError) {

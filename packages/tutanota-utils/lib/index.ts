@@ -115,7 +115,7 @@ export {
 	byteLength,
 	replaceAll,
 } from "./StringUtils.js"
-export {TypeRef, isSameTypeRefByAttr, isSameTypeRef} from "./TypeRef.js"
+export {TypeRef, isSameTypeRefByAttr, isSameTypeRef, getTypeId} from "./TypeRef.js"
 export {
 	defer,
 	deferWithHandler,
@@ -152,9 +152,13 @@ export {
 	mapNullable,
 } from "./Utils.js"
 export type {
-	DeferredObject, lazy, lazyAsync, Thunk, DeferredObjectWithHandler, MaybeLazy, TimeoutSetter
+	DeferredObject, lazy, lazyAsync, Thunk, DeferredObjectWithHandler, MaybeLazy, TimeoutSetter, ErrorInfo
 } from "./Utils.js"
 
 export {
 	mod, clamp
 } from "./MathUtils.js"
+
+export {
+	renderCsv
+} from "./Csv.js"

@@ -1,9 +1,7 @@
-import stream from "mithril/stream"
-import {TextFieldAttrs, TextFieldType} from "../../gui/base/TextFieldN"
+import {TextFieldN, TextFieldType} from "../../gui/base/TextFieldN"
 import {Dialog} from "../../gui/base/Dialog"
 import {lang} from "../../misc/LanguageViewModel"
 import m, {Children, Component, Vnode} from "mithril"
-import {TextFieldN} from "../../gui/base/TextFieldN"
 import {Icons} from "../../gui/base/icons/Icons"
 import {ButtonAttrs, ButtonN} from "../../gui/base/ButtonN"
 
@@ -25,21 +23,20 @@ export class WhitelabelCustomMetaTagsSettings implements Component<WhitelabelCus
 		let editCustomMetaTagsButtonAttrs: ButtonAttrs | null = null
 
 		if (onMetaTagsChanged) {
-			const metaTagsAttrs: TextFieldAttrs = {
-				label: "customMetaTags_label",
-				value: stream(metaTags),
-				type: TextFieldType.Area,
-				oninput: value => {
-					metaTags = value
-				},
-			} as const
 			editCustomMetaTagsButtonAttrs = {
 				label: "edit_action",
 				click: () => {
 					let dialog = Dialog.showActionDialog({
 						title: lang.get("customMetaTags_label"),
 						child: {
-							view: () => m(TextFieldN, metaTagsAttrs),
+ 							view: () => m(TextFieldN, {
+								label: "customMetaTags_label",
+								value: metaTags,
+								type: TextFieldType.Area,
+								oninput: (value: string) => {
+									metaTags = value
+								},
+							}),
 						},
 						okAction: ok => {
 							if (ok) {
@@ -56,7 +53,7 @@ export class WhitelabelCustomMetaTagsSettings implements Component<WhitelabelCus
 		const customMetaTagsDefined = metaTags.length > 0
 		const customMetaTagsTextfieldAttrs = {
 			label: "customMetaTags_label",
-			value: stream(customMetaTagsDefined ? lang.get("activated_label") : lang.get("deactivated_label")),
+			value: customMetaTagsDefined ? lang.get("activated_label") : lang.get("deactivated_label"),
 			disabled: true,
 			injectionsRight: () => [editCustomMetaTagsButtonAttrs ? m(ButtonN, editCustomMetaTagsButtonAttrs) : null],
 		} as const

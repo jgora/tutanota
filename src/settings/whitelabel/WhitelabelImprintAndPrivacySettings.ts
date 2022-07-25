@@ -1,4 +1,3 @@
-import stream from "mithril/stream"
 import {Dialog} from "../../gui/base/Dialog"
 import {lang} from "../../misc/LanguageViewModel"
 import m, {Children, Component, Vnode} from "mithril"
@@ -29,18 +28,17 @@ export class WhitelabelImprintAndPrivacySettings implements Component<Whitelabel
 		let editPrivacyUrlButtonAttrs: ButtonAttrs | null = null
 
 		if (onPrivacyStatementUrlChanged) {
-			const privacyUrlTextfieldAttrs: TextFieldAttrs = {
-				label: "privacyPolicyUrl_label",
-				value: stream(privacyStatementUrl),
-				oninput: value => (privacyStatementUrl = value.trim()),
-			} as const
 			editPrivacyUrlButtonAttrs = {
 				label: "edit_action",
 				click: () => {
 					let dialog = Dialog.showActionDialog({
 						title: lang.get("privacyLink_label"),
 						child: {
-							view: () => m(TextFieldN, privacyUrlTextfieldAttrs),
+							view: () => m(TextFieldN, {
+								label: "privacyPolicyUrl_label",
+								value: privacyStatementUrl,
+								oninput: (value) => (privacyStatementUrl = value.trim()),
+							}),
 						},
 						allowOkWithReturn: true,
 						okAction: ok => {
@@ -57,7 +55,7 @@ export class WhitelabelImprintAndPrivacySettings implements Component<Whitelabel
 
 		const privacyPolicyConfigTextfieldAttrs = {
 			label: "privacyPolicyUrl_label",
-			value: stream(privacyStatementUrl),
+			value: privacyStatementUrl,
 			disabled: true,
 			injectionsRight: () => [editPrivacyUrlButtonAttrs ? m(ButtonN, editPrivacyUrlButtonAttrs) : null],
 		} as const
@@ -68,18 +66,17 @@ export class WhitelabelImprintAndPrivacySettings implements Component<Whitelabel
 		let editImprintUrlButtonAttrs: ButtonAttrs | null = null
 
 		if (onImprintUrlChanged) {
-			const imprintUrlTextfieldAttrs: TextFieldAttrs = {
-				label: "imprintUrl_label",
-				value: stream(imprintUrl),
-				oninput: value => (imprintUrl = value.trim()),
-			} as const
 			editImprintUrlButtonAttrs = {
 				label: "edit_action",
 				click: () => {
 					const dialog = Dialog.showActionDialog({
 						title: lang.get("imprintUrl_label"),
 						child: {
-							view: () => m(TextFieldN, imprintUrlTextfieldAttrs),
+							view: () => m(TextFieldN, {
+								label: "imprintUrl_label",
+								value: imprintUrl,
+								oninput: value => (imprintUrl = value.trim()),
+							}),
 						},
 						allowOkWithReturn: true,
 						okAction: ok => {
@@ -96,7 +93,7 @@ export class WhitelabelImprintAndPrivacySettings implements Component<Whitelabel
 
 		const whitelabelImprintTextfieldAttrs = {
 			label: "imprintUrl_label",
-			value: stream(imprintUrl),
+			value: imprintUrl,
 			disabled: true,
 			injectionsRight: () => [editImprintUrlButtonAttrs ? m(ButtonN, editImprintUrlButtonAttrs) : null],
 		} as const

@@ -1,66 +1,54 @@
-import {Request} from "../../api/common/MessageDispatcher"
-import {promiseMap, uint8ArrayToBase64} from "@tutao/tutanota-utils"
+import {promiseMap} from "@tutao/tutanota-utils"
 import type {MailBundle} from "../../mail/export/Bundler"
 import type {NativeInterface} from "./NativeInterface"
-import {FileReference} from "../../api/common/utils/FileUtils";
-import {DataFile} from "../../api/common/DataFile";
+import {FileReference} from "../../api/common/utils/FileUtils"
+import {DataFile} from "../../api/common/DataFile"
 import {HttpMethod} from "../../api/common/EntityFunctions"
-
-
-export type DataTaskResponse = {
-	statusCode: number
-	errorId: string | null
-	precondition: string | null
-	suspensionTime: string | null
-}
-export type DownloadTaskResponse = DataTaskResponse & {
-	encryptedFileUri: string | null
-}
-
-export type UploadTaskResponse = DataTaskResponse & {
-	responseBody: string
-}
+import {FileFacade} from "./generatedipc/FileFacade.js"
+import {ExportFacade} from "./generatedipc/ExportFacade.js"
+import {DownloadTaskResponse} from "./generatedipc/DownloadTaskResponse"
+import {UploadTaskResponse} from "./generatedipc/UploadTaskResponse"
+import {isDesktop} from "../../api/common/Env.js"
+import {ProgrammingError} from "../../api/common/error/ProgrammingError.js"
 
 export type FileUri = string
 
 export class NativeFileApp {
-	native: NativeInterface
 
-	constructor(nativeInterface: NativeInterface) {
-		this.native = nativeInterface
+	constructor(
+		private readonly fileFacade: FileFacade,
+		private readonly exportFacade: ExportFacade,
+	) {
 	}
 
 	/**
 	 * Open the file
 	 * @param file The uri of the file
-	 * @param mimeType The mimeType of the file
 	 */
 	open(file: FileReference): Promise<void> {
-		return this.native.invokeNative(new Request("open", [file.location, file.mimeType]))
+		return this.fileFacade.open(file.location, file.mimeType)
 	}
 
 	/**
 	 * Opens a file chooser to select a file.
-	 * @param button The file chooser is opened next to the rectangle
+	 * @param boundingRect The file chooser is opened next to the rectangle.
 	 */
-	openFileChooser(boundingRect: ClientRect): Promise<Array<FileReference>> {
+	async openFileChooser(boundingRect: DOMRect): Promise<Array<FileReference>> {
 		/* The file chooser opens next to a location specified by srcRect on larger devices (iPad).
 		 * The rectangle must be specifed using values for x, y, height and width.
-		 * @param  srcRect Dictionary containing the location of the button which has been pressed to open the file chooser.
 		 */
-		let srcRect = {
-			x: boundingRect.left,
-			y: boundingRect.top,
-			width: boundingRect.width,
-			height: boundingRect.height,
+		const srcRect = {
+			x: Math.round(boundingRect.left),
+			y: Math.round(boundingRect.top),
+			width: Math.round(boundingRect.width),
+			height: Math.round(boundingRect.height),
 		}
-		return this.native
-				   .invokeNative(new Request("openFileChooser", [srcRect, false]))
-				   .then((response: Array<string>) => promiseMap(response, this.uriToFileRef.bind(this)))
+		const files = await this.fileFacade.openFileChooser(srcRect)
+		return promiseMap(files, this.uriToFileRef.bind(this))
 	}
 
-	openFolderChooser(): Promise<Array<string>> {
-		return this.native.invokeNative(new Request("openFileChooser", [null, true]))
+	openFolderChooser(): Promise<string | null> {
+		return this.fileFacade.openFolderChooser()
 	}
 
 	/**
@@ -68,7 +56,7 @@ export class NativeFileApp {
 	 * @param  file The uri of the file to delete.
 	 */
 	deleteFile(file: FileUri): Promise<void> {
-		return this.native.invokeNative(new Request("deleteFile", [file]))
+		return this.fileFacade.deleteFile(file)
 	}
 
 	/**
@@ -76,7 +64,7 @@ export class NativeFileApp {
 	 * @param file The uri of the file
 	 */
 	getName(file: FileUri): Promise<string> {
-		return this.native.invokeNative(new Request("getName", [file]))
+		return this.fileFacade.getName(file)
 	}
 
 	/**
@@ -84,7 +72,7 @@ export class NativeFileApp {
 	 * @param file The uri of the file
 	 */
 	getMimeType(file: FileUri): Promise<string> {
-		return this.native.invokeNative(new Request("getMimeType", [file]))
+		return this.fileFacade.getMimeType(file)
 	}
 
 	/**
@@ -92,7 +80,7 @@ export class NativeFileApp {
 	 * @param file The uri of the file
 	 */
 	getSize(file: FileUri): Promise<number> {
-		return this.native.invokeNative(new Request("getSize", [file])).then(sizeString => Number(sizeString))
+		return this.fileFacade.getSize(file)
 	}
 
 	/**
@@ -101,11 +89,11 @@ export class NativeFileApp {
 	 * @returns {*} absolute path of the destination file
 	 */
 	putFileIntoDownloadsFolder(localFileUri: FileUri): Promise<string> {
-		return this.native.invokeNative(new Request("putFileIntoDownloads", [localFileUri]))
+		return this.fileFacade.putFileIntoDownloadsFolder(localFileUri)
 	}
 
-	async saveDataFile(data: DataFile): Promise<FileReference> {
-		const fileUri = await this.native.invokeNative(new Request("saveDataFile", [data.name, uint8ArrayToBase64(data.data)]))
+	async writeDataFile(data: DataFile): Promise<FileReference> {
+		const fileUri = await this.fileFacade.writeDataFile(data)
 		return {
 			_type: "FileReference",
 			name: data.name,
@@ -119,7 +107,7 @@ export class NativeFileApp {
 	 * Uploads the binary data of a file to tutadb
 	 */
 	upload(fileUrl: string, targetUrl: string, method: HttpMethod, headers: Dict): Promise<UploadTaskResponse> {
-		return this.native.invokeNative(new Request("upload", [fileUrl, targetUrl, method, headers]))
+		return this.fileFacade.upload(fileUrl, targetUrl, method, headers)
 	}
 
 	/**
@@ -127,7 +115,7 @@ export class NativeFileApp {
 	 * @returns Resolves to the URI of the downloaded file
 	 */
 	download(sourceUrl: FileUri, filename: string, headers: Dict): Promise<DownloadTaskResponse> {
-		return this.native.invokeNative(new Request("download", [sourceUrl, filename, headers]))
+		return this.fileFacade.download(sourceUrl, filename, headers)
 	}
 
 	/**
@@ -136,15 +124,28 @@ export class NativeFileApp {
 	 * @return Base64 encoded, shortened SHA256 hash of the file
 	 */
 	hashFile(fileUri: FileUri): Promise<string> {
-		return this.native.invokeNative(new Request('hashFile', [fileUri]))
+		return this.fileFacade.hashFile(fileUri)
 	}
 
 	clearFileData(): Promise<any> {
-		return this.native.invokeNative(new Request("clearFileData", []))
+		return this.fileFacade.clearFileData()
 	}
 
-	readDataFile(uriOrPath: string): Promise<DataFile | null> {
-		return this.native.invokeNative(new Request("readDataFile", [uriOrPath]))
+	/**
+	 * take a file location in the form of
+	 *   - a uri like file:///home/user/cat.jpg
+	 *   - an absolute file path like C:\Users\cat.jpg
+	 * and return a DataFile populated
+	 * with data and metadata of that file on disk.
+	 *
+	 * returns null
+	 *   - if invoked in apps, because they use FileRef, not DataFile
+	 *   - if file can't be opened for any reason
+	 *   - if path is not absolute
+	 */
+	async readDataFile(uriOrPath: string): Promise<DataFile | null> {
+		if (!isDesktop()) throw new ProgrammingError("Don't call readDataFile when not in Desktop")
+		return this.fileFacade.readDataFile(uriOrPath)
 	}
 
 	/**
@@ -154,7 +155,7 @@ export class NativeFileApp {
 	 * @returns {Promise<*>}
 	 */
 	mailToMsg(bundle: MailBundle, fileName: string): Promise<DataFile> {
-		return this.native.invokeNative(new Request("mailToMsg", [bundle, fileName]))
+		return this.exportFacade.mailToMsg(bundle, fileName)
 	}
 
 	/**
@@ -163,18 +164,18 @@ export class NativeFileApp {
 	 * @param fileNames: relative paths to files from the export directory
 	 */
 	startNativeDrag(fileNames: Array<string>): Promise<void> {
-		return this.native.invokeNative(new Request("startNativeDrag", [fileNames]))
+		return this.exportFacade.startNativeDrag(fileNames)
 	}
 
 	saveToExportDir(file: DataFile): Promise<void> {
-		return this.native.invokeNative(new Request("saveToExportDir", [file]))
+		return this.exportFacade.saveToExportDir(file)
 	}
 
-	checkFileExistsInExportDirectory(path: string): Promise<boolean> {
-		return this.native.invokeNative(new Request("checkFileExistsInExportDirectory", [path]))
+	checkFileExistsInExportDir(path: string): Promise<boolean> {
+		return this.exportFacade.checkFileExistsInExportDir(path)
 	}
 
-	getFilesMetaData(filesUris: string[]): Promise<Array<FileReference>> {
+	getFilesMetaData(filesUris: ReadonlyArray<string>): Promise<Array<FileReference>> {
 		return promiseMap(filesUris, async uri => {
 			const [name, mimeType, size] = await Promise.all([this.getName(uri), this.getMimeType(uri), this.getSize(uri)])
 			return {
@@ -204,7 +205,7 @@ export class NativeFileApp {
 	 *
 	 */
 	joinFiles(filename: string, files: Array<FileUri>): Promise<FileUri> {
-		return this.native.invokeNative(new Request('joinFiles', [filename, files]))
+		return this.fileFacade.joinFiles(filename, files)
 	}
 
 	/**
@@ -212,9 +213,7 @@ export class NativeFileApp {
 	 * @param fileUri
 	 * @param maxChunkSizeBytes
 	 */
-	async splitFile(fileUri: FileUri, maxChunkSizeBytes: number): Promise<FileUri[]> {
-		return this.native.invokeNative(new Request("splitFile", [fileUri, maxChunkSizeBytes]))
+	async splitFile(fileUri: FileUri, maxChunkSizeBytes: number): Promise<ReadonlyArray<FileUri>> {
+		return this.fileFacade.splitFile(fileUri, maxChunkSizeBytes)
 	}
-
-
 }

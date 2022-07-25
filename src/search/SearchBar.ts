@@ -10,22 +10,22 @@ import {DefaultAnimationTime} from "../gui/animation/Animations"
 import {BootIcons} from "../gui/base/icons/BootIcons"
 import type {PositionRect} from "../gui/base/Overlay"
 import {displayOverlay} from "../gui/base/Overlay"
-import type {Mail} from "../api/entities/tutanota/Mail"
-import {MailTypeRef} from "../api/entities/tutanota/Mail"
-import type {Contact} from "../api/entities/tutanota/Contact"
-import {ContactTypeRef} from "../api/entities/tutanota/Contact"
+import type {Mail} from "../api/entities/tutanota/TypeRefs.js"
+import {MailTypeRef} from "../api/entities/tutanota/TypeRefs.js"
+import type {Contact} from "../api/entities/tutanota/TypeRefs.js"
+import {ContactTypeRef} from "../api/entities/tutanota/TypeRefs.js"
 import type {Shortcut} from "../misc/KeyManager"
 import {keyManager} from "../misc/KeyManager"
 import {NotAuthorizedError, NotFoundError} from "../api/common/error/RestError"
 import {getRestriction, getSearchUrl, isAdministratedGroup, setSearchUrl} from "./model/SearchUtils"
 import {locator} from "../api/main/MainLocator"
 import {Dialog} from "../gui/base/Dialog"
-import type {GroupInfo} from "../api/entities/sys/GroupInfo"
-import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
+import type {GroupInfo} from "../api/entities/sys/TypeRefs.js"
+import {GroupInfoTypeRef} from "../api/entities/sys/TypeRefs.js"
 import {FULL_INDEXED_TIMESTAMP, Keys, TabIndex} from "../api/common/TutanotaConstants"
 import {assertMainOrNode, isApp} from "../api/common/Env"
-import type {WhitelabelChild} from "../api/entities/sys/WhitelabelChild"
-import {WhitelabelChildTypeRef} from "../api/entities/sys/WhitelabelChild"
+import type {WhitelabelChild} from "../api/entities/sys/TypeRefs.js"
+import {WhitelabelChildTypeRef} from "../api/entities/sys/TypeRefs.js"
 import {styles} from "../gui/styles"
 import {client} from "../misc/ClientDetector"
 import {debounce, downcast, noOp} from "@tutao/tutanota-utils"
@@ -98,10 +98,10 @@ export class SearchBar implements Component<SearchBarAttrs> {
 		this.lastSelectedGroupInfoResult = stream()
 		this.lastSelectedWhitelabelChildrenInfoResult = stream()
 		this.focused = false
-		this.skipNextBlur = stream(false)
+		this.skipNextBlur = stream<boolean>(false)
 		this.busy = false
 		this._returnListener = noOp
-		this._state = stream({
+		this._state = stream<SearchBarState>({
 			query: "",
 			searchResult: null,
 			indexState: locator.search.indexState(),

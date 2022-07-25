@@ -1,14 +1,13 @@
 import m, {Children, Component, Vnode} from "mithril"
 import {lang} from "../../misc/LanguageViewModel"
-import type {VirtualRow} from "../../gui/base/List"
+import type {ListFetchResult, VirtualRow} from "../../gui/base/List"
 import {List} from "../../gui/base/List"
 import {MailFolderType} from "../../api/common/TutanotaConstants"
 import type {MailView} from "./MailView"
-import type {Mail} from "../../api/entities/tutanota/Mail"
-import {MailTypeRef} from "../../api/entities/tutanota/Mail"
+import type {Mail} from "../../api/entities/tutanota/TypeRefs.js"
+import {MailTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
 import {canDoDragAndDropExport, getArchiveFolder, getFolderName, getInboxFolder} from "../model/MailUtils"
-import {findAndApplyMatchingRule, isInboxList} from "../model/InboxRuleHandler"
-import {ConnectionError, NotFoundError} from "../../api/common/error/RestError"
+import {NotFoundError} from "../../api/common/error/RestError"
 import {size} from "../../gui/size"
 import {styles} from "../../gui/styles"
 import {Icon} from "../../gui/base/Icon"
@@ -23,13 +22,14 @@ import {getLetId, haveSameId, sortCompareByReverseId} from "../../api/common/uti
 import {moveMails, promptAndDeleteMails} from "./MailGuiUtils"
 import {MailRow} from "./MailRow"
 import {makeTrackedProgressMonitor} from "../../api/common/utils/ProgressMonitor"
-import {Request} from "../../api/common/MessageDispatcher"
 import {generateExportFileName, generateMailFile, getMailExportMode} from "../export/Exporter"
 import {deduplicateFilenames} from "../../api/common/utils/FileUtils"
 import {makeMailBundle} from "../export/Bundler"
 import {ListColumnWrapper} from "../../gui/ListColumnWrapper"
 import {assertMainOrNode} from "../../api/common/Env"
 import {WsConnectionState} from "../../api/main/WorkerClient"
+import {findAndApplyMatchingRule, isInboxList} from "../model/InboxRuleHandler.js"
+import {isOfflineError} from "../../api/common/utils/ErrorCheckUtils.js"
 
 assertMainOrNode()
 const className = "mail-list"
@@ -49,6 +49,7 @@ export class MailListView implements Component {
 		}>
 	// Used for modifying the cursor during drag and drop
 	_listDom: HTMLElement | null
+
 	constructor(mailListId: Id, mailView: MailView) {
 		this.listId = mailListId
 		this.mailView = mailView
@@ -57,8 +58,12 @@ export class MailListView implements Component {
 		this.list = new List(
 			{
 				rowHeight: size.list_row_height,
-				fetch: (start, count) => {
-					return this._loadMailRange(start, count)
+				fetch: async (start, count) => {
+					const result = await this.loadMailRange(start, count)
+					if (result.complete) {
+						this.fixCounterIfNeeded(this.listId, this.list.getLoadedEntities().length)
+					}
+					return result
 				},
 				loadSingle: elementId => {
 					return locator.entityClient
@@ -74,7 +79,6 @@ export class MailListView implements Component {
 				elementSelected: (entities, elementClicked, selectionChanged, multiSelectionActive) =>
 					mailView.elementSelected(entities, elementClicked, selectionChanged, multiSelectionActive),
 				createVirtualRow: () => new MailRow(false),
-				showStatus: false,
 				className: className,
 				swipe: {
 					renderLeftSpacer: () =>
@@ -100,19 +104,26 @@ export class MailListView implements Component {
 							this.list.selectNone()
 							return locator.mailModel
 										  .getMailboxFolders(listElement)
-										  .then(folders => moveMails({mailModel : locator.mailModel, mails : [listElement], targetMailFolder : getInboxFolder(folders)}))
+										  .then(folders => moveMails({
+											  mailModel: locator.mailModel,
+											  mails: [listElement],
+											  targetMailFolder: getInboxFolder(folders)
+										  }))
 						} else {
 							this.list.selectNone()
 							return locator.mailModel
 										  .getMailboxFolders(listElement)
-										  .then(folders => moveMails({mailModel : locator.mailModel, mails : [listElement], targetMailFolder : getArchiveFolder(folders)}))
+										  .then(folders => moveMails({
+											  mailModel: locator.mailModel,
+											  mails: [listElement],
+											  targetMailFolder: getArchiveFolder(folders)
+										  }))
 						}
 					},
 					enabled: true,
 				},
 				multiSelectionAllowed: true,
 				emptyMessage: lang.get("noMails_msg"),
-				listLoadedCompletly: () => this._fixCounterIfNeeded(this.listId, this.list.getLoadedEntities().length),
 				dragStart: (event, row, selected) => this._dragStart(event, row, selected),
 			})
 
@@ -165,7 +176,7 @@ export class MailListView implements Component {
 		if (didComplete) {
 			await locator.fileApp.startNativeDrag(fileNames as string[])
 		} else {
-			await locator.native.invokeNative(new Request("focusApplicationWindow", []))
+			await locator.desktopSystemFacade.focusApplicationWindow()
 			Dialog.message("unsuccessfulDrop_msg")
 		}
 
@@ -228,7 +239,7 @@ export class MailListView implements Component {
 
 					case "complete": {
 						// We have downloaded it, but we need to check if it still exists
-						const exists = await locator.fileApp.checkFileExistsInExportDirectory(existing.fileName)
+						const exists = await locator.fileApp.checkFileExistsInExportDir(existing.fileName)
 
 						if (exists) {
 							handleDownloaded(existing.fileName, Promise.resolve(mail))
@@ -272,7 +283,7 @@ export class MailListView implements Component {
 	}
 
 	// Do not start many fixes in parallel, do check after some time when counters are more likely to settle
-	_fixCounterIfNeeded: (listId: Id, listLength: number) => void = debounce(2000, async (listId: Id, listLength: number) => {
+	private fixCounterIfNeeded: (listId: Id, listLength: number) => void = debounce(2000, async (listId: Id, listLength: number) => {
 		// If folders are changed, list won't have the data we need.
 		// Do not rely on counters if we are not connected
 		if (this.listId !== listId || locator.worker.wsConnection()() !== WsConnectionState.connected) {
@@ -293,6 +304,7 @@ export class MailListView implements Component {
 		}, 0)
 		const counterValue = await locator.mailModel.getCounterValue(this.listId)
 		if (counterValue != null && counterValue !== unreadMails) {
+			console.log("Fixing up counters for list", this.listId)
 			await locator.mailModel.fixupCounterForMailList(this.listId, unreadMails)
 		}
 	})
@@ -383,28 +395,38 @@ export class MailListView implements Component {
 		}
 	}
 
-	_loadMailRange(start: Id, count: number): Promise<Mail[]> {
-		return locator.entityClient.loadRange(MailTypeRef, this.listId, start, count, true).then(mails => {
-			return locator.mailModel.getMailboxDetailsForMailListId(this.listId).then(mailboxDetail => {
-				if (isInboxList(mailboxDetail, this.listId)) {
-					// filter emails
-					return promiseFilter(mails, mail => {
-						return findAndApplyMatchingRule(locator.mailFacade, locator.entityClient, mailboxDetail, mail, true).then(matchingMailId => !matchingMailId)
-					}).then(inboxMails => {
-						if (mails.length === count && inboxMails.length < mails.length) {
-							//console.log("load more because of matching inbox rules")
-							return this._loadMailRange(mails[mails.length - 1]._id[1], mails.length - inboxMails.length).then(filteredMails => {
-								return inboxMails.concat(filteredMails)
-							})
-						}
-
-						return inboxMails
-					})
-				} else {
-					return mails
-				}
-			})
-		})
+	private async loadMailRange(start: Id, count: number): Promise<ListFetchResult<Mail>> {
+		try {
+			const items = await locator.entityClient.loadRange(MailTypeRef, this.listId, start, count, true)
+			const mailboxDetail = await locator.mailModel.getMailboxDetailsForMailListId(this.listId)
+			// For inbox rules there are two points where we might want to apply them. The first one is MailModel which applied inbox rules as they are received
+			// in real time. The second one is here, when we load emails in inbox. If they are unread we want to apply inbox rules to them. If inbox rule is
+			// applies the email is moved out of inbox and we don't return it here.
+			if (isInboxList(mailboxDetail, this.listId)) {
+				const mailsToKeepInInbox = await promiseFilter(items, async (mail) => {
+					const wasMatched = (await findAndApplyMatchingRule(locator.mailFacade, locator.entityClient, mailboxDetail, mail, true)) != null
+					return !wasMatched
+				})
+				return {items: mailsToKeepInInbox, complete: items.length < count}
+			} else {
+				return {items, complete: items.length < count}
+			}
+		} catch (e) {
+			// The way the cache works is that it tries to fulfill the API contract of returning as many items as requested as long as it can.
+			// This is problematic for offline where we might not have the full page of emails loaded (e.g. we delete part as it's too old or we move emails
+			// around). Because of that cache will try to load additional items from the server in order to return `count` items. If it fails to load them,
+			// it will not return anything and instead will throw an error.
+			// This is generally fine but in case of offline we want to display everything that we have cached. For that we fetch directly from the cache,
+			// give it to the list and let list make another request (and almost certainly fail that request) to show a retry button. This way we both show
+			// the items we have and also show that we couldn't load everything.
+			if (isOfflineError(e)) {
+				const items = await locator.cacheStorage.provideFromRange(MailTypeRef, this.listId, start, count, true)
+				if (items.length === 0) throw e
+				return {items, complete: false}
+			} else {
+				throw e
+			}
+		}
 	}
 }
 

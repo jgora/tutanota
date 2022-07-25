@@ -4,24 +4,27 @@ import {resolveTypeReference} from "../../common/EntityFunctions"
 import {OperationType} from "../../common/TutanotaConstants"
 import {assertNotNull, firstThrow, flat, groupBy, isSameTypeRef, lastThrow, TypeRef} from "@tutao/tutanota-utils"
 import {containsEventOfType, getEventOfType} from "../../common/utils/Utils"
-import {PermissionTypeRef} from "../../entities/sys/Permission"
-import {EntityEventBatchTypeRef} from "../../entities/sys/EntityEventBatch"
+import type {EntityUpdate} from "../../entities/sys/TypeRefs.js"
+import {
+	BucketPermissionTypeRef,
+	EntityEventBatchTypeRef,
+	PermissionTypeRef,
+	RecoverCodeTypeRef,
+	RejectedSenderTypeRef,
+	SecondFactorTypeRef,
+	SessionTypeRef
+} from "../../entities/sys/TypeRefs.js"
 import {ValueType} from "../../common/EntityConstants"
-import {SessionTypeRef} from "../../entities/sys/Session"
-import {BucketPermissionTypeRef} from "../../entities/sys/BucketPermission"
-import {SecondFactorTypeRef} from "../../entities/sys/SecondFactor"
-import {RecoverCodeTypeRef} from "../../entities/sys/RecoverCode"
 import {NotAuthorizedError, NotFoundError} from "../../common/error/RestError"
-import {MailTypeRef} from "../../entities/tutanota/Mail"
-import type {EntityUpdate} from "../../entities/sys/EntityUpdate"
-import {RejectedSenderTypeRef} from "../../entities/sys/RejectedSender"
+import {MailTypeRef} from "../../entities/tutanota/TypeRefs.js"
 import {firstBiggerThanSecond, GENERATED_MAX_ID, GENERATED_MIN_ID, getElementId} from "../../common/utils/EntityUtils";
 import {ProgrammingError} from "../../common/error/ProgrammingError"
-import {assertWorkerOrNode, isDesktop} from "../../common/Env"
-import type {ListElementEntity, SomeEntity} from "../../common/EntityTypes"
+import {assertWorkerOrNode} from "../../common/Env"
+import type {ListElementEntity, SomeEntity, TypeModel} from "../../common/EntityTypes"
 import {EntityUpdateData} from "../../main/EventController"
 import {QueuedBatch} from "../search/EventQueue"
-
+import {ENTITY_EVENT_BATCH_EXPIRE_MS} from "../EventBusClient"
+import {CustomCacheHandlerMap} from "./CustomCacheHandler.js"
 
 assertWorkerOrNode()
 
@@ -32,6 +35,15 @@ assertWorkerOrNode()
  * We want to avoid that the requests are too small
  */
 export const EXTEND_RANGE_MIN_CHUNK_SIZE = 40
+const IGNORED_TYPES = [
+	EntityEventBatchTypeRef,
+	PermissionTypeRef,
+	BucketPermissionTypeRef,
+	SessionTypeRef,
+	SecondFactorTypeRef,
+	RecoverCodeTypeRef,
+	RejectedSenderTypeRef,
+] as const
 
 export interface IEntityRestCache extends EntityRestInterface {
 	/**
@@ -60,25 +72,24 @@ export interface IEntityRestCache extends EntityRestInterface {
 	/**
 	 * Fetch the time since last time we downloaded event batches.
 	 */
-	timeSinceLastSync(): Promise<number | null>;
+	timeSinceLastSyncMs(): Promise<number | null>;
+
+	/**
+	 * Detect if out of sync based on stored "lastUpdateTime" and the current server time
+	 */
+	isOutOfSync(): Promise<boolean>;
 }
 
 
 export type Range = {lower: Id, upper: Id}
 
-export interface CacheStorage {
-
-	/**
-	 * Get a given entity from the cache, expects that you have already checked for existence
-	 */
-	get<T extends SomeEntity>(typeRef: TypeRef<T>, listId: Id | null, id: Id): Promise<T | null>;
-
-	deleteIfExists<T extends SomeEntity>(typeRef: TypeRef<T>, listId: Id | null, id: Id): Promise<void>;
-
-	isElementIdInCacheRange<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id, id: Id): Promise<boolean>;
-
-	put(originalEntity: SomeEntity): Promise<void>;
-
+/**
+ * Part of the cache storage only with subset of CacheStorage functionality
+ *
+ * Separate from the rest of the cache as a narrow interface to not expose the whole storage for cases where we want to only get the cached part of the list to
+ * display it even if we can't load the full page from the server or need some metadata.
+ */
+export interface ExposedCacheStorage {
 	/**
 	 * Load range of entities. Does not include {@param start}.
 	 * If {@param reverse} is false then returns entities newer than {@param start} in ascending order sorted by
@@ -87,6 +98,35 @@ export interface CacheStorage {
 	 * elementId.
 	 */
 	provideFromRange<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id, start: Id, count: number, reverse: boolean): Promise<T[]>;
+
+	/**
+	 * retrieve all list elements that are in the cache
+	 * @param typeRef
+	 * @param listId
+	 */
+	getWholeList<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id): Promise<Array<T>>
+
+	getLastUpdateTime(): Promise<number | null>
+}
+
+export interface CacheStorage extends ExposedCacheStorage {
+
+	/**
+	 * Get a given entity from the cache, expects that you have already checked for existence
+	 */
+	get<T extends SomeEntity>(typeRef: TypeRef<T>, listId: Id | null, id: Id): Promise<T | null>;
+
+	/**
+	 * get a map with cache handlers for the customId types this storage implementation supports
+	 * customId types that don't have a custom handler don't get served from the cache
+	 */
+	getCustomCacheHandlerMap(entityRestClient: EntityRestClient): CustomCacheHandlerMap;
+
+	deleteIfExists<T extends SomeEntity>(typeRef: TypeRef<T>, listId: Id | null, id: Id): Promise<void>;
+
+	isElementIdInCacheRange<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id, id: Id): Promise<boolean>;
+
+	put(originalEntity: SomeEntity): Promise<void>;
 
 	getRangeForList<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id): Promise<Range | null>;
 
@@ -111,8 +151,6 @@ export interface CacheStorage {
 
 	purgeStorage(): Promise<void>
 
-	getLastUpdateTime(): Promise<number | null>
-
 	putLastUpdateTime(value: number): Promise<void>
 }
 
@@ -132,21 +170,15 @@ export interface CacheStorage {
  *
  * Range handling:
  * |          <|>        c d e f g h i j k      <|>             |
- * MIN_ID  lowerRangeId     ids in rage    upperRangeId    MAX_ID
+ * MIN_ID  lowerRangeId     ids in range    upperRangeId    MAX_ID
  * lowerRangeId may be anything from MIN_ID to c, upperRangeId may be anything from k to MAX_ID
  */
 export class EntityRestCache implements IEntityRestCache {
-	private readonly ignoredTypes: TypeRef<any>[];
-	readonly entityRestClient: EntityRestClient;
-	private readonly storage: CacheStorage;
 
-	constructor(entityRestClient: EntityRestClient, storage: CacheStorage) {
-		this.entityRestClient = entityRestClient
-		this.ignoredTypes = [
-			EntityEventBatchTypeRef, PermissionTypeRef, BucketPermissionTypeRef, SessionTypeRef,
-			SecondFactorTypeRef, RecoverCodeTypeRef, RejectedSenderTypeRef,
-		]
-		this.storage = storage
+	constructor(
+		readonly entityRestClient: EntityRestClient,
+		private readonly storage: CacheStorage,
+	) {
 	}
 
 	async load<T extends SomeEntity>(
@@ -162,7 +194,7 @@ export class EntityRestCache implements IEntityRestCache {
 			|| cachedEntity == null
 		) {
 			const entity = await this.entityRestClient.load(typeRef, id, queryParameters, extraHeaders)
-			if (typeRef.app !== "monitor" && queryParameters?.version == null && !this.ignoredTypes.some(ref => isSameTypeRef(typeRef, ref))) {
+			if (queryParameters?.version == null && !isIgnoredType(typeRef)) {
 				await this.storage.put(entity)
 			}
 			return entity
@@ -171,10 +203,7 @@ export class EntityRestCache implements IEntityRestCache {
 	}
 
 	loadMultiple<T extends SomeEntity>(typeRef: TypeRef<T>, listId: Id | null, elementIds: Array<Id>): Promise<Array<T>> {
-		if (
-			typeRef.app === "monitor"
-			|| this.ignoredTypes.some(ref => isSameTypeRef(typeRef, ref))
-		) {
+		if (isIgnoredType(typeRef)) {
 			return this.entityRestClient.loadMultiple(typeRef, listId, elementIds)
 		}
 
@@ -206,7 +235,13 @@ export class EntityRestCache implements IEntityRestCache {
 	}
 
 	purgeStorage(): Promise<void> {
+		console.log("Purging the user's offline database")
 		return this.storage.purgeStorage()
+	}
+
+	async isOutOfSync(): Promise<boolean> {
+		const timeSinceLastSync = await this.timeSinceLastSyncMs()
+		return timeSinceLastSync != null && timeSinceLastSync > ENTITY_EVENT_BATCH_EXPIRE_MS
 	}
 
 	async recordSyncTime(): Promise<void> {
@@ -214,7 +249,7 @@ export class EntityRestCache implements IEntityRestCache {
 		await this.storage.putLastUpdateTime(timestamp)
 	}
 
-	async timeSinceLastSync(): Promise<number | null> {
+	async timeSinceLastSyncMs(): Promise<number | null> {
 		const lastUpdate = await this.storage.getLastUpdateTime()
 		if (lastUpdate == null) {
 			return null
@@ -258,12 +293,12 @@ export class EntityRestCache implements IEntityRestCache {
 	}
 
 	async loadRange<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id, start: Id, count: number, reverse: boolean): Promise<T[]> {
+		if (this.storage.getCustomCacheHandlerMap(this.entityRestClient).has(typeRef)) {
+			return await this.storage.getCustomCacheHandlerMap(this.entityRestClient).get(typeRef)!.loadRange(this.storage, listId, start, count, reverse)
+		}
+
 		const typeModel = await resolveTypeReference(typeRef)
-		if (
-			typeRef.app === "monitor"
-			|| this.ignoredTypes.some(ref => isSameTypeRef(typeRef, ref))
-			|| typeModel.values._id.type !== ValueType.GeneratedId // we currently only store ranges for generated ids
-		) {
+		if (!isCachedType(typeModel, typeRef)) {
 			return this.entityRestClient.loadRange(typeRef, listId, start, count, reverse)
 		}
 
@@ -502,18 +537,20 @@ export class EntityRestCache implements IEntityRestCache {
 	 * @return Promise, which resolves to the array of valid events (if response is NotFound or NotAuthorized we filter it out)
 	 */
 	async entityEventsReceived(batch: QueuedBatch): Promise<Array<EntityUpdate>> {
+
+		await this.recordSyncTime()
+
 		// we handle post multiple create operations separately to optimize the number of requests with getMultiple
 		const createUpdatesForLETs: EntityUpdate[] = []
 		const regularUpdates: EntityUpdate[] = [] // all updates not resulting from post multiple requests
 		const updatesArray = batch.events
 		for (const update of updatesArray) {
-			const {instanceListId} = getUpdateInstanceId(update)
 			if (update.application !== "monitor") {
-				//monitor application is ignored
-				// mails are ignores because move operation are handled as a special event (and no post multiple is possible)
+				// monitor application is ignored
+				// mails are ignored because move operations are handled as a special event (and no post multiple is possible)
 				if (
 					update.operation === OperationType.CREATE &&
-					instanceListId != null &&
+					getUpdateInstanceId(update).instanceListId != null &&
 					!isSameTypeRef(new TypeRef(update.application, update.type), MailTypeRef)
 				) {
 					createUpdatesForLETs.push(update)
@@ -532,12 +569,15 @@ export class EntityRestCache implements IEntityRestCache {
 			const typeRef = new TypeRef<ListElementEntity>(firstUpdate.application, firstUpdate.type)
 			const ids = updates.map(update => update.instanceId)
 
-			//We only want to load the instances that are in cache range
-			const idsInCacheRange = await this.getElementIdsInCacheRange(typeRef, instanceListId, ids)
+			// We only want to load the instances that are in cache range
+			const customHandlers = this.storage.getCustomCacheHandlerMap(this.entityRestClient)
+			const idsInCacheRange = customHandlers.has(typeRef)
+				? await customHandlers.get(typeRef)!.getElementIdsInCacheRange(this.storage, instanceListId, ids)
+				: await this.getElementIdsInCacheRange(typeRef, instanceListId, ids)
+
 			if (idsInCacheRange.length === 0) {
 				postMultipleEventUpdates.push(updates)
 			} else {
-
 				const updatesNotInCacheRange = idsInCacheRange.length === updates.length
 					? []
 					: updates.filter(update => !idsInCacheRange.includes(update.instanceId))
@@ -621,6 +661,7 @@ export class EntityRestCache implements IEntityRestCache {
 				return update
 			} else if (await this.storage.isElementIdInCacheRange(typeRef, instanceListId, instanceId)) {
 				// No need to try to download something that's not there anymore
+				// We do not consult custom handlers here because they are only needed for list elements.
 				return this.entityRestClient.load(typeRef, [instanceListId, instanceId])
 						   .then(entity => this.storage.put(entity))
 						   .then(() => update)
@@ -719,4 +760,24 @@ function isRangeRequestAwayFromExistingRange(range: Range, reverse: boolean, sta
 	return reverse
 		? firstBiggerThanSecond(range.lower, start)
 		: firstBiggerThanSecond(start, range.upper)
+}
+
+/**
+ * some types are completely ignored by the cache and always served from a request.
+ * Note:
+ * isCachedType(ref) ---> !isIgnoredType(ref) but
+ * isIgnoredType(ref) -/-> !isCachedType(ref) because of opted-in CustomId types.
+ */
+function isIgnoredType(typeRef: TypeRef<unknown>): boolean {
+	return typeRef.app === "monitor" || IGNORED_TYPES.some(ref => isSameTypeRef(typeRef, ref))
+}
+
+/**
+ * customId types are normally not cached, but some are opted in.
+ * Note:
+ * isCachedType(ref) ---> !isIgnoredType(ref) but
+ * isIgnoredType(ref) -/-> !isCachedType(ref)
+ */
+function isCachedType(typeModel: TypeModel, typeRef: TypeRef<unknown>): boolean {
+	return !isIgnoredType(typeRef) && typeModel.values._id.type === ValueType.GeneratedId
 }

@@ -4,6 +4,9 @@ import type {Base64, Base64Url} from "@tutao/tutanota-utils"
 import {assertNotNull} from "@tutao/tutanota-utils"
 import type {Credentials} from "./Credentials"
 import {DatabaseKeyFactory} from "./DatabaseKeyFactory"
+import {OfflineDbFacade} from "../../desktop/db/OfflineDbFacade"
+import {InterWindowEventBus} from "../../native/common/InterWindowEventBus"
+import {InterWindowEventTypes} from "../../native/common/InterWindowEventTypes"
 
 /**
  * Type for persistent credentials, that contain the full credentials data.
@@ -44,7 +47,7 @@ export interface CredentialsEncryption {
 	/**
 	 * Returns all credentials encryption modes that are supported by the device.
 	 */
-	getSupportedEncryptionModes(): Promise<Array<CredentialEncryptionMode>>
+	getSupportedEncryptionModes(): Promise<ReadonlyArray<CredentialEncryptionMode>>
 }
 
 /**
@@ -130,8 +133,9 @@ export interface ICredentialsProvider {
 	/**
 	 * Deletes stored credentials with specified userId.
 	 * No-op if credentials are not there.
+	 * @param opts.deleteOfflineDb whether to delete offline database. Will delete by default.
 	 */
-	deleteByUserId(userId: Id): Promise<void>
+	deleteByUserId(userId: Id, opts?: {deleteOfflineDb: boolean}): Promise<void>
 
 	/**
 	 * Sets the credentials encryption mode, i.e. how the intermediate key used for encrypting credentials is protected.
@@ -149,7 +153,7 @@ export interface ICredentialsProvider {
 	/**
 	 * Returns all credentials encryption modes that are supported by the device.
 	 */
-	getSupportedEncryptionModes(): Promise<Array<CredentialEncryptionMode>>
+	getSupportedEncryptionModes(): Promise<ReadonlyArray<CredentialEncryptionMode>>
 
 	/**
 	 * Removes all stored credentials as well as any settings associated with credentials encryption.
@@ -166,7 +170,9 @@ export class CredentialsProvider implements ICredentialsProvider {
 		private readonly credentialsEncryption: CredentialsEncryption,
 		private readonly storage: CredentialsStorage,
 		private readonly keyMigrator: ICredentialsKeyMigrator,
-		private readonly databaseKeyFactory: DatabaseKeyFactory
+		private readonly databaseKeyFactory: DatabaseKeyFactory,
+		private readonly offlineDbFacade: OfflineDbFacade | null,
+		private readonly interWindowEventBus: InterWindowEventBus<InterWindowEventTypes> | null,
 	) {
 	}
 
@@ -197,8 +203,6 @@ export class CredentialsProvider implements ICredentialsProvider {
 			decrypted.databaseKey = await this.databaseKeyFactory.generateKey()
 
 			if (decrypted.databaseKey != null) {
-				// TODO this might prompt the user to unlock the keychain again
-				// 		We should figure out what to do about this
 				const reEncrypted = await this.credentialsEncryption.encrypt(decrypted)
 				this.storage.store(reEncrypted)
 			}
@@ -214,7 +218,11 @@ export class CredentialsProvider implements ICredentialsProvider {
 		})
 	}
 
-	async deleteByUserId(userId: Id): Promise<void> {
+	async deleteByUserId(userId: Id, opts: {deleteOfflineDb: boolean} = {deleteOfflineDb: true}): Promise<void> {
+		await this.interWindowEventBus?.send("credentialsDeleted", {userId})
+		if (opts?.deleteOfflineDb) {
+			await this.offlineDbFacade?.deleteDatabaseForUser(userId)
+		}
 		this.storage.deleteByUserId(userId)
 	}
 
@@ -240,7 +248,7 @@ export class CredentialsProvider implements ICredentialsProvider {
 		return this.storage.getCredentialEncryptionMode()
 	}
 
-	async getSupportedEncryptionModes(): Promise<Array<CredentialEncryptionMode>> {
+	async getSupportedEncryptionModes(): Promise<ReadonlyArray<CredentialEncryptionMode>> {
 		return await this.credentialsEncryption.getSupportedEncryptionModes()
 	}
 

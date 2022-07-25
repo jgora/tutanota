@@ -3,14 +3,14 @@ import {ButtonN, ButtonType} from "../gui/base/ButtonN"
 import {getColouredTutanotaLogo} from "../gui/theme"
 import {isApp, isDesktop} from "../api/common/Env"
 import {createLogFile} from "../api/common/Logger"
-import {downcast, stringToUtf8Uint8Array} from "@tutao/tutanota-utils"
-import {clientInfoString, showUserError} from "../misc/ErrorHandlerImpl"
+import {downcast} from "@tutao/tutanota-utils"
+import {showUserError} from "../misc/ErrorHandlerImpl"
 import {locator} from "../api/main/MainLocator"
-import {InfoLink, lang} from "../misc/LanguageViewModel"
+import {InfoLink} from "../misc/LanguageViewModel"
 import {newMailEditorFromTemplate} from "../mail/editor/MailEditor"
-import {createDataFile} from "../api/common/DataFile"
 import {UserError} from "../api/main/UserError"
 import {Attachment} from "../mail/editor/SendMailModel";
+import {clientInfoString} from "../misc/ErrorReporter"
 
 export class AboutDialog implements Component {
 	view(vnode: Vnode): Children {
@@ -55,30 +55,21 @@ export class AboutDialog implements Component {
 
 		if (global.logger) {
 			const mainEntries = global.logger.getEntries()
-			const mainLogFile = createLogFile(timestamp.getTime(), mainEntries, "main")
+			const mainLogFile = createLogFile(timestamp.getTime(), mainEntries.join("\n"), "main")
 			attachments.push(mainLogFile)
 			const workerLogEntries = await locator.worker.getLog()
-			const workerLogFile = await createLogFile(timestamp.getTime(), workerLogEntries, "worker")
+			const workerLogFile = await createLogFile(timestamp.getTime(), workerLogEntries.join("\n"), "worker")
 			attachments.push(workerLogFile)
 		}
 
-		const {getSearchIndexDebugLogs} = await import("../misc/IndexerDebugLogger")
-		const logs = getSearchIndexDebugLogs()
-
-		if (logs) {
-			attachments.push(createDataFile("indexer_debug.log", "text/plain", stringToUtf8Uint8Array(logs)))
-		}
-
-		if (isDesktop()) {
-			const desktopEntries = await locator.systemApp.getDesktopLogs()
-			const desktopLogFile = createLogFile(timestamp.getTime(), desktopEntries, "desktop")
-			attachments.push(desktopLogFile)
-		}
-
-		if (isApp()) {
-			const fileReference = await locator.systemApp.getDeviceLogs()
-			fileReference.name = `${timestamp.getTime()}_device_tutanota.log`
-			attachments.push(fileReference)
+		if (isDesktop() || isApp()) {
+			const nativeLog = await locator.commonSystemFacade.getLog()
+			const nativeLogFile = createLogFile(
+				timestamp.getTime(),
+				nativeLog,
+				isDesktop() ? "desktop" : "device"
+			)
+			attachments.push(nativeLogFile)
 		}
 
 		const mailboxDetails = await locator.mailModel.getUserMailboxDetails()

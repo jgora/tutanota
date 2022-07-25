@@ -1,281 +1,223 @@
-import m, {Component} from "mithril"
-import {TextFieldAttrs, TextFieldN, TextFieldType} from "../gui/base/TextFieldN"
-import {PasswordIndicator} from "../gui/PasswordIndicator"
+import m, {Children, Component, Vnode} from "mithril"
+import {TextFieldN, TextFieldType} from "../gui/base/TextFieldN"
+import {CompletenessIndicator} from "../gui/CompletenessIndicator.js"
 import {getPasswordStrength, isSecurePassword} from "../misc/PasswordUtils"
-import {Dialog} from "../gui/base/Dialog"
 import type {TranslationKey} from "../misc/LanguageViewModel"
 import {lang} from "../misc/LanguageViewModel"
 import type {Status} from "../gui/base/StatusField"
 import {StatusField} from "../gui/base/StatusField"
-import stream from "mithril/stream"
-import {logins} from "../api/main/LoginController"
-import {NotAuthenticatedError} from "../api/common/error/RestError"
-import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
-import type {User} from "../api/entities/sys/User"
-import {getEnabledMailAddressesForGroupInfo} from "../api/common/utils/GroupUtils"
-import {ofClass} from "@tutao/tutanota-utils"
-import {getEtId} from "../api/common/utils/EntityUtils"
-import {locator} from "../api/main/MainLocator"
+import {LoginController} from "../api/main/LoginController"
 import {assertMainOrNode} from "../api/common/Env"
+import {getEnabledMailAddressesForGroupInfo} from "../api/common/utils/GroupUtils.js"
 
 assertMainOrNode()
 
-/**
- * A form for entering a new password. Optionally it allows to enter the old password for validation and/or to repeat the new password.
- * showChangeOwnPasswordDialog() and showChangeUserPasswordAsAdminDialog() show this form as dialog.
- */
-export class PasswordForm implements Component {
-	readonly view: Component["view"]
-	private _oldPassword!: string
-	private _oldPasswordStatus!: Status
-	private _newPassword!: string
-	private _newPasswordStatus!: Status
-	private _repeatedPassword!: string
-	private _repeatedPasswordStatus!: Status
-	private readonly _validateOldPassword: boolean
-	private readonly _enforcePasswordStrength: boolean
-	private readonly _repeatPassword: boolean
+export interface PasswordFormAttrs {
+	model: PasswordModel
+	passwordInfoKey?: TranslationKey
+}
+
+export interface PasswordModelConfig {
+	readonly checkOldPassword: boolean,
+	readonly enforceStrength: boolean,
+	readonly repeatInput: boolean,
+}
+
+export class PasswordModel {
+	private newPassword = ""
+	private oldPassword = ""
+	private repeatedPassword = ""
+	private passwordStrength: number
 
 	constructor(
-		validateOldPassword: boolean,
-		enforcePasswordStrength: boolean,
-		repeatPassword: boolean,
-		passwordInfoTextId?: TranslationKey,
+		private readonly logins: LoginController,
+		readonly config: PasswordModelConfig,
 	) {
-		this._validateOldPassword = validateOldPassword
-		this._enforcePasswordStrength = enforcePasswordStrength
-		this._repeatPassword = repeatPassword
-
-		// make sure both the input values and status fields are initialized correctly
-		this._onOldPasswordInput("")
-
-		this._onNewPasswordInput("")
-
-		this._onRepeatedPasswordInput("")
-
-		const oldPasswordFieldAttrs: TextFieldAttrs = {
-			label: "oldPassword_label",
-			value: stream(this._oldPassword),
-			helpLabel: () =>
-				m(StatusField, {
-					status: this._oldPasswordStatus,
-				}),
-			oninput: value => this._onOldPasswordInput(value),
-			preventAutofill: true,
-			type: TextFieldType.Password,
-		} as const
-		const passwordIndicator = new PasswordIndicator(() => this._getPasswordStrength())
-		const newPasswordFieldAttrs: TextFieldAttrs = {
-			label: "newPassword_label",
-			value: stream(this._newPassword),
-			helpLabel: () =>
-				m(StatusField, {
-					status: this._newPasswordStatus,
-				}),
-			oninput: value => this._onNewPasswordInput(value),
-			type: TextFieldType.Password,
-			preventAutofill: true,
-			injectionsRight: () => m(".mb-s.mlr", m(passwordIndicator)),
-		} as const
-		const repeatedPasswordFieldAttrs: TextFieldAttrs = {
-			label: "repeatedPassword_label",
-			value: stream(this._repeatedPassword),
-			helpLabel: () =>
-				m(StatusField, {
-					status: this._repeatedPasswordStatus,
-				}),
-			oninput: value => this._onRepeatedPasswordInput(value),
-			type: TextFieldType.Password,
-		} as const
-
-		this.view = () => {
-			return m(
-				"",
-				{
-					onremove: () => {
-						this._oldPassword = ""
-						this._newPassword = ""
-						this._repeatedPassword = ""
-					},
-				},
-				[
-					validateOldPassword ? m(TextFieldN, oldPasswordFieldAttrs) : null,
-					m(TextFieldN, newPasswordFieldAttrs),
-					passwordInfoTextId ? m(".small.mt-s", lang.get(passwordInfoTextId)) : null,
-					repeatPassword ? m(TextFieldN, repeatedPasswordFieldAttrs) : null,
-				],
-			)
-		}
+		this.passwordStrength = this.calculatePasswordStrength()
 	}
 
-	_getPasswordStrength(): number {
-		let reserved: string[] = []
-
-		if (logins.isUserLoggedIn()) {
-			reserved = getEnabledMailAddressesForGroupInfo(logins.getUserController().userGroupInfo).concat(logins.getUserController().userGroupInfo.name)
-		}
-
-		// 80% strength is minimum. we expand it to 100%, so the password indicator if completely filled when the password is strong enough
-		return getPasswordStrength(this._newPassword, reserved)
+	getNewPassword(): string {
+		return this.newPassword
 	}
 
-	_getErrorFromStatus(status: Status): TranslationKey | null {
-		if (!status) return null
-		return status.type !== "valid" ? status.text : null
+	setNewPassword(newPassword: string) {
+		this.newPassword = newPassword
+		this.passwordStrength = this.calculatePasswordStrength()
+	}
+
+	getOldPassword(): string {
+		return this.oldPassword
+	}
+
+	setOldPassword(oldPassword: string) {
+		this.oldPassword = oldPassword
+		this.passwordStrength = this.calculatePasswordStrength()
+	}
+
+	getRepeatedPassword(): string {
+		return this.repeatedPassword
+	}
+
+	setRepeatedPassword(repeatedPassword: string) {
+		this.repeatedPassword = repeatedPassword
+		this.passwordStrength = this.calculatePasswordStrength()
+	}
+
+	clear() {
+		this.newPassword = ""
+		this.oldPassword = ""
+		this.repeatedPassword = ""
+		this.passwordStrength = this.calculatePasswordStrength()
 	}
 
 	getErrorMessageId(): TranslationKey | null {
 		return (
-			this._getErrorFromStatus(this._oldPasswordStatus) ||
-			this._getErrorFromStatus(this._newPasswordStatus) ||
-			this._getErrorFromStatus(this._repeatedPasswordStatus)
+			this.getErrorFromStatus(this.getOldPasswordStatus())
+			?? this.getErrorFromStatus(this.getNewPasswordStatus())
+			?? this.getErrorFromStatus(this.getRepeatedPasswordStatus())
 		)
 	}
 
-	getOldPassword(): string {
-		return this._oldPassword
-	}
-
-	getNewPassword(): string {
-		return this._newPassword
-	}
-
-	isPasswordUnsecure(): boolean {
-		return !isSecurePassword(this._getPasswordStrength())
-	}
-
-	/**
-	 * The user must enter the old password in addition to the new password (twice). The password strength is enforced.
-	 */
-	static showChangeOwnPasswordDialog(allowCancel: boolean = true): void {
-		let form = new PasswordForm(true, true, true)
-
-		let changeOwnPasswordOkAction = (dialog: Dialog) => {
-			let error = form.getErrorMessageId()
-
-			if (error) {
-				Dialog.message(error)
-			} else {
-				showProgressDialog("pleaseWait_msg", locator.loginFacade.changePassword(form.getOldPassword(), form.getNewPassword()))
-					.then(() => {
-						locator.credentialsProvider.deleteByUserId(getEtId(logins.getUserController().user))
-						Dialog.message("pwChangeValid_msg")
-						dialog.close()
-					})
-					.catch(
-						ofClass(NotAuthenticatedError, e => {
-							Dialog.message("oldPasswordInvalid_msg")
-						}),
-					)
-					.catch(e => {
-						Dialog.message("passwordResetFailed_msg")
-					})
-			}
-		}
-
-		Dialog.showActionDialog({
-			title: lang.get("changePassword_label"),
-			child: form,
-			validator: () => form.getErrorMessageId(),
-			okAction: changeOwnPasswordOkAction,
-			allowCancel: allowCancel,
-		})
-	}
-
-	/**
-	 *The admin does not have to enter the old password in addition to the new password (twice). The password strength is not enforced.
-	 */
-	static showChangeUserPasswordAsAdminDialog(user: User): void {
-		let form = new PasswordForm(false, false, true)
-
-		let changeUserPasswordAsAdminOkAction = (dialog: Dialog) => {
-			let p = locator.userManagementFacade
-						   .changeUserPassword(user, form.getNewPassword())
-						   .then(() => {
-							   Dialog.message("pwChangeValid_msg")
-							   dialog.close()
-						   })
-						   .catch(e => {
-							   Dialog.message("passwordResetFailed_msg")
-						   })
-			showProgressDialog("pleaseWait_msg", p)
-		}
-
-		Dialog.showActionDialog({
-			title: lang.get("changePassword_label"),
-			child: form,
-			validator: () => form.getErrorMessageId(),
-			okAction: changeUserPasswordAsAdminOkAction,
-		})
-	}
-
-	_onOldPasswordInput(oldPassword: string): void {
-		this._oldPassword = oldPassword
-
-		if (this._validateOldPassword && oldPassword === "") {
-			this._oldPasswordStatus = {
+	getOldPasswordStatus(): Status {
+		if (this.config.checkOldPassword && this.oldPassword === "") {
+			return {
 				type: "neutral",
 				text: "oldPasswordNeutral_msg",
 			}
 		} else {
-			this._oldPasswordStatus = {
+			return {
 				type: "valid",
 				text: "emptyString_msg",
 			}
 		}
 	}
 
-	_onNewPasswordInput(newPassword: string): void {
-		this._newPassword = newPassword
-
-		if (this._newPassword === "") {
-			this._newPasswordStatus = {
+	getNewPasswordStatus(): Status {
+		if (this.newPassword === "") {
+			return {
 				type: "neutral",
 				text: "password1Neutral_msg",
 			}
-		} else if (this._validateOldPassword && this._oldPassword === this._newPassword) {
-			this._newPasswordStatus = {
+		} else if (this.config.checkOldPassword && this.oldPassword === this.newPassword) {
+			return {
 				type: "invalid",
 				text: "password1InvalidSame_msg",
 			}
-		} else if (this.isPasswordUnsecure()) {
-			if (this._enforcePasswordStrength) {
-				this._newPasswordStatus = {
+		} else if (this.isPasswordInsecure()) {
+			if (this.config.enforceStrength) {
+				return {
 					type: "invalid",
 					text: "password1InvalidUnsecure_msg",
 				}
 			} else {
-				this._newPasswordStatus = {
+				return {
 					type: "valid",
 					text: "password1InvalidUnsecure_msg",
 				}
 			}
 		} else {
-			this._newPasswordStatus = {
+			return {
 				type: "valid",
 				text: "passwordValid_msg",
 			}
 		}
 	}
 
-	_onRepeatedPasswordInput(repeatedPassword: string): void {
-		this._repeatedPassword = repeatedPassword
+	getRepeatedPasswordStatus(): Status {
+		const repeatedPassword = this.repeatedPassword
+		const newPassword = this.newPassword
 
-		if (this._repeatPassword && this._repeatedPassword === "") {
-			this._repeatedPasswordStatus = {
+		if (this.config.repeatInput && repeatedPassword === "") {
+			return {
 				type: "neutral",
 				text: "password2Neutral_msg",
 			}
-		} else if (this._repeatPassword && this._repeatedPassword !== this._newPassword) {
-			this._repeatedPasswordStatus = {
+		} else if (this.config.repeatInput && repeatedPassword !== newPassword) {
+			return {
 				type: "invalid",
 				text: "password2Invalid_msg",
 			}
 		} else {
-			this._repeatedPasswordStatus = {
+			return {
 				type: "valid",
 				text: "passwordValid_msg",
 			}
 		}
+	}
+
+	isPasswordInsecure(): boolean {
+		return !isSecurePassword(this.getPasswordStrength())
+	}
+
+	getPasswordStrength(): number {
+		return this.passwordStrength
+	}
+
+	private getErrorFromStatus(status: Status): TranslationKey | null {
+		if (!status) return null
+		return status.type !== "valid" ? status.text : null
+	}
+
+	private calculatePasswordStrength(): number {
+		let reserved: string[] = []
+
+		if (this.logins.isUserLoggedIn()) {
+			reserved = getEnabledMailAddressesForGroupInfo(this.logins.getUserController().userGroupInfo)
+				.concat(this.logins.getUserController().userGroupInfo.name)
+		}
+
+		// 80% strength is minimum. we expand it to 100%, so the password indicator if completely filled when the password is strong enough
+		return getPasswordStrength(this.newPassword, reserved)
+	}
+}
+
+/**
+ * A form for entering a new password. Optionally it allows to enter the old password for validation and/or to repeat the new password.
+ * showChangeOwnPasswordDialog() and showChangeUserPasswordAsAdminDialog() show this form as dialog.
+ */
+export class PasswordForm implements Component<PasswordFormAttrs> {
+
+	view({attrs}: Vnode<PasswordFormAttrs>): Children {
+		return m("", {
+				onremove: () => attrs.model.clear(),
+			},
+			[
+				attrs.model.config.checkOldPassword ?
+					m(TextFieldN, {
+						label: "oldPassword_label",
+						value: attrs.model.getOldPassword(),
+						helpLabel: () => m(StatusField, {status: attrs.model.getOldPasswordStatus()}),
+						oninput: (input) => attrs.model.setOldPassword(input),
+						preventAutofill: true,
+						type: TextFieldType.Password,
+					})
+					: null,
+				m(TextFieldN, {
+					label: "newPassword_label",
+					value: attrs.model.getNewPassword(),
+					helpLabel: () => m(StatusField, {
+						status: attrs.model.getNewPasswordStatus(),
+					}),
+					oninput: (input) => attrs.model.setNewPassword(input),
+					type: TextFieldType.Password,
+					preventAutofill: true,
+					injectionsRight: () => m(".mb-s.mlr", m(CompletenessIndicator, {percentageCompleted: attrs.model.getPasswordStrength()})),
+				}),
+				attrs.passwordInfoKey ? m(".small.mt-s", lang.get(attrs.passwordInfoKey)) : null,
+				attrs.model.config.repeatInput
+					? m(TextFieldN, {
+						label: "repeatedPassword_label",
+						value: attrs.model.getRepeatedPassword(),
+						helpLabel: () =>
+							m(StatusField, {
+								status: attrs.model.getRepeatedPasswordStatus(),
+							}),
+						oninput: (input) => attrs.model.setRepeatedPassword(input),
+						type: TextFieldType.Password,
+					})
+					: null,
+			],
+		)
+
 	}
 }

@@ -18,16 +18,16 @@ import {htmlSanitizer} from "../misc/HtmlSanitizer.js"
 import {Dialog, DialogType} from "../gui/base/Dialog.js"
 import {Icon, progressIcon} from "../gui/base/Icon.js"
 import {theme} from "../gui/theme.js"
-import {createSecondFactor} from "../api/entities/sys/SecondFactor.js"
+import {createSecondFactor} from "../api/entities/sys/TypeRefs.js"
 import {assertNotNull, LazyLoaded, neverNull} from "@tutao/tutanota-utils"
 import {locator} from "../api/main/MainLocator.js"
-import type {User} from "../api/entities/sys/User.js"
+import type {User} from "../api/entities/sys/TypeRefs.js"
 import {getEtId, isSameId} from "../api/common/utils/EntityUtils.js"
 import {logins} from "../api/main/LoginController.js"
 import * as RecoverCodeDialog from "./RecoverCodeDialog.js"
 import {IWebauthnClient} from "../misc/2fa/webauthn/WebauthnClient.js"
-import type {U2fRegisteredDevice} from "../api/entities/sys/U2fRegisteredDevice.js"
-import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo.js"
+import type {U2fRegisteredDevice} from "../api/entities/sys/TypeRefs.js"
+import {GroupInfoTypeRef} from "../api/entities/sys/TypeRefs.js"
 import {EntityClient} from "../api/common/EntityClient.js"
 import {ProgrammingError} from "../api/common/error/ProgrammingError.js"
 import type {TotpSecret} from "@tutao/tutanota-crypto"
@@ -81,7 +81,7 @@ export class EditSecondFactorDialog {
 					// We don't want <xml> around the content, we actually enforce <svg> namespace and we want it to be parsed as such.
 					xmlDeclaration: false,
 				})
-				totpQRCodeSvg = htmlSanitizer.sanitizeSVG(qrcodeGenerator.svg()).text
+				totpQRCodeSvg = htmlSanitizer.sanitizeSVG(qrcodeGenerator.svg()).html
 			} else {
 				totpQRCodeSvg = null
 			}
@@ -182,7 +182,7 @@ export class EditSecondFactorDialog {
 
 		const typeDropdownAttrs: DropDownSelectorAttrs<FactorTypesEnum> = {
 			label: "type_label",
-			selectedValue: stream(this.selectedType),
+			selectedValue: this.selectedType,
 			selectionChangedHandler: newValue => this.onTypeSelected(newValue),
 			items: options,
 			dropdownWidth: 300,
@@ -190,7 +190,7 @@ export class EditSecondFactorDialog {
 		const nameFieldAttrs: TextFieldAttrs = {
 			label: "name_label",
 			helpLabel: () => lang.get("secondFactorNameInfo_msg"),
-			value: stream(this.name),
+			value: this.name,
 			oninput: value => {
 				this.name = value
 			},
@@ -224,7 +224,7 @@ export class EditSecondFactorDialog {
 		const totpSecretFieldAttrs: TextFieldAttrs = {
 			label: "totpSecret_label",
 			helpLabel: () => lang.get(isApp() ? "totpTransferSecretApp_msg" : "totpTransferSecret_msg"),
-			value: stream(this.totpKeys.readableKey),
+			value: this.totpKeys.readableKey,
 			injectionsRight: () => m(ButtonN, copyButtonAttrs),
 			disabled: true,
 		}
@@ -235,7 +235,7 @@ export class EditSecondFactorDialog {
 		}
 		const totpCodeAttrs: TextFieldAttrs = {
 			label: "totpCode_label",
-			value: stream(this.totpCode),
+			value: this.totpCode,
 			oninput: newValue => this.onTotpValueChange(newValue),
 		}
 		const openTOTPAppAttrs: ButtonAttrs = {
@@ -264,7 +264,7 @@ export class EditSecondFactorDialog {
 
 	private async openOtpLink() {
 		const {url} = await this.otpInfo.getAsync()
-		const successful = await locator.systemApp.openLinkNative(url)
+		const successful = await locator.systemFacade.openLink(url)
 
 		if (!successful) {
 			Dialog.message("noAppAvailable_msg")

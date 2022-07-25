@@ -4,7 +4,6 @@ import {LOGIN_TITLE} from "../api/common/Env"
 import fs from "fs"
 import path from "path"
 import os from "os"
-import type {IPC} from "./IPC"
 import type {WindowManager} from "./DesktopWindowManager"
 import {log} from "./DesktopLog"
 
@@ -17,8 +16,7 @@ type ErrorLog = {
 }
 
 export class DesktopErrorHandler {
-	private _wm!: WindowManager
-	private _ipc!: IPC
+	private wm!: WindowManager
 	private _errorLogPath: string
 	lastErrorLog: ErrorLog | null = null
 	private _showingErrorDialog: boolean
@@ -29,9 +27,8 @@ export class DesktopErrorHandler {
 	}
 
 	// these listeners can only be set after the app ready event
-	init(wm: WindowManager, ipc: IPC) {
-		this._wm = wm
-		this._ipc = ipc
+	init(wm: WindowManager) {
+		this.wm = wm
 		process
 			.on("uncaughtException", error => {
 				this.handleUnexpectedFailure(error)
@@ -95,12 +92,12 @@ export class DesktopErrorHandler {
 						})
 						app.exit(0)
 					} else {
-						const loggedInWindow = this._wm.getAll().find(w => w.getTitle() !== LOGIN_TITLE)
+						const loggedInWindow = this.wm.getAll().find(w => w.getTitle() !== LOGIN_TITLE)
 
 						if (loggedInWindow) {
 							return this.sendErrorReport(loggedInWindow.id)
 						} else {
-							const lastFocused = await this._wm.getLastFocused(true)
+							const lastFocused = await this.wm.getLastFocused(true)
 							return this.sendErrorReport(lastFocused.id)
 						}
 					}
@@ -111,12 +108,12 @@ export class DesktopErrorHandler {
 			})
 	}
 
-	sendErrorReport(windowId: number): Promise<any> {
+	async sendErrorReport(windowId: number): Promise<any> {
 		if (!this.lastErrorLog) {
 			return Promise.resolve()
 		}
-
-		return this._ipc.sendRequest(windowId, "reportError", [this.lastErrorLog]).then(() => (this.lastErrorLog = null))
+		this.wm.get(windowId)?.desktopFacade.reportError(this.lastErrorLog)
+		this.lastErrorLog = null
 	}
 
 	// replace absolute file paths in stack trace with nicer ones relative to the app

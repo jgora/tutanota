@@ -5,7 +5,8 @@ import fs from "fs-extra"
 import path, {dirname} from "path"
 import {fileURLToPath} from "url"
 import stream from "stream"
-import {spawnSync} from "child_process"
+import {spawn, spawnSync} from "child_process"
+import {$} from "zx"
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -23,26 +24,44 @@ export function getTutanotaAppVersion() {
 
 /**
  * Returns the version of electron used by the app (as in package.json).
- * @returns {string}
+ * @returns Promise<{string}>
  */
-export function getElectronVersion(log = console.log.bind(console)) {
-	return getInstalledModuleVersion("electron", log)
+export async function getElectronVersion(log = console.log.bind(console)) {
+	return await getInstalledModuleVersion("electron", log)
 }
 
 /**
  * Get the installed version of a module
  * @param module {string}
- * @returns {string}
+ * @returns Promise<{string}>
  */
-export function getInstalledModuleVersion(module, log) {
-	// npm list likes to error out for no reason so we just print a warning. If it really fails, we will see it.
-	// shell: true because otherwise Windows can't find npm.
-	const {stdout, stderr, status, error} = spawnSync("npm", ["list", module, "--json"], {shell: true})
-	if (status !== 0) {
-		log(`npm list is not happy about ${module}, but it doesn't mean anything`, status, stderr, error)
+export async function getInstalledModuleVersion(module, log) {
+	let json
+	const cachePath = "node_modules/.npm-deps-resolved"
+	if (await fs.exists(cachePath)) {
+		// Look for node_modules in current directory
+		const content = await fs.readFile(cachePath, "utf8")
+		json = JSON.parse(content)
+	} else if (await fs.exists(path.join("..", cachePath))) {
+		// Try to find node_modules in directory one level up (e.g. if we run tests). Should be probably more generic
+		const content = await fs.readFile(path.join("..", cachePath), "utf8")
+		json = JSON.parse(content)
+	} else {
+		console.log(`Using slow method to resolve dependency version. Add a postinstall script to dump 'npm list' into ${cachePath} to speed things up.`)
+		// npm list likes to error out for no reason so we just print a warning. If it really fails, we will see it.
+		// shell: true because otherwise Windows can't find npm.
+		const {stdout, stderr, status, error} = spawnSync("npm", ["list", module, "--json"], {shell: true})
+		if (status !== 0) {
+			log(`npm list is not happy about ${module}, but it doesn't mean anything`, status, stderr, error)
+		}
+		json = JSON.parse(stdout.toString().trim())
 	}
-	const json = JSON.parse(stdout.toString().trim())
-	return findVersion(json, module)
+
+	const version = findVersion(json, module)
+	if (version == null) {
+		throw new Error(`Could not find version of ${module}`)
+	}
+	return version
 }
 
 // Unfortunately `npm list` is garbage and instead of just giving you the info about package it will give you some subtree with the thing you are looking for
@@ -52,10 +71,12 @@ function findVersion({dependencies}, nodeModule) {
 	if (dependencies[nodeModule]) {
 		return dependencies[nodeModule].version
 	} else {
-		for (const dep of Object.values(dependencies)) {
-			const found = findVersion(dep, nodeModule)
-			if (found) {
-				return found
+		for (const [name, dep] of Object.entries(dependencies)) {
+			if ("dependencies" in dep) {
+				const found = findVersion(dep, nodeModule)
+				if (found) {
+					return found
+				}
 			}
 		}
 	}
@@ -136,4 +157,52 @@ export function getCanonicalPlatformName(platformName) {
 		default:
 			throw new Error(`Unknown platform name ${platformName}`)
 	}
+}
+
+export async function runStep(name, cmd) {
+	const before = Date.now()
+	console.log("Build >", name)
+	await cmd()
+	console.log("Build >", name, "took", Date.now() - before, "ms")
+}
+
+export function writeFile(targetFile, content) {
+	return fs.mkdir(path.dirname(targetFile), {recursive: true}).then(() => fs.writeFile(targetFile, content, 'utf-8'))
+}
+
+/**
+ * A little helper that runs the command. Unlike zx stdio is set to "inherit" and we don't pipe output.
+ */
+export async function sh(pieces, ...args) {
+	// If you need this function, but you can't use zx copy it from here
+	// https://github.com/google/zx/blob/a7417430013445592bcd1b512e1f3080a87fdade/src/guards.mjs
+	// (or more up-to-date version)
+	const fullCommand = formatCommand(pieces, args)
+	console.log(`$ ${fullCommand}`)
+	const child = spawn(fullCommand, {shell: true, stdio: "inherit"})
+	return new Promise((resolve, reject) => {
+		child.on("close", (code) => {
+			if (code === 0) {
+				resolve()
+			} else {
+				reject(new Error("Process failed with " + code))
+			}
+		})
+		child.on("error", (error) => {
+			reject(`Failed to spawn child: ${error}`)
+		})
+	})
+}
+
+function formatCommand(pieces, args) {
+	// Pieces are parts between arguments
+	// So if you have incvcation sh`command ${myArg} something ${myArg2}`
+	// then pieces will be ["command ", " something "]
+	// and the args will be [(valueOfMyArg1), (valueOfMyArg2)]
+	// There are always args.length + 1 pieces (if command ends with argument then the last piece is an empty string).
+	let fullCommand = pieces[0]
+	for (let i = 0; i < args.length; i++) {
+		fullCommand += $.quote(args[i]) + pieces[i + 1]
+	}
+	return fullCommand
 }

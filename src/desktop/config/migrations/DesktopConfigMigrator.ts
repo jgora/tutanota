@@ -9,19 +9,21 @@ import * as migration0002 from "./migration-0002"
 import * as migration0003 from "./migration-0003"
 import * as migration0004 from "./migration-0004"
 import * as migration0005 from "./migration-0005"
+import * as migration0006 from "./migration-0006"
+import * as migration0007 from "./migration-0007"
 import type {Config, ConfigMigration} from "../ConfigCommon"
-import {DesktopCryptoFacade} from "../../DesktopCryptoFacade"
+import {DesktopNativeCryptoFacade} from "../../DesktopNativeCryptoFacade"
 import type {DesktopKeyStoreFacade} from "../../KeyStoreFacadeImpl"
 
 export type MigrationKind = "migrateClient" | "migrateAdmin"
 export type ElectronExports = typeof Electron.CrossProcessExports;
 
 export class DesktopConfigMigrator {
-	readonly crypto: DesktopCryptoFacade
+	readonly crypto: DesktopNativeCryptoFacade
 	_keyStoreFacade: DesktopKeyStoreFacade
 	_electron: ElectronExports
 
-	constructor(crypto: DesktopCryptoFacade, keyStoreFacade: DesktopKeyStoreFacade, electron: ElectronExports) {
+	constructor(crypto: DesktopNativeCryptoFacade, keyStoreFacade: DesktopKeyStoreFacade, electron: ElectronExports) {
 		this.crypto = crypto
 		this._keyStoreFacade = keyStoreFacade
 		this._electron = electron
@@ -50,8 +52,12 @@ export class DesktopConfigMigrator {
 				await applyMigration(config => migration0005[migrationFunction](config, this._electron), oldConfig)
 
 			case 5:
-				log.debug("config up to date")
+				await applyMigration(migration0006[migrationFunction], oldConfig)
 
+			case 6:
+				await applyMigration(migration0007[migrationFunction], oldConfig)
+			case 7:
+				log.debug("config up to date")
 				/* add new migrations as needed */
 				break
 

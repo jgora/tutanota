@@ -1,20 +1,16 @@
 import {parseCalendarFile} from "../export/CalendarImporter"
-import type {CalendarEvent} from "../../api/entities/tutanota/CalendarEvent"
-import type {File as TutanotaFile} from "../../api/entities/tutanota/File"
+import type {CalendarEvent, CalendarEventAttendee, File as TutanotaFile, Mail} from "../../api/entities/tutanota/TypeRefs.js"
 import {locator} from "../../api/main/MainLocator"
-import type {CalendarEventAttendee} from "../../api/entities/tutanota/CalendarEventAttendee"
-import type {CalendarAttendeeStatus} from "../../api/common/TutanotaConstants"
-import {ArchiveDataType, CalendarMethod, getAsEnumValue} from "../../api/common/TutanotaConstants"
+import {CalendarAttendeeStatus, CalendarMethod, getAsEnumValue} from "../../api/common/TutanotaConstants"
 import {assertNotNull, clone, filterInt, noOp, ofClass, Thunk} from "@tutao/tutanota-utils"
 import {findPrivateCalendar, getEventStart, getTimeZone} from "./CalendarUtils"
 import {logins} from "../../api/main/LoginController"
-import type {Mail} from "../../api/entities/tutanota/Mail"
 import {calendarUpdateDistributor} from "./CalendarUpdateDistributor"
 import {Dialog} from "../../gui/base/Dialog"
 import {UserError} from "../../api/main/UserError"
 import {NoopProgressMonitor} from "../../api/common/utils/ProgressMonitor"
 import {CalendarEventViewModel, createCalendarEventViewModel} from "./CalendarEventViewModel"
-import {convertToDataFile, DataFile} from "../../api/common/DataFile";
+import {DataFile} from "../../api/common/DataFile";
 
 function getParsedEvent(
 	fileData: DataFile,
@@ -71,7 +67,7 @@ export async function showEventDetails(event: CalendarEvent, eventBubbleRect: Cl
 }
 
 export async function getEventFromFile(file: TutanotaFile): Promise<CalendarEvent | null> {
-	const dataFile = await locator.fileController.downloadAndDecryptBrowser(file)
+	const dataFile = await locator.fileController.downloadAndDecrypt(file)
 	const parsedEvent = getParsedEvent(dataFile)
 	return parsedEvent?.event ?? null
 }
@@ -122,12 +118,13 @@ export function replyToEventInvitation(
 		return import("../../mail/editor/SendMailModel").then(({SendMailModel}) => {
 			const sendMailModel = new SendMailModel(
 				locator.mailFacade,
+				locator.entityClient,
 				logins,
 				locator.mailModel,
 				locator.contactModel,
 				locator.eventController,
-				locator.entityClient,
 				mailboxDetails,
+				locator.recipientsModel
 			)
 			return calendarUpdateDistributor
 				.sendResponse(eventClone, sendMailModel, foundAttendee.address.address, previousMail, decision)
@@ -141,11 +138,12 @@ export function replyToEventInvitation(
 								return locator.calendarModel.updateEvent(eventClone, alarmInfos, getTimeZone(), calendar.groupRoot, event).then(noOp)
 							})
 						} else {
-							return locator.calendarModel.createEvent(eventClone, [], getTimeZone(), calendar.groupRoot)
+							if (decision !== CalendarAttendeeStatus.DECLINED) {
+								return locator.calendarModel.createEvent(eventClone, [], getTimeZone(), calendar.groupRoot)
+							}
 						}
-					} else {
-						return Promise.resolve()
 					}
+					return Promise.resolve()
 				})
 		})
 	})

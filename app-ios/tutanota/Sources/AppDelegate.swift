@@ -11,24 +11,24 @@ class AppDelegate : UIResponder,
   private var alarmManager: AlarmManager!
   private var viewController: ViewController!
   
-  func registerForPushNotifications(
-    callback: @escaping ResponseCallback<String>
-  ) {
+  func registerForPushNotifications() async throws -> String {
     #if targetEnvironment(simulator)
-    return
+    return ""
     #else
-    UNUserNotificationCenter.current()
-      .requestAuthorization(
-        options: [.alert, .badge, .sound]) { granted, error in
-        if error == nil {
-          DispatchQueue.main.async {
-            self.pushTokenCallback = callback
-            UIApplication.shared.registerForRemoteNotifications()
+    return try await withCheckedThrowingContinuation { continuation in
+      UNUserNotificationCenter.current()
+        .requestAuthorization(
+          options: [.alert, .badge, .sound]) { granted, error in
+          if error == nil {
+            DispatchQueue.main.async {
+              self.pushTokenCallback = continuation.resume(with:)
+              UIApplication.shared.registerForRemoteNotifications()
+            }
+          } else {
+            continuation.resume(with: .failure(error!))
           }
-        } else {
-          callback(.failure(error!))
         }
-      }
+    }
     #endif
   }
   
@@ -42,10 +42,9 @@ class AppDelegate : UIResponder,
     
     self.alarmManager = AlarmManager(keychainManager: keychainManager, userPreference: userPreferences)
     self.window = UIWindow(frame: UIScreen.main.bounds)
-    let credentialsEncryption = CredentialsEncryption(keychainManager: keychainManager)
+    let credentialsEncryption = IosNativeCredentialsFacade(keychainManager: keychainManager)
     self.viewController = ViewController(
-      crypto: CryptoFacade(),
-      contactsSource: ContactsSource(),
+      crypto: IosNativeCryptoFacade(),
       themeManager: ThemeManager(),
       keychainManager: keychainManager,
       userPreferences: userPreferences,

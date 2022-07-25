@@ -1,8 +1,6 @@
-import m, {Children, VnodeDOM} from "mithril"
+import m, {Children, Component, VnodeDOM} from "mithril"
 import {Icons} from "./icons/Icons"
 import type {Editor} from "../editor/Editor"
-import stream from "mithril/stream"
-import Stream from "mithril/stream"
 import {noOp, numberRange} from "@tutao/tutanota-utils"
 import type {ButtonAttrs} from "./ButtonN"
 import {ButtonColor, ButtonN, ButtonType} from "./ButtonN"
@@ -20,12 +18,12 @@ export type Options = {
 	customButtonAttrs?: Array<ButtonAttrs>
 }
 
-export class RichTextToolbar {
-	view: (...args: Array<any>) => any
-	selectedSize: Stream<number>
+export class RichTextToolbar implements Component<Options> {
+	view: Component["view"]
+	selectedSize: number
 
 	constructor(editor: Editor, options?: Options) {
-		this.selectedSize = stream(size.font_size_base)
+		this.selectedSize = size.font_size_base
 		const styleToggleAttrs: Array<ButtonAttrs> = ([
 			{
 				style: "b",
@@ -204,7 +202,7 @@ export class RichTextToolbar {
 						click: () => {
 							editor.squire.setFontSize(n)
 
-							this.selectedSize(n)
+							this.selectedSize = n
 							setTimeout(() => editor.squire.focus(), 100) // blur for the editor is fired after the handler for some reason
 
 							m.redraw()
@@ -230,9 +228,9 @@ export class RichTextToolbar {
 
 		this.view = (): Children | null => {
 			try {
-				this.selectedSize(parseInt(editor.squire.getFontInfo().size.slice(0, -2)))
+				this.selectedSize = parseInt(editor.squire.getFontInfo().size.slice(0, -2))
 			} catch (e) {
-				this.selectedSize(size.font_size_base)
+				this.selectedSize = size.font_size_base
 			}
 
 			return m(
@@ -271,7 +269,7 @@ export class RichTextToolbar {
 
 	_animate(dom: HTMLElement, appear: boolean): Promise<any> {
 		let childHeight = Array.from(dom.children)
-							   .map((domElement: HTMLElement) => domElement.offsetHeight)
+							   .map((domElement) => (domElement as HTMLElement).offsetHeight)
 							   .reduce((current: number, previous: number) => Math.max(current, previous), 0)
 		return animations
 			.add(dom, [height(appear ? 0 : childHeight, appear ? childHeight : 0), appear ? opacity(0, 1, false) : opacity(1, 0, false)])

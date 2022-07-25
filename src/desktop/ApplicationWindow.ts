@@ -1,9 +1,8 @@
-import type {BrowserWindow, ContextMenuParams, NativeImage, Result,} from "electron"
+import type {BrowserWindow, ContextMenuParams, NativeImage, Result, Session} from "electron"
 import type {WindowBounds, WindowManager} from "./DesktopWindowManager"
-import type {IPC} from "./IPC"
 import url from "url"
 import type {lazy} from "@tutao/tutanota-utils"
-import {assertNotNull, capitalizeFirstLetter, noOp, typedEntries, typedKeys} from "@tutao/tutanota-utils"
+import {capitalizeFirstLetter, noOp, typedEntries, typedKeys} from "@tutao/tutanota-utils"
 import {Keys} from "../api/common/TutanotaConstants"
 import type {Key} from "../misc/KeyManager"
 import path from "path"
@@ -11,9 +10,16 @@ import type {TranslationKey} from "../misc/LanguageViewModel"
 import {log} from "./DesktopLog"
 import {parseUrlOrNull} from "./PathUtils"
 import type {LocalShortcutManager} from "./electron-localshortcut/LocalShortcut"
-import {ThemeManager} from "./ThemeManager"
+import {DesktopThemeFacade} from "./DesktopThemeFacade"
 import {CancelledError} from "../api/common/error/CancelledError"
 import {ElectronExports} from "./ElectronExportTypes";
+import {OfflineDbFacade} from "./db/OfflineDbFacade"
+import {DesktopFacade} from "../native/common/generatedipc/DesktopFacade.js"
+import {CommonNativeFacade} from "../native/common/generatedipc/CommonNativeFacade.js"
+import {RemoteBridge} from "./ipc/RemoteBridge.js"
+import {InterWindowEventSender} from "../native/common/InterWindowEventBus.js"
+import {InterWindowEventTypes} from "../native/common/InterWindowEventTypes.js"
+import {ProgrammingError} from "../api/common/error/ProgrammingError.js"
 import HandlerDetails = Electron.HandlerDetails
 
 const MINIMUM_WINDOW_SIZE: number = 350
@@ -39,29 +45,23 @@ type LocalShortcut = {
 const TAG = "[ApplicationWindow]"
 
 export class ApplicationWindow {
-	private readonly _ipc: IPC
 	private readonly _startFileURLString: string
 	private readonly _electron: ElectronExports
 	private readonly _localShortcut: LocalShortcutManager
-	private readonly _themeManager: ThemeManager
+	private readonly _themeFacade: DesktopThemeFacade
 	private readonly _startFileURL: URL
+	private _desktopFacade!: DesktopFacade
+	private _commonNativeFacade!: CommonNativeFacade
+	private _interWindowEventSender!: InterWindowEventSender<InterWindowEventTypes>
+
 	_browserWindow!: BrowserWindow
 
 	/** User logged in in this window. Reset from WindowManager. */
-	_userInfo: UserInfo | null
+	private userId: Id | null = null
 	private _setBoundsTimeout: ReturnType<typeof setTimeout> | null = null
 	private _findingInPage: boolean = false
 	private _skipNextSearchBarBlur: boolean = false
-	private _lastSearchRequest:
-		| [
-		string,
-		{
-			forward: boolean
-			matchCase: boolean
-		},
-	]
-		| null
-		| undefined = null
+	private _lastSearchRequest: [string, {forward: boolean, matchCase: boolean}] | null = null
 	private _lastSearchPromiseReject: (arg0: Error | null) => void
 	private _shortcuts: Array<LocalShortcut>
 	id!: number
@@ -72,13 +72,13 @@ export class ApplicationWindow {
 		icon: NativeImage,
 		electron: typeof Electron.CrossProcessExports,
 		localShortcutManager: LocalShortcutManager,
-		themeManager: ThemeManager,
+		themeFacade: DesktopThemeFacade,
+		private readonly offlineDbFacade: OfflineDbFacade,
+		private readonly remoteBridge: RemoteBridge,
 		dictUrl: string,
 		noAutoLogin?: boolean | null,
 	) {
-		this._themeManager = themeManager
-		this._userInfo = null
-		this._ipc = assertNotNull(wm.ipc)
+		this._themeFacade = themeFacade
 		this._electron = electron
 		this._localShortcut = localShortcutManager
 		this._startFileURL = url.pathToFileURL(path.join(this._electron.app.getAppPath(), desktophtml))
@@ -166,10 +166,30 @@ export class ApplicationWindow {
 			icon,
 			dictUrl,
 		})
+		this.initFacades()
 
 		this._loadInitialUrl(noAutoLogin ?? false)
 
 		this._electron.Menu.setApplicationMenu(null)
+	}
+
+	get desktopFacade(): DesktopFacade {
+		return this._desktopFacade
+	}
+
+	get commonNativeFacade(): CommonNativeFacade {
+		return this._commonNativeFacade
+	}
+
+	get interWindowEventSender(): InterWindowEventSender<InterWindowEventTypes> {
+		return this._interWindowEventSender
+	}
+
+	private initFacades() {
+		const sendingFacades = this.remoteBridge.createBridge(this)
+		this._desktopFacade = sendingFacades.desktopFacade
+		this._commonNativeFacade = sendingFacades.commonNativeFacade
+		this._interWindowEventSender = sendingFacades.interWindowEventSender
 	}
 
 	async _loadInitialUrl(noAutoLogin: boolean) {
@@ -182,11 +202,9 @@ export class ApplicationWindow {
 	}
 
 	async updateBackgroundColor() {
-		const theme = await this._themeManager.getCurrentThemeWithFallback()
+		const theme = await this._themeFacade.getCurrentThemeWithFallback()
 
 		if (theme) {
-			// It currently does not work
-			// see https://github.com/electron/electron/issues/26842
 			this._browserWindow.setBackgroundColor(theme.content_bg)
 		}
 	}
@@ -283,19 +301,41 @@ export class ApplicationWindow {
 
 		this.id = this._browserWindow.id
 
-		this._ipc.addWindow(this.id)
-
 		this._browserWindow.webContents.session.setPermissionRequestHandler(
 			(webContents, permission, callback: (_: boolean) => void) => callback(false),
 		)
 
-		wm.dl.manageDownloadsForSession(this._browserWindow.webContents.session, dictUrl)
+		const session = this._browserWindow.webContents.session
+		session.setPermissionRequestHandler(
+			(webContents, permission, callback: (_: boolean) => void) => callback(false),
+		)
+
+		const assetDir = path.dirname(url.fileURLToPath(this._startFileURLString))
+
+		// Intercepts all file:// requests
+		// Default session is  shared between all windows so we only register it once
+		if (!session.protocol.isProtocolIntercepted("file")) {
+			const intercepting = session.protocol.interceptFileProtocol("file", (request, cb) => {
+				const requestedPath = url.fileURLToPath(request.url)
+				const resolvedPath = path.resolve(assetDir, requestedPath)
+				if (!resolvedPath.startsWith(assetDir)) {
+					console.log("Invalid asset URL", request.url.toString())
+					cb({statusCode: 404})
+				} else {
+					cb({path: resolvedPath})
+				}
+			})
+			if (!intercepting) {
+				throw new ProgrammingError("Cannot intercept file: protocol!")
+			}
+		}
+
+		this.manageDownloadsForSession(session, dictUrl)
 
 		this._browserWindow
-			.on("closed", () => {
-				this.setUserInfo(null)
-
-				this._ipc.removeWindow(this.id)
+			.on("close", () => {
+				this.closeDb()
+				this.remoteBridge.destroyBridge(this)
 			})
 			.on("focus", () => this._localShortcut.enableAll(this._browserWindow))
 			.on("blur", (_: FocusEvent) => this._localShortcut.disableAll(this._browserWindow))
@@ -325,7 +365,7 @@ export class ApplicationWindow {
 
 					this._browserWindow.webContents
 						.once("found-in-page", (ev, res) => {
-							this._ipc.sendRequest(this.id, "applySearchResultToOverlay", [res])
+							this._desktopFacade.applySearchResultToOverlay(res)
 						})
 						.findInPage(searchTerm, options)
 				}
@@ -333,8 +373,7 @@ export class ApplicationWindow {
 			.on("did-finish-load", () => {
 				// This also covers the case when window was reloaded.
 				// the webContents needs to know on which channel to listen
-				// Wait for IPC to be initialized so that render process can process our messages.
-				this._ipc.initialized(this.id).then(() => this._sendShortcutstoRender())
+				this._sendShortcutstoRender()
 			})
 			.on("did-fail-load", (evt, errorCode, errorDesc, validatedURL) => {
 				log.debug(TAG, "failed to load resource: ", validatedURL, errorDesc)
@@ -364,7 +403,7 @@ export class ApplicationWindow {
 			.on("did-navigate-in-page", () => this._browserWindow.emit("did-navigate"))
 			.on("zoom-changed", (ev, direction: "in" | "out") => this._browserWindow.emit("zoom-changed", ev, direction))
 			.on("update-target-url", (ev, url) => {
-				this._ipc.sendRequest(this.id, "updateTargetUrl", [url, this._startFileURLString])
+				this._desktopFacade.updateTargetUrl(url, this._startFileURLString)
 			})
 
 		this._browserWindow.webContents.setWindowOpenHandler(details => this._onNewWindow(details))
@@ -374,8 +413,21 @@ export class ApplicationWindow {
 	}
 
 	async reload(queryParams: Record<string, string | boolean>) {
+		await this.closeDb()
+		this.remoteBridge.destroyBridge(this)
+		this.userId = null
+		this.initFacades()
 		const url = await this._getInitialUrl(queryParams)
 		await this._browserWindow.loadURL(url)
+	}
+
+	private async closeDb() {
+		if (this.userId) {
+			console.log(`closing offline db for ${this.userId}`)
+			await this.offlineDbFacade.closeDatabaseForUser(this.userId)
+		} else {
+			console.error("couldn't close db for window, no userId is set!!!!")
+		}
 	}
 
 	_onNewWindow(details: HandlerDetails): {action: "deny"} {
@@ -415,14 +467,26 @@ export class ApplicationWindow {
 
 	_sendShortcutstoRender(): void {
 		// delete exec since functions don't cross IPC anyway.
-		// it will be replaced by () => true in the renderer thread.
+		// it will be replaced by () => true in the renderer thread
 		const webShortcuts = this._shortcuts.map(s =>
 			Object.assign({}, s, {
 				exec: null,
 			}),
 		)
 
-		this._ipc.sendRequest(this.id, "addShortcuts", webShortcuts)
+		this._desktopFacade.addShortcuts(webShortcuts)
+	}
+
+	private manageDownloadsForSession(session: Session, dictUrl: string) {
+		dictUrl = dictUrl + "/dictionaries/"
+		log.debug(TAG, "getting dictionaries from:", dictUrl)
+		session.setSpellCheckerDictionaryDownloadURL(dictUrl)
+		session
+			.removeAllListeners("spellcheck-dictionary-download-failure")
+			.on("spellcheck-dictionary-initialized", (ev, lcode) => log.debug(TAG, "spellcheck-dictionary-initialized", lcode))
+			.on("spellcheck-dictionary-download-begin", (ev, lcode) => log.debug(TAG, "spellcheck-dictionary-download-begin", lcode))
+			.on("spellcheck-dictionary-download-success", (ev, lcode) => log.debug(TAG, "spellcheck-dictionary-download-success", lcode))
+			.on("spellcheck-dictionary-download-failure", (ev, lcode) => log.debug(TAG, "spellcheck-dictionary-download-failure", lcode))
 	}
 
 	_tryGoBack(): void {
@@ -435,19 +499,15 @@ export class ApplicationWindow {
 		}
 	}
 
-	openMailBox(info: UserInfo, path?: string | null): Promise<void> {
-		return this._ipc
-				   .initialized(this.id)
-				   .then(() => this._ipc.sendRequest(this.id, "openMailbox", [info.userId, info.mailAddress, path]))
-				   .then(() => this.show())
+	async openMailBox(info: UserInfo, path?: string | null): Promise<void> {
+		await this._commonNativeFacade.openMailBox(info.userId, info.mailAddress!, path ?? null)
+		this.show()
 	}
 
 	// open at date?
-	openCalendar(info: UserInfo): Promise<void> {
-		return this._ipc
-				   .initialized(this.id)
-				   .then(() => this._ipc.sendRequest(this.id, "openCalendar", [info.userId]))
-				   .then(() => this.show())
+	async openCalendar(info: UserInfo): Promise<void> {
+		await this._commonNativeFacade.openCalendar(info.userId)
+		this.show()
 	}
 
 	setContextMenuHandler(handler: (arg0: ContextMenuParams) => void) {
@@ -466,27 +526,24 @@ export class ApplicationWindow {
 			return
 		}
 
-		// need to wait for the nativeApp to register itself
-		return this._ipc.initialized(this.id).then(() => this._browserWindow.webContents.send("to-renderer", msg))
+		// calls to this already await ipc.initialized
+		this._browserWindow.webContents.send("to-renderer", msg)
 	}
 
-	setUserInfo(info: UserInfo | null) {
-		this._userInfo = info
+	getUserId(): Id | null {
+		return this.userId
 	}
 
-	getUserInfo(): UserInfo | null {
-		return this._userInfo
-	}
-
-	getUserId(): string | null {
-		return this._userInfo ? this._userInfo.userId : null
+	setUserId(id: Id | null) {
+		this.userId = id
 	}
 
 	getPath(): string {
 		return this._browserWindow.webContents.getURL().substring(this._startFileURLString.length)
 	}
 
-	findInPage([searchTerm, options]: [string, {forward: boolean, matchCase: boolean}]): Promise<Result | null> {
+	findInPage(searchTerm: string, forward: boolean, matchCase: boolean, findNext: boolean): Promise<Result | null> {
+		const options = {forward, matchCase, findNext}
 		this._findingInPage = true
 
 		if (searchTerm !== "") {
@@ -560,11 +617,11 @@ export class ApplicationWindow {
 	}
 
 	_printMail() {
-		this._ipc.sendRequest(this.id, "print", [])
+		this._desktopFacade.print()
 	}
 
 	_openFindInPage(): void {
-		this._ipc.sendRequest(this.id, "openFindInPage", [])
+		this._desktopFacade.openFindInPage()
 	}
 
 	isVisible(): boolean {
@@ -617,7 +674,7 @@ export class ApplicationWindow {
 		}
 
 		url.searchParams.append("platformId", process.platform)
-		const theme = await this._themeManager.getCurrentThemeWithFallback()
+		const theme = await this._themeFacade.getCurrentThemeWithFallback()
 		url.searchParams.append("theme", JSON.stringify(theme))
 		return url.toString()
 	}

@@ -4,26 +4,26 @@ import {InfoLink, lang} from "../misc/LanguageViewModel"
 import {getSpamRuleFieldToName, getSpamRuleTypeNameMapping, showAddSpamRuleDialog} from "./AddSpamRuleDialog"
 import {getSpamRuleField, GroupType, OperationType, SpamRuleFieldType, SpamRuleType} from "../api/common/TutanotaConstants"
 import {getCustomMailDomains} from "../api/common/utils/Utils"
-import type {CustomerServerProperties} from "../api/entities/sys/CustomerServerProperties"
-import {CustomerServerPropertiesTypeRef} from "../api/entities/sys/CustomerServerProperties"
+import type {AuditLogEntry, Customer, CustomerInfo, CustomerServerProperties, DomainInfo, GroupInfo} from "../api/entities/sys/TypeRefs.js"
+import {
+	AuditLogEntryTypeRef,
+	createEmailSenderListElement,
+	CustomerInfoTypeRef,
+	CustomerServerPropertiesTypeRef,
+	CustomerTypeRef,
+	GroupInfoTypeRef,
+	GroupTypeRef,
+	RejectedSenderTypeRef,
+	UserTypeRef
+} from "../api/entities/sys/TypeRefs.js"
 import {DropDownSelector} from "../gui/base/DropDownSelector"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
 import {logins} from "../api/main/LoginController"
-import type {AuditLogEntry} from "../api/entities/sys/AuditLogEntry"
-import {AuditLogEntryTypeRef} from "../api/entities/sys/AuditLogEntry"
 import {formatDateTime, formatDateTimeFromYesterdayOn} from "../misc/Formatter"
-import type {Customer} from "../api/entities/sys/Customer"
-import {CustomerTypeRef} from "../api/entities/sys/Customer"
 import {Dialog} from "../gui/base/Dialog"
-import type {GroupInfo} from "../api/entities/sys/GroupInfo"
-import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
 import {LockedError, NotAuthorizedError, PreconditionFailedError} from "../api/common/error/RestError"
-import type {CustomerInfo} from "../api/entities/sys/CustomerInfo"
-import {CustomerInfoTypeRef} from "../api/entities/sys/CustomerInfo"
-import {loadEnabledTeamMailGroups, loadEnabledUserMailGroups, loadGroupDisplayName} from "./LoadingUtils"
-import {GroupTypeRef} from "../api/entities/sys/Group"
-import {UserTypeRef} from "../api/entities/sys/User"
+import {GroupData, loadEnabledTeamMailGroups, loadEnabledUserMailGroups, loadGroupDisplayName} from "./LoadingUtils"
 import {Icons} from "../gui/base/icons/Icons"
 import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
 import type {EntityUpdateData} from "../api/main/EventController"
@@ -34,13 +34,10 @@ import {attachDropdown, createDropdown, DropdownChildAttrs} from "../gui/base/Dr
 import {ButtonType} from "../gui/base/ButtonN"
 import {DomainDnsStatus} from "./DomainDnsStatus"
 import {showDnsCheckDialog} from "./CheckDomainDnsStatusDialog"
-import type {DomainInfo} from "../api/entities/sys/DomainInfo"
 import {BootIcons} from "../gui/base/icons/BootIcons"
-import {RejectedSenderTypeRef} from "../api/entities/sys/RejectedSender"
 import {GENERATED_MAX_ID, generatedIdToTimestamp, getElementId, sortCompareByReverseId, timestampToGeneratedId} from "../api/common/utils/EntityUtils"
 import {ExpandableTable} from "./ExpandableTable"
 import {showRejectedSendersInfoDialog} from "./RejectedSendersInfoDialog"
-import {createEmailSenderListElement} from "../api/entities/sys/EmailSenderListElement"
 import {showAddDomainWizard} from "./emaildomain/AddDomainWizard"
 import {getUserGroupMemberships} from "../api/common/utils/GroupUtils"
 import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
@@ -48,6 +45,7 @@ import {getDomainPart} from "../misc/parsing/MailAddressParser"
 import type {UpdatableSettingsViewer} from "./SettingsView"
 import {locator} from "../api/main/MainLocator"
 import {assertMainOrNode} from "../api/common/Env"
+import {SelectorItemList} from "../gui/base/DropDownSelectorN.js"
 
 assertMainOrNode()
 // Number of days for that we load rejected senders
@@ -56,37 +54,37 @@ const REJECTED_SENDERS_TO_LOAD_MS = 5 * DAY_IN_MILLIS
 const REJECTED_SENDERS_MAX_NUMBER = 100
 
 export class GlobalSettingsViewer implements UpdatableSettingsViewer {
-	view: (...args: Array<any>) => any
-	_props: Stream<CustomerServerProperties>
-	_customer: Stream<Customer>
-	_customerInfo: LazyLoaded<CustomerInfo>
-	_spamRuleLines: Stream<Array<TableLineAttrs>>
-	_rejectedSenderLines: Stream<Array<TableLineAttrs>>
-	_customDomainLines: Stream<Array<TableLineAttrs>>
-	_auditLogLines: Stream<Array<TableLineAttrs>>
-
+	view: UpdatableSettingsViewer["view"]
+	private readonly props: Stream<CustomerServerProperties>
+	private customer: Customer | null
+	private readonly customerInfo: LazyLoaded<CustomerInfo>
+	private spamRuleLines: ReadonlyArray<TableLineAttrs>
+	private rejectedSenderLines: ReadonlyArray<TableLineAttrs>
+	private customDomainLines: ReadonlyArray<TableLineAttrs>
+	private auditLogLines: ReadonlyArray<TableLineAttrs>
 	/**
 	 * caches the current status for the custom email domains
 	 * map from domain name to status
 	 */
-	_domainDnsStatus: Record<string, DomainDnsStatus>
+	private readonly domainDnsStatus: Record<string, DomainDnsStatus>
 
 	constructor() {
-		this._customerInfo = new LazyLoaded(() => {
+		this.customerInfo = new LazyLoaded(() => {
 			return locator.entityClient
 						  .load(CustomerTypeRef, neverNull(logins.getUserController().user.customer))
 						  .then(customer => locator.entityClient.load(CustomerInfoTypeRef, customer.customerInfo))
 		})
-		this._domainDnsStatus = {}
-		this._spamRuleLines = stream([])
-		this._rejectedSenderLines = stream([])
-		this._customDomainLines = stream([])
-		this._auditLogLines = stream([])
-		this._props = stream()
-		this._customer = stream()
+		this.domainDnsStatus = {}
+		this.spamRuleLines = []
+		this.rejectedSenderLines = []
+		this.customDomainLines = []
+		this.auditLogLines = []
+		this.props = stream()
+		this.customer = null
+
 		let saveIpAddress = stream(false)
 
-		this._props.map(props => saveIpAddress(props.saveEncryptedIpAddressInSession))
+		this.props.map(props => saveIpAddress(props.saveEncryptedIpAddressInSession))
 
 		let saveIpAddressDropdown = new DropDownSelector(
 			"saveEncryptedIpAddress_label",
@@ -104,14 +102,14 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 			saveIpAddress,
 			250,
 		).setSelectionChangedHandler(v => {
-			const newProps: CustomerServerProperties = Object.assign({}, this._props(), {
+			const newProps: CustomerServerProperties = Object.assign({}, this.props(), {
 				saveEncryptedIpAddressInSession: v,
 			})
 			locator.entityClient.update(newProps)
 		})
 		let requirePasswordUpdateAfterReset = stream(false)
 
-		this._props.map(props => requirePasswordUpdateAfterReset(props.requirePasswordUpdateAfterReset))
+		this.props.map(props => requirePasswordUpdateAfterReset(props.requirePasswordUpdateAfterReset))
 
 		let requirePasswordUpdateAfterResetDropdown = new DropDownSelector(
 			"enforcePasswordUpdate_title",
@@ -129,7 +127,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 			requirePasswordUpdateAfterReset,
 			250,
 		).setSelectionChangedHandler(v => {
-			const newProps: CustomerServerProperties = Object.assign({}, this._props(), {
+			const newProps: CustomerServerProperties = Object.assign({}, this.props(), {
 				requirePasswordUpdateAfterReset: v,
 			})
 			locator.entityClient.update(newProps)
@@ -145,7 +143,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 					click: () => showAddSpamRuleDialog(null),
 					icon: () => Icons.Add,
 				},
-				lines: this._spamRuleLines(),
+				lines: this.spamRuleLines,
 			}
 			const rejectedSenderTableAttrs: TableAttrs = {
 				columnHeading: ["emailSender_label"],
@@ -154,11 +152,11 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 				addButtonAttrs: {
 					label: "refresh_action",
 					click: () => {
-						this._updateRejectedSenderTable()
+						this.updateRejectedSenderTable()
 					},
 					icon: () => BootIcons.Progress,
 				},
-				lines: this._rejectedSenderLines(),
+				lines: this.rejectedSenderLines,
 			}
 			const customDomainTableAttrs: TableAttrs = {
 				columnHeading: ["adminCustomDomain_label", "catchAllMailbox_label"],
@@ -167,25 +165,25 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 				addButtonAttrs: {
 					label: "addCustomDomain_action",
 					click: () => {
-						this._customerInfo.getAsync().then(customerInfo => {
+						this.customerInfo.getAsync().then(customerInfo => {
 							if (logins.getUserController().isFreeAccount()) {
 								showNotAvailableForFreeDialog(getCustomMailDomains(customerInfo).length === 0)
 							} else {
 								showAddDomainWizard("", customerInfo).then(() => {
-									this._updateDomains()
+									this.updateDomains()
 								})
 							}
 						})
 					},
 					icon: () => Icons.Add,
 				},
-				lines: this._customDomainLines(),
+				lines: this.customDomainLines,
 			}
 			const auditLogTableAttrs: TableAttrs = {
 				columnHeading: ["action_label", "modified_label", "time_label"],
 				columnWidths: [ColumnWidth.Largest, ColumnWidth.Largest, ColumnWidth.Small],
 				showActionButtonColumn: true,
-				lines: this._auditLogLines(),
+				lines: this.auditLogLines,
 			}
 			return [
 				m("#global-settings.fill-absolute.scroll.plr-l", [
@@ -199,7 +197,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 						title: "rejectedEmails_label",
 						table: rejectedSenderTableAttrs,
 						infoMsg: "rejectedSenderListInfo_msg",
-						onExpand: () => this._updateRejectedSenderTable(),
+						onExpand: () => this.updateRejectedSenderTable(),
 					}),
 					m(ExpandableTable, {
 						title: "customEmailDomains_label",
@@ -213,7 +211,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 						logins.getUserController().isGlobalAdmin() && logins.getUserController().isPremiumAccount()
 							? m("", [
 								m(requirePasswordUpdateAfterResetDropdown),
-								this._customer()
+								this.customer
 									? m(
 										".mt-l",
 										m(ExpandableTable, {
@@ -230,56 +228,54 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 			]
 		}
 
-		this._updateDomains()
+		this.updateDomains()
 
-		this._updateCustomerServerProperties()
+		this.updateCustomerServerProperties()
 
-		this._updateAuditLog()
+		this.updateAuditLog()
 	}
 
-	_updateCustomerServerProperties(): Promise<void> {
+	private updateCustomerServerProperties(): Promise<void> {
 		return locator.customerFacade.loadCustomerServerProperties().then(props => {
-			this._props(props)
+			this.props(props)
 
 			const fieldToName = getSpamRuleFieldToName()
 
-			this._spamRuleLines(
-				props.emailSenderList.map((rule, index) => {
-					return {
-						cells: () => [
+			this.spamRuleLines = props.emailSenderList.map((rule, index) => {
+				return {
+					cells: () => [
+						{
+							main: fieldToName[getSpamRuleField(rule)],
+							info: [rule.value],
+						},
+						{
+							main: neverNull(getSpamRuleTypeNameMapping().find(t => t.value === rule.type)).name,
+						},
+					],
+					actionButtonAttrs: createRowActions(
+						{
+							getArray: () => props.emailSenderList,
+							updateInstance: () => locator.entityClient.update(props).catch(ofClass(LockedError, noOp)),
+						},
+						rule,
+						index,
+						[
 							{
-								main: fieldToName[getSpamRuleField(rule)],
-								info: [rule.value],
-							},
-							{
-								main: neverNull(getSpamRuleTypeNameMapping().find(t => t.value === rule.type)).name,
+								label: "edit_action",
+								click: () => showAddSpamRuleDialog(rule),
+								type: ButtonType.Dropdown,
 							},
 						],
-						actionButtonAttrs: createRowActions(
-							{
-								getArray: () => props.emailSenderList,
-								updateInstance: () => locator.entityClient.update(props).catch(ofClass(LockedError, noOp)),
-							},
-							rule,
-							index,
-							[
-								{
-									label: "edit_action",
-									click: () => showAddSpamRuleDialog(rule),
-									type: ButtonType.Dropdown,
-								},
-							],
-						),
-					}
-				}),
-			)
+					),
+				}
+			})
 
 			m.redraw()
 		})
 	}
 
-	_updateRejectedSenderTable(): void {
-		const customer = this._customer()
+	private updateRejectedSenderTable(): void {
+		const customer = this.customer
 
 		if (customer && customer.rejectedSenders) {
 			// Rejected senders are written with TTL for seven days.
@@ -302,7 +298,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 											  }
 										  })
 										  .then(rejectedSenders => {
-											  const tableEntries = rejectedSenders.map(rejectedSender => {
+											  this.rejectedSenderLines = rejectedSenders.map(rejectedSender => {
 												  const rejectDate = formatDateTime(new Date(generatedIdToTimestamp(getElementId(rejectedSender))))
 												  return {
 													  cells: () => {
@@ -344,35 +340,31 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 													  ),
 												  }
 											  })
-
-											  this._rejectedSenderLines(tableEntries)
 										  })
 			showProgressDialog("loading_msg", loadingPromise).then(() => m.redraw())
 		}
 	}
 
-	_updateAuditLog(): Promise<void> {
+	private updateAuditLog(): Promise<void> {
 		return locator.entityClient.load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)).then(customer => {
-			this._customer(customer)
+			this.customer = customer
 
 			return locator.entityClient.loadRange(AuditLogEntryTypeRef, neverNull(customer.auditLog).items, GENERATED_MAX_ID, 200, true).then(auditLog => {
-				this._auditLogLines(
-					auditLog.map(auditLogEntry => {
-						return {
-							cells: [auditLogEntry.action, auditLogEntry.modifiedEntity, formatDateTimeFromYesterdayOn(auditLogEntry.date)],
-							actionButtonAttrs: {
-								label: "showMore_action",
-								icon: () => Icons.More,
-								click: () => this._showAuditLogDetails(auditLogEntry, customer),
-							},
-						}
-					}),
-				)
+				this.auditLogLines = auditLog.map(auditLogEntry => {
+					return {
+						cells: [auditLogEntry.action, auditLogEntry.modifiedEntity, formatDateTimeFromYesterdayOn(auditLogEntry.date)],
+						actionButtonAttrs: {
+							label: "showMore_action",
+							icon: () => Icons.More,
+							click: () => this.showAuditLogDetails(auditLogEntry, customer),
+						},
+					}
+				})
 			})
 		})
 	}
 
-	_showAuditLogDetails(entry: AuditLogEntry, customer: Customer) {
+	private showAuditLogDetails(entry: AuditLogEntry, customer: Customer) {
 		let modifiedGroupInfo: Stream<GroupInfo> = stream()
 		let groupInfo = stream<GroupInfo>()
 		let groupInfoLoadingPromises: Promise<unknown>[] = []
@@ -385,7 +377,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 						   modifiedGroupInfo(gi)
 					   })
 					   .catch(
-						   ofClass(NotAuthorizedError, e => {
+						   ofClass(NotAuthorizedError, () => {
 							   // If the admin is removed from the free group, he does not have the permission to access the groupinfo of that group anymore
 						   }),
 					   ),
@@ -400,7 +392,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 						   groupInfo(gi)
 					   })
 					   .catch(
-						   ofClass(NotAuthorizedError, e => {
+						   ofClass(NotAuthorizedError, () => {
 							   // If the admin is removed from the free group, he does not have the permission to access the groupinfo of that group anymore
 						   }),
 					   ),
@@ -421,8 +413,8 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 								m("td", lang.get("modified_label")),
 								m(
 									"td.pl",
-									modifiedGroupInfo() && this._getGroupInfoDisplayText(modifiedGroupInfo())
-										? this._getGroupInfoDisplayText(modifiedGroupInfo())
+									modifiedGroupInfo() && this.getGroupInfoDisplayText(modifiedGroupInfo())
+										? this.getGroupInfoDisplayText(modifiedGroupInfo())
 										: entry.modifiedEntity,
 								),
 							]),
@@ -433,7 +425,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 										"td.pl",
 										customer.adminGroup === groupInfoValue.group
 											? lang.get("globalAdmin_label")
-											: this._getGroupInfoDisplayText(groupInfoValue),
+											: this.getGroupInfoDisplayText(groupInfoValue),
 									),
 								])
 								: null,
@@ -447,7 +439,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 		})
 	}
 
-	_getGroupInfoDisplayText(groupInfo: GroupInfo): string {
+	private getGroupInfoDisplayText(groupInfo: GroupInfo): string {
 		if (groupInfo.name && groupInfo.mailAddress) {
 			return groupInfo.name + " <" + groupInfo.mailAddress + ">"
 		} else if (groupInfo.mailAddress) {
@@ -457,26 +449,26 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 		}
 	}
 
-	_updateDomains(): Promise<void> {
-		return this._customerInfo.getAsync().then(customerInfo => {
+	private async updateDomains(): Promise<void> {
+		return this.customerInfo.getAsync().then(customerInfo => {
 			let customDomainInfos = getCustomMailDomains(customerInfo)
 			// remove dns status instances for all removed domains
-			Object.keys(this._domainDnsStatus).forEach(domain => {
+			Object.keys(this.domainDnsStatus).forEach(domain => {
 				if (!customDomainInfos.find(di => di.domain === domain)) {
-					delete this._domainDnsStatus[domain]
+					delete this.domainDnsStatus[domain]
 				}
 			})
 			return promiseMap(customDomainInfos, domainInfo => {
 				// create dns status instances for all new domains
-				if (!this._domainDnsStatus[domainInfo.domain]) {
-					this._domainDnsStatus[domainInfo.domain] = new DomainDnsStatus(domainInfo.domain)
+				if (!this.domainDnsStatus[domainInfo.domain]) {
+					this.domainDnsStatus[domainInfo.domain] = new DomainDnsStatus(domainInfo.domain)
 
-					this._domainDnsStatus[domainInfo.domain].loadCurrentStatus().then(() => {
+					this.domainDnsStatus[domainInfo.domain].loadCurrentStatus().then(() => {
 						m.redraw()
 					})
 				}
 
-				let domainDnsStatus = this._domainDnsStatus[domainInfo.domain]
+				let domainDnsStatus = this.domainDnsStatus[domainInfo.domain]
 				let p = Promise.resolve(lang.get("comboBoxSelectionNone_msg"))
 
 				if (domainInfo.catchAllMailGroup) {
@@ -505,107 +497,98 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 							icon: () => Icons.More,
 							click: createDropdown(
 								{
-                                    lazyButtons: () => {
+									lazyButtons: () => {
 
-                                        const buttons: DropdownChildAttrs[] = [
-                                            {
-                                                type: ButtonType.Dropdown,
-                                                label: "setCatchAllMailbox_action",
-                                                click: () => this._editCatchAllMailbox(domainInfo),
-                                            },
-                                            {
-                                                type: ButtonType.Dropdown,
-                                                label: "delete_action",
-                                                click: () => this._deleteCustomDomain(domainInfo),
-                                            }
-                                        ]
+										const buttons: DropdownChildAttrs[] = [
+											{
+												type: ButtonType.Dropdown,
+												label: "setCatchAllMailbox_action",
+												click: () => this.editCatchAllMailbox(domainInfo),
+											},
+											{
+												type: ButtonType.Dropdown,
+												label: "delete_action",
+												click: () => this.deleteCustomDomain(domainInfo),
+											}
+										]
 
-                                        if (domainDnsStatus.status.isLoaded() && !domainDnsStatus.areAllRecordsFine()) {
-                                            buttons.unshift({
-                                                type: ButtonType.Dropdown,
-                                                label: "resumeSetup_label",
-                                                click: () => {
-                                                    showAddDomainWizard(domainDnsStatus.domain, customerInfo).then(() => {
-                                                        domainDnsStatus.loadCurrentStatus().then(() => m.redraw())
-                                                    })
-                                                },
-                                            })
-                                        }
-                                        return buttons
-                                    }, width: 260
-                                },
+										if (domainDnsStatus.status.isLoaded() && !domainDnsStatus.areAllRecordsFine()) {
+											buttons.unshift({
+												type: ButtonType.Dropdown,
+												label: "resumeSetup_label",
+												click: () => {
+													showAddDomainWizard(domainDnsStatus.domain, customerInfo).then(() => {
+														domainDnsStatus.loadCurrentStatus().then(() => m.redraw())
+													})
+												},
+											})
+										}
+										return buttons
+									}, width: 260
+								},
 							),
 						},
 					}
 				})
 			}).then(tableLines => {
-				this._customDomainLines(tableLines)
+				this.customDomainLines = tableLines
 
 				m.redraw()
 			})
 		})
 	}
 
-	_editCatchAllMailbox(domainInfo: DomainInfo) {
-		showProgressDialog(
-			"pleaseWait_msg",
-			locator.entityClient.load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)).then(customer => {
-				return loadEnabledTeamMailGroups(customer).then(teamMailGroups =>
-					loadEnabledUserMailGroups(customer).then(userMailGroups => {
-						let allMailGroups = teamMailGroups.concat(userMailGroups)
-						const options = [
-							{
-								name: lang.get("comboBoxSelectionNone_msg"),
-								value: null,
-							},
-							...allMailGroups.map(groupData => {
-								return {
-									name: groupData.displayName,
-									value: groupData.groupId,
-								}
-							})
-						]
-						let selectedPromise: Promise<unknown> = Promise.resolve(null) // default is no selection
-
-						if (domainInfo.catchAllMailGroup) {
-							// the catch all group may be a user group, so load the mail group in that case
-							selectedPromise = locator.entityClient.load(GroupTypeRef, domainInfo.catchAllMailGroup).then(catchAllGroup => {
-								if (catchAllGroup.type === GroupType.User) {
-									return locator.entityClient.load(UserTypeRef, neverNull(catchAllGroup.user)).then(user => {
-										return getUserGroupMemberships(user, GroupType.Mail)[0].group // the first is the users personal mail group
-									})
-								} else {
-									return domainInfo.catchAllMailGroup
-								}
-							})
-						}
-
-						return selectedPromise.then(catchAllMailGroupId => {
-							let selected = allMailGroups.find(g => g.groupId === catchAllMailGroupId)
-							return {
-								available: options,
-								selected: selected,
-							}
-						})
-					}),
-				)
-			}),
-		).then(availableAndSelectedGroupDatas => {
-			const valueStream = stream(availableAndSelectedGroupDatas.selected ? availableAndSelectedGroupDatas.selected.groupId : null)
-			return Dialog.showDropDownSelectionDialog(
-				"setCatchAllMailbox_action",
-				"catchAllMailbox_label",
-				null,
-				availableAndSelectedGroupDatas.available,
-				valueStream,
-				250,
-			).then(selectedMailGroupId => {
-				return locator.customerFacade.setCatchAllGroup(domainInfo.domain, selectedMailGroupId)
-			})
-		})
+	private async editCatchAllMailbox(domainInfo: DomainInfo) {
+		const groupDatas = await showProgressDialog("pleaseWait_msg", this.loadMailboxGroupDataAndCatchAllId(domainInfo))
+		const initialValue = groupDatas.selected?.groupId ?? null
+		const selectedMailGroupId = await Dialog.showDropDownSelectionDialog(
+			"setCatchAllMailbox_action",
+			"catchAllMailbox_label",
+			null,
+			[
+				{
+					name: lang.get("comboBoxSelectionNone_msg"),
+					value: null,
+				},
+				...groupDatas.available.map(groupData => {
+					return {
+						name: groupData.displayName,
+						value: groupData.groupId,
+					}
+				})
+			],
+			initialValue,
+			250,
+		)
+		return locator.customerFacade.setCatchAllGroup(domainInfo.domain, selectedMailGroupId)
 	}
 
-	_deleteCustomDomain(domainInfo: DomainInfo) {
+	private async loadMailboxGroupDataAndCatchAllId(domainInfo: DomainInfo): Promise<{available: Array<GroupData>, selected: GroupData | null}> {
+		const customer = await locator.entityClient.load(CustomerTypeRef, neverNull(logins.getUserController().user.customer))
+		const teamMailGroups = await loadEnabledTeamMailGroups(customer)
+		const userMailGroups = await loadEnabledUserMailGroups(customer)
+		const allMailGroups = teamMailGroups.concat(userMailGroups)
+		let catchAllMailGroupId: Id | null = null
+		if (domainInfo.catchAllMailGroup) {
+
+			const catchAllGroup = await locator.entityClient.load(GroupTypeRef, domainInfo.catchAllMailGroup)
+			if (catchAllGroup.type === GroupType.User) {
+				// the catch all group may be a user group, so load the mail group in that case
+				const user = await locator.entityClient.load(UserTypeRef, neverNull(catchAllGroup.user))
+				catchAllMailGroupId = getUserGroupMemberships(user, GroupType.Mail)[0].group // the first is the users personal mail group
+			} else {
+				catchAllMailGroupId = domainInfo.catchAllMailGroup
+			}
+		}
+
+		return {
+			available: allMailGroups,
+			selected: allMailGroups.find(g => g.groupId === catchAllMailGroupId) ?? null,
+		}
+	}
+
+
+	private deleteCustomDomain(domainInfo: DomainInfo) {
 		Dialog.confirm(() =>
 			lang.get("confirmCustomDomainDeletion_msg", {
 				"{domain}": domainInfo.domain,
@@ -615,9 +598,9 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 				locator.customerFacade
 					   .removeDomain(domainInfo.domain)
 					   .catch(
-						   ofClass(PreconditionFailedError, e => {
+						   ofClass(PreconditionFailedError, () => {
 							   let registrationDomains =
-								   this._props() != null ? this._props().whitelabelRegistrationDomains.map(domainWrapper => domainWrapper.value) : []
+								   this.props() != null ? this.props().whitelabelRegistrationDomains.map(domainWrapper => domainWrapper.value) : []
 
 							   if (registrationDomains.indexOf(domainInfo.domain) !== -1) {
 								   Dialog.message(() =>
@@ -634,7 +617,7 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 							   }
 						   }),
 					   )
-					   .catch(ofClass(LockedError, e => Dialog.message("operationStillActive_msg")))
+					   .catch(ofClass(LockedError, () => Dialog.message("operationStillActive_msg")))
 			}
 		})
 	}
@@ -642,13 +625,13 @@ export class GlobalSettingsViewer implements UpdatableSettingsViewer {
 	entityEventsReceived(updates: ReadonlyArray<EntityUpdateData>): Promise<void> {
 		return promiseMap(updates, update => {
 			if (isUpdateForTypeRef(CustomerServerPropertiesTypeRef, update) && update.operation === OperationType.UPDATE) {
-				return this._updateCustomerServerProperties()
+				return this.updateCustomerServerProperties()
 			} else if (isUpdateForTypeRef(AuditLogEntryTypeRef, update)) {
-				return this._updateAuditLog()
+				return this.updateAuditLog()
 			} else if (isUpdateForTypeRef(CustomerInfoTypeRef, update) && update.operation === OperationType.UPDATE) {
-				this._customerInfo.reset()
+				this.customerInfo.reset()
 
-				return this._updateDomains()
+				return this.updateDomains()
 			}
 		}).then(noOp)
 	}

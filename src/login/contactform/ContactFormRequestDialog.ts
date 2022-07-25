@@ -11,9 +11,9 @@ import {windowFacade} from "../../misc/WindowFacade"
 import {progressIcon} from "../../gui/base/Icon"
 import {AccessDeactivatedError} from "../../api/common/error/RestError"
 import {client} from "../../misc/ClientDetector"
-import {createPushIdentifier} from "../../api/entities/sys/PushIdentifier"
+import {createPushIdentifier} from "../../api/entities/sys/TypeRefs.js"
 import {logins} from "../../api/main/LoginController"
-import {PasswordForm} from "../../settings/PasswordForm"
+import {PasswordForm, PasswordModel} from "../../settings/PasswordForm"
 import {HtmlEditor} from "../../gui/editor/HtmlEditor"
 import {Icons} from "../../gui/base/icons/Icons"
 import stream from "mithril/stream"
@@ -22,19 +22,18 @@ import {CheckboxN} from "../../gui/base/CheckboxN"
 import {getPrivacyStatementLink} from "../LoginView"
 import type {DialogHeaderBarAttrs} from "../../gui/base/DialogHeaderBar"
 import {ButtonN, ButtonType} from "../../gui/base/ButtonN"
-import type {File as TutanotaFile} from "../../api/entities/tutanota/File"
-import type {ContactForm} from "../../api/entities/tutanota/ContactForm"
+import type {ContactForm, File as TutanotaFile} from "../../api/entities/tutanota/TypeRefs.js"
 import {createDropDownButton} from "../../gui/base/Dropdown"
 import {showProgressDialog} from "../../gui/dialogs/ProgressDialog"
 import {getCleanedMailAddress} from "../../misc/parsing/MailAddressParser"
-import {createDraftRecipient} from "../../api/entities/tutanota/DraftRecipient"
-import {makeRecipientDetails, RecipientInfoType} from "../../api/common/RecipientInfo"
 import {checkAttachmentSize} from "../../mail/model/MailUtils"
 import {locator} from "../../api/main/MainLocator"
 import {assertMainOrNode} from "../../api/common/Env"
 import {DataFile} from "../../api/common/DataFile";
 import {FileReference} from "../../api/common/utils/FileUtils";
 import {SessionType} from "../../api/common/SessionType.js";
+import {RecipientType} from "../../api/common/recipients/Recipient"
+import {readLocalFiles, showFileChooser} from "../../file/FileController.js"
 
 assertMainOrNode()
 
@@ -49,7 +48,7 @@ export class ContactFormRequestDialog {
 	_loadingAttachments: boolean
 	_contactForm: ContactForm
 	_notificationEmailAddress: string
-	_passwordForm: PasswordForm
+	private passwordModel = new PasswordModel(logins, {checkOldPassword: false, enforceStrength: false, repeatInput: true})
 	_privacyPolicyAccepted: Stream<boolean>
 	_windowCloseUnsubscribe: () => void
 
@@ -65,8 +64,7 @@ export class ContactFormRequestDialog {
 		this._subject = ""
 		this._notificationEmailAddress = ""
 		this._windowCloseUnsubscribe = noOp
-		this._passwordForm = new PasswordForm(false, false, true, "contactFormEnterPasswordInfo_msg")
-		this._privacyPolicyAccepted = stream(false)
+		this._privacyPolicyAccepted = stream<boolean>(false)
 		this._editor = new HtmlEditor().showBorders().setPlaceholderId("contactFormPlaceholder_label").setMinHeight(200)
 		let headerBarAttrs: DialogHeaderBarAttrs = {
 			left: [
@@ -114,14 +112,14 @@ export class ContactFormRequestDialog {
 		})
 		const subject = m(TextFieldN, {
 			label: "subject_label",
-			value: stream(this._subject),
+			value: this._subject,
 			helpLabel: this.getConfidentialStateMessage,
 			injectionsRight: () => [attachFilesButton],
 			oninput: value => (this._subject = value),
 		})
 		const notificationEmailAddress = m(TextFieldN, {
 			label: "mailAddress_label",
-			value: stream(this._notificationEmailAddress),
+			value: this._notificationEmailAddress,
 			helpLabel: () => lang.get("contactFormMailAddressInfo_msg"),
 			oninput: value => {
 				this._notificationEmailAddress = value.trim()
@@ -142,17 +140,16 @@ export class ContactFormRequestDialog {
 				},
 				ondrop: (ev: DragEvent) => {
 					if (ev.dataTransfer?.files && ev.dataTransfer.files.length > 0) {
-						locator.fileController
-							   .readLocalFiles(ev.dataTransfer.files)
-							   .then(dataFiles => {
-								   this._attachFiles(dataFiles as any)
+						readLocalFiles(ev.dataTransfer.files)
+							.then(dataFiles => {
+								this._attachFiles(dataFiles as any)
 
-								   m.redraw()
-							   })
-							   .catch(e => {
-								   console.log(e)
-								   return Dialog.message("couldNotAttachFile_msg")
-							   })
+								m.redraw()
+							})
+							.catch(e => {
+								console.log(e)
+								return Dialog.message("couldNotAttachFile_msg")
+							})
 						ev.stopPropagation()
 						ev.preventDefault()
 					}
@@ -167,13 +164,17 @@ export class ContactFormRequestDialog {
 						: [m(".flex-v-center", progressIcon()), m(".small.flex-v-center.plr.button-height", lang.get("loading_msg"))],
 				),
 				this._attachmentButtons.length > 0 ? m("hr") : null,
-				m(this._passwordForm),
+				m(PasswordForm, {
+					model: this.passwordModel,
+					passwordInfoKey: "contactFormEnterPasswordInfo_msg"
+				}),
 				m(".pt-l.text", m(this._editor)),
 				notificationEmailAddress,
 				getPrivacyStatementLink()
 					? m(CheckboxN, {
 						label: () => this._getPrivacyPolicyCheckboxContent(),
-						checked: this._privacyPolicyAccepted,
+						checked: this._privacyPolicyAccepted(),
+						onChecked: this._privacyPolicyAccepted,
 					})
 					: null,
 			],
@@ -205,7 +206,7 @@ export class ContactFormRequestDialog {
 	}
 
 	_showFileChooserForAttachments(): Promise<void> {
-		return locator.fileController.showFileChooser(true).then(files => {
+		return showFileChooser(true).then(files => {
 			this._attachFiles(files as any)
 
 			m.redraw()
@@ -239,7 +240,7 @@ export class ContactFormRequestDialog {
 						if (file._type === "DataFile") {
 							locator.fileController.saveDataFile(downcast(file))
 						} else {
-							locator.fileController.downloadAndOpen((file as any) as TutanotaFile, true)
+							locator.fileController.open(file as TutanotaFile)
 						}
 					},
 				).setType(ButtonType.Secondary),
@@ -273,7 +274,7 @@ export class ContactFormRequestDialog {
 	async send(): Promise<void> {
 		const {mailFacade, customerFacade} = locator
 
-		const passwordErrorId = this._passwordForm.getErrorMessageId()
+		const passwordErrorId = this.passwordModel.getErrorMessageId()
 
 		if (passwordErrorId) {
 			Dialog.message(passwordErrorId)
@@ -285,7 +286,7 @@ export class ContactFormRequestDialog {
 			return
 		}
 
-		const passwordOk = !this._passwordForm.isPasswordUnsecure() || (await Dialog.confirm("contactFormPasswordNotSecure_msg"))
+		const passwordOk = !this.passwordModel.isPasswordInsecure() || (await Dialog.confirm("contactFormPasswordNotSecure_msg"))
 
 		if (passwordOk) {
 			const cleanedNotificationMailAddress = getCleanedMailAddress(this._notificationEmailAddress)
@@ -294,7 +295,7 @@ export class ContactFormRequestDialog {
 				return Dialog.message("mailAddressInvalid_msg")
 			}
 
-			const password = this._passwordForm.getNewPassword()
+			const password = this.passwordModel.getNewPassword()
 
 			const doSend = async () => {
 				const contactFormResult = await customerFacade.createContactFormUser(password, this._contactForm._id)
@@ -324,12 +325,7 @@ export class ContactFormRequestDialog {
 							bodyText: this._editor.getValue(),
 							senderMailAddress: userEmailAddress,
 							senderName: "",
-							toRecipients: [
-								createDraftRecipient({
-									name,
-									mailAddress,
-								}),
-							],
+							toRecipients: [{name, address: mailAddress}],
 							ccRecipients: [],
 							bccRecipients: [],
 							conversationType: ConversationType.NEW,
@@ -340,7 +336,7 @@ export class ContactFormRequestDialog {
 							method: MailMethod.NONE,
 						},
 					)
-					await mailFacade.sendDraft(draft, [makeRecipientDetails(name, mailAddress, RecipientInfoType.INTERNAL, null)], lang.code)
+					await mailFacade.sendDraft(draft, [{name, address: mailAddress, type: RecipientType.INTERNAL, contact: null}], lang.code)
 				} finally {
 					await logins.logout(false)
 				}
@@ -369,16 +365,15 @@ function showConfirmDialog(userEmailAddress: string): Promise<void> {
 			dialog.close()
 			resolve()
 		}).setType(ButtonType.Login)
-		const requestId = m(TextFieldN, {
-			label: "mailAddress_label",
-			value: stream(userEmailAddress),
-			disabled: true,
-		})
 		const dialog = new Dialog(DialogType.EditMedium, {
 			view: () =>
 				m("", [
 					m(".dialog-header.plr-l.flex.justify-center.items-center.b", lang.get("loginCredentials_label")),
-					m(".plr-l.pb.text-break", m(".pt", lang.get("contactFormSubmitConfirm_msg")), requestId),
+					m(".plr-l.pb.text-break", m(".pt", lang.get("contactFormSubmitConfirm_msg")), m(TextFieldN, {
+						label: "mailAddress_label",
+						value: userEmailAddress,
+						disabled: true,
+					})),
 					m(confirm),
 				]),
 		})

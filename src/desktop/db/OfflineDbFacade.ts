@@ -1,29 +1,68 @@
 import {OfflineDb, PersistedEntity} from "./OfflineDb"
-import {OfflineDbMeta} from "../../api/worker/rest/OfflineStorage"
+import {OfflineDbMeta} from "../../api/worker/offline/OfflineStorage.js"
+import {ProgrammingError} from "../../api/common/error/ProgrammingError"
+
+export interface OfflineDbFactory {
+	create(userid: string, key: Aes256Key): Promise<OfflineDb>
+
+	delete(userId: string): Promise<void>
+}
+
+type CacheEntry = {
+	readonly db: OfflineDb,
+	/** Reference counting for db in case multiple windows open it. */
+	counter: number,
+}
 
 export class OfflineDbFacade {
 	constructor(
-		private readonly offlineDbFactory: (userid: string, key: Aes256Key) => Promise<OfflineDb>
+		private readonly offlineDbFactory: OfflineDbFactory,
 	) {
 	}
 
-	private readonly cache: Map<Id, OfflineDb> = new Map()
+	private readonly cache: Map<Id, CacheEntry> = new Map()
 
 	/**
 	 * Open up a OfflineDb for the given user
 	 * Must be called before any queries for that user can be made
 	 */
 	async openDatabaseForUser(userId: Id, databaseKey: Aes256Key): Promise<void> {
-		if (!this.cache.has(userId)) {
-			const db = await this.offlineDbFactory(userId, databaseKey)
-			this.cache.set(userId, db)
+		let entry: CacheEntry | undefined = this.cache.get(userId)
+		if (entry) {
+			entry.counter += 1
+		} else {
+			const db = await this.offlineDbFactory.create(userId, databaseKey)
+			entry = {db, counter: 1}
+			this.cache.set(userId, entry)
 		}
 	}
 
 	async closeDatabaseForUser(userId: Id): Promise<void> {
-		const db = this.getDbForUserId(userId)
-		await db.close()
-		this.cache.delete(userId)
+		const entry = this.cache.get(userId)
+		if (entry == null) {
+			return
+		}
+		entry.counter -= 1
+		if (entry.counter === 0) {
+			await entry.db.close()
+			this.cache.delete(userId)
+		}
+	}
+
+	async deleteDatabaseForUser(userId: Id): Promise<void> {
+		const entry = this.cache.get(userId)
+		if (entry != null) {
+			if (entry.counter != 1) {
+				throw new ProgrammingError(`Trying to delete database that is opened ${entry.counter} times`)
+			}
+			await this.closeDatabaseForUser(userId)
+		}
+
+		await this.offlineDbFactory.delete(userId)
+	}
+
+	async isDatabaseOpen(userId: Id): Promise<boolean> {
+		return this.cache.has(userId)
 	}
 
 	async get(userId: Id, type: string, listId: string | null, elementId: string): Promise<Uint8Array | null> {
@@ -58,13 +97,16 @@ export class OfflineDbFacade {
 		return this.getDbForUserId(userId).provideFromRange(type, listId, start, count, reverse)
 	}
 
-	async delete(userId: Id, type: string, listId: string | null, elementId: string): Promise<void> {
+	async delete(userId: Id, type: string, listId: Id | null, elementId: Id): Promise<void> {
 		return this.getDbForUserId(userId).delete(type, listId, elementId)
 	}
 
-	async deleteAll(userId: Id): Promise<void> {
-		return this.getDbForUserId(userId).deleteAll()
+	async deleteIn(userId: Id, type: string, listId: Id | null, elementIds: Id[]): Promise<void> {
+		this.getDbForUserId(userId).deleteIn(type, listId, elementIds)
+	}
 
+	async deleteAll(userId: Id): Promise<void> {
+		return this.getDbForUserId(userId).purge()
 	}
 
 	async getLastBatchIdForGroup(userId: Id, groupId: Id): Promise<string | null> {
@@ -83,14 +125,34 @@ export class OfflineDbFacade {
 		return this.getDbForUserId(userId).putMetadata(key, value)
 	}
 
+	async dumpMetadata(userId: Id): Promise<Array<[string, Uint8Array]>> {
+		return this.getDbForUserId(userId).dumpMetadata()
+	}
 
-	private getDbForUserId(userId: Id,): OfflineDb {
-		const db = this.cache.get(userId)
+	async deleteRange(userId: Id, type: string, listId: string) {
+		return this.getDbForUserId(userId).deleteRange(type, listId)
+	}
 
-		if (!db) {
-			throw new Error(`Db for user ${userId} is not open. must call openDataBaseForUser first :)`)
+	async getListElementsOfType(userId: Id, typeId: string): Promise<Array<Uint8Array>> {
+		return this.getDbForUserId(userId).getListElementsOfType(typeId)
+	}
+
+	async getWholeList(userId: Id, typeId: string, listId: Id): Promise<Array<Uint8Array>> {
+		return this.getDbForUserId(userId).getWholeList(typeId, listId)
+	}
+
+	async compactDatabase(userId: Id): Promise<void> {
+		await this.getDbForUserId(userId).compactDatabase()
+	}
+
+	private getDbForUserId(userId: Id): OfflineDb {
+		const entry = this.cache.get(userId)
+
+		if (!entry) {
+			throw new ProgrammingError(`Db for user ${userId} is not open. must call openDataBaseForUser first :)`)
 		}
 
-		return db
+		return entry.db
 	}
 }
+

@@ -1,17 +1,32 @@
 import type {InvoiceData, PaymentData, SpamRuleFieldType, SpamRuleType} from "../../common/TutanotaConstants"
 import {AccountType, BookingItemFeatureType, Const, GroupType} from "../../common/TutanotaConstants"
-import {CustomerTypeRef} from "../../entities/sys/Customer"
-import {CustomerInfoTypeRef} from "../../entities/sys/CustomerInfo"
+import type {
+	AccountingInfo,
+	CustomDomainReturn,
+	CustomerServerProperties,
+	EmailSenderListElement,
+	PaymentDataServicePutReturn
+} from "../../entities/sys/TypeRefs.js"
+import {
+	AccountingInfoTypeRef,
+	createBrandingDomainData,
+	createBrandingDomainDeleteData,
+	createCreateCustomerServerPropertiesData,
+	createCustomDomainData,
+	createEmailSenderListElement,
+	createMembershipAddData,
+	createMembershipRemoveData,
+	createPaymentDataServicePutData,
+	createPdfInvoiceServiceData,
+	CustomerInfoTypeRef,
+	CustomerServerPropertiesTypeRef,
+	CustomerTypeRef
+} from "../../entities/sys/TypeRefs.js"
 import {assertWorkerOrNode} from "../../common/Env"
-import type {EmailSenderListElement} from "../../entities/sys/EmailSenderListElement"
-import {createEmailSenderListElement} from "../../entities/sys/EmailSenderListElement"
 import type {Hex} from "@tutao/tutanota-utils"
-import {downcast, neverNull, noOp, ofClass, stringToUtf8Uint8Array, uint8ArrayToBase64, uint8ArrayToHex} from "@tutao/tutanota-utils"
-import type {CustomerServerProperties} from "../../entities/sys/CustomerServerProperties"
-import {CustomerServerPropertiesTypeRef} from "../../entities/sys/CustomerServerProperties"
+import {assertNotNull, downcast, neverNull, noOp, ofClass, stringToUtf8Uint8Array, uint8ArrayToBase64, uint8ArrayToHex} from "@tutao/tutanota-utils"
 import {getWhitelabelDomain} from "../../common/utils/Utils"
-import {resolveSessionKey} from "../crypto/CryptoFacade"
-import {createCreateCustomerServerPropertiesData} from "../../entities/sys/CreateCustomerServerPropertiesData"
+import {CryptoFacade} from "../crypto/CryptoFacade"
 import {
 	BrandingDomainService,
 	CreateCustomerServerProperties,
@@ -20,28 +35,14 @@ import {
 	PaymentDataService,
 	PdfInvoiceService,
 	SystemKeysService
-} from "../../entities/sys/Services"
-import type {SystemKeysReturn} from "../../entities/sys/SystemKeysReturn"
-import {createCustomerAccountCreateData} from "../../entities/tutanota/CustomerAccountCreateData"
-import {createContactFormAccountData} from "../../entities/tutanota/ContactFormAccountData"
+} from "../../entities/sys/Services.js"
+import type {ContactFormAccountReturn, InternalGroupData} from "../../entities/tutanota/TypeRefs.js"
+import {createContactFormAccountData, createCustomerAccountCreateData} from "../../entities/tutanota/TypeRefs.js"
 import type {UserManagementFacade} from "./UserManagementFacade"
 import type {GroupManagementFacadeImpl} from "./GroupManagementFacade"
-import {createCustomDomainData} from "../../entities/sys/CustomDomainData"
-import type {CustomDomainReturn} from "../../entities/sys/CustomDomainReturn"
-import type {ContactFormAccountReturn} from "../../entities/tutanota/ContactFormAccountReturn"
-import {createBrandingDomainDeleteData} from "../../entities/sys/BrandingDomainDeleteData"
-import {createBrandingDomainData} from "../../entities/sys/BrandingDomainData"
-import type {LoginFacadeImpl} from "./LoginFacade"
 import type {WorkerImpl} from "../WorkerImpl"
 import {CounterFacade} from "./CounterFacade"
-import {createMembershipAddData} from "../../entities/sys/MembershipAddData"
-import {createMembershipRemoveData} from "../../entities/sys/MembershipRemoveData"
-import {createPaymentDataServicePutData} from "../../entities/sys/PaymentDataServicePutData"
 import type {Country} from "../../common/CountryList"
-import type {PaymentDataServicePutReturn} from "../../entities/sys/PaymentDataServicePutReturn"
-import {_TypeModel as AccountingInfoTypeModel, AccountingInfoTypeRef} from "../../entities/sys/AccountingInfo"
-import {createPdfInvoiceServiceData} from "../../entities/sys/PdfInvoiceServiceData"
-import type {InternalGroupData} from "../../entities/tutanota/InternalGroupData"
 import {LockedError} from "../../common/error/RestError"
 import type {RsaKeyPair} from "@tutao/tutanota-crypto"
 import {aes128RandomKey, bitArrayToUint8Array, encryptKey, hexToPublicKey, sha256Hash, uint8ArrayToBitArray} from "@tutao/tutanota-crypto"
@@ -51,6 +52,7 @@ import {DataFile} from "../../common/DataFile";
 import {IServiceExecutor} from "../../common/ServiceRequest"
 import {ContactFormAccountService, CustomerAccountService} from "../../entities/tutanota/Services"
 import {BookingFacade} from "./BookingFacade"
+import {UserFacade} from "./UserFacade"
 
 assertWorkerOrNode()
 
@@ -80,6 +82,8 @@ export interface CustomerFacade {
 	readAvailableCustomerStorage(customerId: Id): Promise<number>
 
 	loadCustomerServerProperties(): Promise<CustomerServerProperties>
+
+	loadAccountingInfo(): Promise<AccountingInfo>
 
 	editSpamRule(spamRule: EmailSenderListElement): Promise<void>
 
@@ -125,7 +129,7 @@ export class CustomerFacadeImpl implements CustomerFacade {
 
 	constructor(
 		private readonly worker: WorkerImpl,
-		private readonly login: LoginFacadeImpl,
+		private readonly userFacade: UserFacade,
 		private readonly groupManagement: GroupManagementFacadeImpl,
 		private readonly userManagement: UserManagementFacade,
 		private readonly counters: CounterFacade,
@@ -133,17 +137,16 @@ export class CustomerFacadeImpl implements CustomerFacade {
 		private readonly entityClient: EntityClient,
 		private readonly serviceExecutor: IServiceExecutor,
 		private readonly bookingFacade: BookingFacade,
+		private readonly cryptoFacade: CryptoFacade,
 	) {
 		this.contactFormUserGroupData = null
 	}
 
-	getDomainValidationRecord(domainName: string): Promise<string> {
-		return Promise.resolve(
-			"t-verify=" +
-			uint8ArrayToHex(
-				sha256Hash(stringToUtf8Uint8Array(domainName.trim().toLowerCase() + neverNull(this.login.getLoggedInUser().customer))).slice(0, 16),
-			),
-		)
+	async getDomainValidationRecord(domainName: string): Promise<string> {
+		const customer = this.getCustomerId()
+		const baseString = domainName.trim().toLowerCase() + customer
+		const hash = sha256Hash(stringToUtf8Uint8Array(baseString)).slice(0, 16)
+		return "t-verify=" + uint8ArrayToHex(hash)
 	}
 
 	addDomain(domainName: string): Promise<CustomDomainReturn> {
@@ -169,7 +172,8 @@ export class CustomerFacadeImpl implements CustomerFacade {
 	}
 
 	async orderWhitelabelCertificate(domainName: string): Promise<void> {
-		const customer = await this.entityClient.load(CustomerTypeRef, neverNull(this.login.getLoggedInUser().customer))
+		const customerId = this.getCustomerId()
+		const customer = await this.entityClient.load(CustomerTypeRef, customerId)
 		const customerInfo = await this.entityClient.load(CustomerInfoTypeRef, customer.customerInfo)
 		let existingBrandingDomain = getWhitelabelDomain(customerInfo, domainName)
 		const keyData = await this.serviceExecutor.get(SystemKeysService, null)
@@ -186,6 +190,10 @@ export class CustomerFacadeImpl implements CustomerFacade {
 		} else {
 			await this.serviceExecutor.post(BrandingDomainService, data)
 		}
+	}
+
+	private getCustomerId() {
+		return assertNotNull(this.userFacade.getLoggedInUser().customer)
 	}
 
 	async deleteCertificate(domainName: string): Promise<void> {
@@ -230,14 +238,14 @@ export class CustomerFacadeImpl implements CustomerFacade {
 	}
 
 	async loadCustomerServerProperties(): Promise<CustomerServerProperties> {
-		const customer = await this.entityClient.load(CustomerTypeRef, neverNull(this.login.getLoggedInUser().customer))
+		const customer = await this.entityClient.load(CustomerTypeRef, this.getCustomerId())
 		let cspId
 		if (customer.serverProperties) {
 			cspId = customer.serverProperties
 		} else {
 			// create properties
 			const sessionKey = aes128RandomKey()
-			const adminGroupKey = this.login.getGroupKey(this.login.getGroupId(GroupType.Admin))
+			const adminGroupKey = this.userFacade.getGroupKey(this.userFacade.getGroupId(GroupType.Admin))
 
 			const groupEncSessionKey = encryptKey(adminGroupKey, sessionKey)
 			const data = createCreateCustomerServerPropertiesData({
@@ -334,7 +342,7 @@ export class CustomerFacadeImpl implements CustomerFacade {
 			customerGroupKey,
 		)
 
-				const recoverData = this.login.generateRecoveryCode(userGroupKey)
+		const recoverData = this.userManagement.generateRecoveryCode(userGroupKey)
 
 		const data = createCustomerAccountCreateData({
 			authToken,
@@ -403,27 +411,17 @@ export class CustomerFacadeImpl implements CustomerFacade {
 		return result
 	}
 
-	_getAccountGroupKey(keyData: SystemKeysReturn, accountType: AccountType): Aes128Key {
-		if (accountType === AccountType.FREE) {
-			return uint8ArrayToBitArray(keyData.freeGroupKey)
-		} else if (accountType === AccountType.STARTER) {
-			return uint8ArrayToBitArray(keyData.starterGroupKey)
-		} else {
-			throw Error("Illegal account type")
-		}
-	}
-
 	async switchFreeToPremiumGroup(): Promise<void> {
 		try {
 			const keyData = await this.serviceExecutor.get(SystemKeysService, null)
 			const membershipAddData = createMembershipAddData({
-				user: this.login.getLoggedInUser()._id,
+				user: this.userFacade.getLoggedInUser()._id,
 				group: neverNull(keyData.premiumGroup),
-				symEncGKey: encryptKey(this.login.getUserGroupKey(), uint8ArrayToBitArray(keyData.premiumGroupKey)),
+				symEncGKey: encryptKey(this.userFacade.getUserGroupKey(), uint8ArrayToBitArray(keyData.premiumGroupKey)),
 			})
 			await this.serviceExecutor.post(MembershipService, membershipAddData)
 			const membershipRemoveData = createMembershipRemoveData({
-				user: this.login.getLoggedInUser()._id,
+				user: this.userFacade.getLoggedInUser()._id,
 				group: neverNull(keyData.freeGroup),
 			})
 			await this.serviceExecutor.delete(MembershipService, membershipRemoveData)
@@ -438,13 +436,13 @@ export class CustomerFacadeImpl implements CustomerFacade {
 		try {
 			const keyData = await this.serviceExecutor.get(SystemKeysService, null)
 			const membershipAddData = createMembershipAddData({
-				user: this.login.getLoggedInUser()._id,
+				user: this.userFacade.getLoggedInUser()._id,
 				group: neverNull(keyData.freeGroup),
-				symEncGKey: encryptKey(this.login.getUserGroupKey(), uint8ArrayToBitArray(keyData.freeGroupKey))
+				symEncGKey: encryptKey(this.userFacade.getUserGroupKey(), uint8ArrayToBitArray(keyData.freeGroupKey))
 			})
 			await this.serviceExecutor.post(MembershipService, membershipAddData)
 			const membershipRemoveData = createMembershipRemoveData({
-				user: this.login.getLoggedInUser()._id,
+				user: this.userFacade.getLoggedInUser()._id,
 				group: neverNull(keyData.premiumGroup),
 			})
 			await this.serviceExecutor.delete(MembershipService, membershipRemoveData)
@@ -461,10 +459,10 @@ export class CustomerFacadeImpl implements CustomerFacade {
 		paymentData: PaymentData | null,
 		confirmedInvoiceCountry: Country | null,
 	): Promise<PaymentDataServicePutReturn> {
-		return this.entityClient.load(CustomerTypeRef, neverNull(this.login.getLoggedInUser().customer)).then(customer => {
+		return this.entityClient.load(CustomerTypeRef, neverNull(this.userFacade.getLoggedInUser().customer)).then(customer => {
 			return this.entityClient.load(CustomerInfoTypeRef, customer.customerInfo).then(customerInfo => {
-				return this.entityClient.load(AccountingInfoTypeRef, customerInfo.accountingInfo).then(accountingInfo => {
-					return resolveSessionKey(AccountingInfoTypeModel, accountingInfo).then(accountingInfoSessionKey => {
+				return this.entityClient.load(AccountingInfoTypeRef, customerInfo.accountingInfo).then(async accountingInfo => {
+					return this.cryptoFacade.resolveSessionKeyForInstance(accountingInfo).then(accountingInfoSessionKey => {
 						const service = createPaymentDataServicePutData()
 						service.business = false // not used, must be set to false currently, will be removed later
 
@@ -505,4 +503,9 @@ export class CustomerFacadeImpl implements CustomerFacade {
 		})
 	}
 
+	async loadAccountingInfo(): Promise<AccountingInfo> {
+		const customer = await this.entityClient.load(CustomerTypeRef, assertNotNull(this.userFacade.getUser()?.customer))
+		const customerInfo = await this.entityClient.load(CustomerInfoTypeRef, customer.customerInfo)
+		return this.entityClient.load(AccountingInfoTypeRef, customerInfo.accountingInfo)
+	}
 }

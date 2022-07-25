@@ -9,7 +9,7 @@ import {formatBirthdayOfContact} from "../model/ContactUtils"
 import {defer, DeferredObject, downcast, Thunk} from "@tutao/tutanota-utils"
 import {HtmlEditor, HtmlEditorMode} from "../../gui/editor/HtmlEditor"
 import {ButtonN, ButtonType} from "../../gui/base/ButtonN"
-import type {Contact} from "../../api/entities/tutanota/Contact"
+import type {Contact} from "../../api/entities/tutanota/TypeRefs.js"
 import {getContactAddressTypeLabel, getContactPhoneNumberTypeLabel, getContactSocialTypeLabel} from "./ContactGuiUtils"
 import {TextFieldN} from "../../gui/base/TextFieldN"
 import stream from "mithril/stream"
@@ -80,7 +80,7 @@ export class ContactMergeView {
 		//empty.. placeholders are used if one contact has an attribute while the other does not have it, so an empty one is shown for comparison
 		let emptyFieldPlaceholder = m(TextFieldN, {
 			label: "emptyString_msg",
-			value: stream(""),
+			value: "",
 			disabled: true,
 		})
 		let emptyHTMLFieldPlaceholder = m(
@@ -234,14 +234,14 @@ export class ContactMergeView {
 		const mailAddresses = contact.mailAddresses.map(element => {
 			return m(TextFieldN, {
 				label: () => getContactAddressTypeLabel(element.type as any, element.customTypeName),
-				value: stream(element.address),
+				value: element.address,
 				disabled: true,
 			})
 		})
 		const phones = contact.phoneNumbers.map(element => {
 			return m(TextFieldN, {
 				label: () => getContactPhoneNumberTypeLabel(element.type as any, element.customTypeName),
-				value: stream(element.number),
+				value: element.number,
 				disabled: true,
 			})
 		})
@@ -255,7 +255,7 @@ export class ContactMergeView {
 		const socials = contact.socialIds.map(element => {
 			return m(TextFieldN, {
 				label: () => getContactSocialTypeLabel(getContactSocialType(element), element.customTypeName),
-				value: stream(element.socialId),
+				value: element.socialId,
 				disabled: true,
 			})
 		})
@@ -272,12 +272,12 @@ export class ContactMergeView {
 			return [
 				m(TextFieldN, {
 					label: labelTextId,
-					value: stream(value1 || ""),
+					value: value1 || "",
 					disabled: true,
 				}),
 				m(TextFieldN, {
 					label: labelTextId,
-					value: stream(value2 || ""),
+					value: value2 || "",
 					disabled: true,
 				}),
 			]

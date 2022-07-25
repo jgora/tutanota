@@ -43,7 +43,9 @@ export class Logger {
 	formatLogEntry(date: Date, level: string, ...rest: Array<any>): string {
 		const formattedArgs = rest.map(obj => {
 			try {
-				return obj instanceof Error ? errorToString(obj) : JSON.stringify(obj)
+				return obj instanceof Error
+					? errorToString(Object.assign({stack: null}, obj))
+					: JSON.stringify(obj)
 			} catch (e) {
 				return "[cyclic object]"
 			}
@@ -66,8 +68,7 @@ export class Logger {
 	}
 }
 
-export function createLogFile(timestamp: number, entries: Array<string>, scope: string): DataFile {
-	const content = entries.join("\n")
+export function createLogFile(timestamp: number, content: string, scope: string): DataFile {
 	const data = stringToUtf8Uint8Array(content)
 	return {
 		_type: "DataFile",

@@ -1,5 +1,11 @@
 import {TypeRef} from "./TypeRef.js"
 
+export interface ErrorInfo {
+	readonly name: string | null
+	readonly message: string | null
+	readonly stack: string | null
+}
+
 export type lazy<T> = () => T
 export type lazyAsync<T> = () => Promise<T>
 export type Thunk = () => unknown
@@ -26,16 +32,16 @@ export function defer<T>(): DeferredObject<T> {
 export function deferWithHandler<T, U>(handler: (arg0: T) => U): DeferredObjectWithHandler<T, U> {
 	const deferred = {} as DeferredObjectWithHandler<T, U>
 	deferred.promise = new Promise(
-			(resolve, reject) => {
-				deferred.resolve = resolve
-				deferred.reject = reject
-			}).then(handler)
+		(resolve, reject) => {
+			deferred.resolve = resolve
+			deferred.reject = reject
+		}).then(handler)
 	return deferred
 }
 
 export async function asyncFind<T>(
-		array: ReadonlyArray<T>,
-		finder: (item: T, index: number, arrayLength: number) => Promise<boolean>,
+	array: ReadonlyArray<T>,
+	finder: (item: T, index: number, arrayLength: number) => Promise<boolean>,
 ): Promise<T | null | undefined> {
 	for (let i = 0; i < array.length; i++) {
 		const item = array[i]
@@ -49,8 +55,8 @@ export async function asyncFind<T>(
 }
 
 export async function asyncFindAndMap<T, R>(
-		array: ReadonlyArray<T>,
-		finder: (item: T, index: number, arrayLength: number) => Promise<R | null>,
+	array: ReadonlyArray<T>,
+	finder: (item: T, index: number, arrayLength: number) => Promise<R | null>,
 ): Promise<R | null | undefined> {
 	for (let i = 0; i < array.length; i++) {
 		const item = array[i]
@@ -68,9 +74,9 @@ export async function asyncFindAndMap<T, R>(
  * Calls an executor function for slices of nbrOfElementsInGroup items of the given array until the executor function returns false.
  */
 export function executeInGroups<T>(
-		array: T[],
-		nbrOfElementsInGroup: number,
-		executor: (items: T[]) => Promise<boolean>,
+	array: T[],
+	nbrOfElementsInGroup: number,
+	executor: (items: T[]) => Promise<boolean>,
 ): Promise<void> {
 	if (array.length > 0) {
 		let nextSlice = Math.min(array.length, nbrOfElementsInGroup)
@@ -234,7 +240,7 @@ export function randomIntFromInterval(min: number, max: number): number {
 	return Math.floor(Math.random() * (max - min + 1) + min)
 }
 
-export function errorToString(error: Error): string {
+export function errorToString(error: ErrorInfo): string {
 	let errorString = error.name ? error.name : "?"
 
 	if (error.message) {
@@ -265,11 +271,11 @@ export function deepEqual(a: any, b: any): boolean {
 
 	if (typeof a === "object" && typeof b === "object") {
 		const aIsArgs = isArguments(a),
-				bIsArgs = isArguments(b)
+			bIsArgs = isArguments(b)
 
 		if (a.length === b.length && ((a instanceof Array && b instanceof Array) || (aIsArgs && bIsArgs))) {
 			const aKeys = Object.getOwnPropertyNames(a),
-					bKeys = Object.getOwnPropertyNames(b)
+				bKeys = Object.getOwnPropertyNames(b)
 			if (aKeys.length !== bKeys.length) return false
 
 			for (let i = 0; i < aKeys.length; i++) {
@@ -293,6 +299,7 @@ export function deepEqual(a: any, b: any): boolean {
 			return true
 		}
 
+		// @ts-ignore: we would need to include all @types/node for this to work or import it explicitly. Should probably be rewritten for all typed arrays.
 		if (typeof Buffer === "function" && a instanceof Buffer && b instanceof Buffer) {
 			for (let i = 0; i < a.length; i++) {
 				if (a[i] !== b[i]) return false
@@ -331,9 +338,9 @@ const hasOwn = {}.hasOwnProperty
 export function getChangedProps(objA: any, objB: any): Array<string> {
 	if (objA == null || objB == null || objA === objB) return []
 	return Object.keys(objA)
-			.filter(k => Object.keys(objB).includes(k))
-			.filter(k => ![null, undefined].includes(objA[k]) || ![null, undefined].includes(objB[k]))
-			.filter(k => !deepEqual(objA[k], objB[k]))
+				 .filter(k => Object.keys(objB).includes(k))
+				 .filter(k => ![null, undefined].includes(objA[k]) || ![null, undefined].includes(objB[k]))
+				 .filter(k => !deepEqual(objA[k], objB[k]))
 }
 
 /**

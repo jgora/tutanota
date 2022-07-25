@@ -4,9 +4,9 @@ import {List} from "../gui/base/List"
 import {lang} from "../misc/LanguageViewModel"
 import {NotFoundError} from "../api/common/error/RestError"
 import {size} from "../gui/size"
-import type {GroupInfo} from "../api/entities/sys/GroupInfo"
-import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
-import {CustomerTypeRef} from "../api/entities/sys/Customer"
+import type {GroupInfo} from "../api/entities/sys/TypeRefs.js"
+import {GroupInfoTypeRef} from "../api/entities/sys/TypeRefs.js"
+import {CustomerTypeRef} from "../api/entities/sys/TypeRefs.js"
 import {neverNull, noOp} from "@tutao/tutanota-utils"
 import type {SettingsView, UpdatableSettingsViewer} from "./SettingsView"
 import {LazyLoaded} from "@tutao/tutanota-utils"
@@ -17,13 +17,13 @@ import {Icon} from "../gui/base/Icon"
 import {Icons} from "../gui/base/icons/Icons"
 import {OperationType} from "../api/common/TutanotaConstants"
 import {BootIcons} from "../gui/base/icons/BootIcons"
-import {header} from "../gui/base/Header"
+import {header} from "../gui/Header.js"
 import {isAdministratedGroup} from "../search/model/SearchUtils"
-import {GroupMemberTypeRef} from "../api/entities/sys/GroupMember"
+import {GroupMemberTypeRef} from "../api/entities/sys/TypeRefs.js"
 import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
 import {ButtonN, ButtonType} from "../gui/base/ButtonN"
-import type {GroupMembership} from "../api/entities/sys/GroupMembership"
+import type {GroupMembership} from "../api/entities/sys/TypeRefs.js"
 import {compareGroupInfos} from "../api/common/utils/GroupUtils"
 import {GENERATED_MAX_ID} from "../api/common/utils/EntityUtils"
 import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
@@ -55,25 +55,21 @@ export class GroupListView implements UpdatableSettingsViewer {
 		this._localAdminGroupMemberships = logins.getUserController().getLocalAdminGroupMemberships()
 		this.list = new List({
 			rowHeight: size.list_row_height,
-			fetch: (startId, count) => {
+			fetch: async (startId, count) => {
 				if (startId === GENERATED_MAX_ID) {
-					return this._listId.getAsync().then(listId => {
-						return locator.entityClient.loadAll(GroupInfoTypeRef, listId).then(allGroupInfos => {
-							// we have to set loadedCompletely to make sure that fetch is never called again and also that new users are inserted into the list, even at the end
-							this._setLoadedCompletely()
-
-							// we return all users because we have already loaded all users and the scroll bar shall have the complete size.
-							if (logins.getUserController().isGlobalAdmin()) {
-								return allGroupInfos
-							} else {
-								let localAdminGroupIds = logins
-									.getUserController()
-									.getLocalAdminGroupMemberships()
-									.map(gm => gm.group)
-								return allGroupInfos.filter((gi: GroupInfo) => isAdministratedGroup(localAdminGroupIds, gi))
-							}
-						})
-					})
+					const listId = await this._listId.getAsync()
+					const allGroupInfos = await locator.entityClient.loadAll(GroupInfoTypeRef, listId)
+					let items: GroupInfo[]
+					if (logins.getUserController().isGlobalAdmin()) {
+						items = allGroupInfos
+					} else {
+						let localAdminGroupIds = logins
+							.getUserController()
+							.getLocalAdminGroupMemberships()
+							.map(gm => gm.group)
+						items = allGroupInfos.filter((gi: GroupInfo) => isAdministratedGroup(localAdminGroupIds, gi))
+					}
+					return {items, complete: true}
 				} else {
 					throw new Error("fetch user group infos called for specific start id")
 				}
@@ -94,7 +90,6 @@ export class GroupListView implements UpdatableSettingsViewer {
 			elementSelected: (entities, elementClicked, selectionChanged, multiSelectionActive) =>
 				this.elementSelected(entities, elementClicked, selectionChanged, multiSelectionActive),
 			createVirtualRow: () => new GroupRow(),
-			showStatus: false,
 			className: className,
 			swipe: {
 				renderLeftSpacer: () => [],
@@ -142,10 +137,6 @@ export class GroupListView implements UpdatableSettingsViewer {
 				this._searchResultStreamDependency.end(true)
 			}
 		}
-	}
-
-	_setLoadedCompletely() {
-		this.list.setLoadedCompletely()
 	}
 
 	elementSelected(groupInfos: GroupInfo[], elementClicked: boolean, selectionChanged: boolean, multiSelectOperation: boolean): void {

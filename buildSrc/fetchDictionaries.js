@@ -2,39 +2,41 @@
  * Utility to download/update the dictionaries used for translations within the app.
  */
 import path from "path"
-import glob from "glob"
 import {exitOnFail, getDefaultDistDirectory, getElectronVersion} from "./buildUtils.js"
-import options from "commander"
+import {program} from "commander"
 import {spawnSync} from "child_process"
 import {fileURLToPath} from "url"
 import fs from "fs-extra"
+import "zx/globals"
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-	options
+	program
 		.usage('[options]')
 		.description('Utility to update the app dictionaries')
 		.option('--out-dir <outDir>', "Base dir of client build")
 		.option('--local', 'Build dictionaries for local/debug version of a desktop client')
 		.option('--publish', 'Build and publish .deb package for dictionaries.')
+		.action(async options => {
+			const outDir = typeof options.outDir !== 'undefined' ? options.outDir : getDefaultDistDirectory()
+			const local = typeof options.local !== 'undefined' ? options.local : false
+			const publishDictionaries = typeof options.publish !== 'undefined' ? options.publish : false
+
+			await getDictionaries(outDir, local)
+				.then(async v => {
+					console.log("Dictionaries updated successfully")
+					if (publishDictionaries) {
+						await publishDebPackage()
+					}
+					process.exit()
+				})
+				.catch(e => {
+						console.log("Fetching dictionaries failed: ", e)
+						process.exit(1)
+					}
+				)
+		})
 		.parse(process.argv)
 
-	const outDir = typeof options.outDir !== 'undefined' ? options.outDir : getDefaultDistDirectory()
-	const local = typeof options.local !== 'undefined' ? options.local : false
-	const publishDictionaries = typeof options.publish !== 'undefined' ? options.publish : false
-
-	getDictionaries(outDir, local)
-		.then(async v => {
-			console.log("Dictionaries updated successfully")
-			if (publishDictionaries) {
-				await publishDebPackage()
-			}
-			process.exit()
-		})
-		.catch(e => {
-				console.log("Fetching dictionaries failed: ", e)
-				process.exit(1)
-			}
-		)
 }
 
 /**
@@ -44,11 +46,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
  * @returns {Promise<*>}
  */
 async function getDictionaries(outDir, local) {
-	const electronVersion = getElectronVersion()
+	const electronVersion = await getElectronVersion()
 	const baseTarget = path.join((outDir), '..')
 
 	const targets = local
-		? glob.sync(path.join(baseTarget, 'desktop*'))
+		? await globby(path.join(baseTarget, 'desktop*'))
 		: [baseTarget]
 	const targetPaths = targets.map(d => path.join(d, "dictionaries"))
 	return fetchDictionaries(electronVersion, targetPaths)
@@ -57,19 +59,18 @@ async function getDictionaries(outDir, local) {
 async function publishDebPackage() {
 	const commonArgs = `-f -s dir -t deb --deb-user tutadb --deb-group tutadb`
 	const target = `/opt/tutanota`
-	const electronVersion = getElectronVersion()
+	const electronVersion = await getElectronVersion()
 	const deb = `tutanota-desktop-dicts_${electronVersion}_amd64.deb`
 
-	console.log("create " + debs.dict)
+	console.log("create", deb)
 	exitOnFail(spawnSync("/usr/local/bin/fpm", `${commonArgs} -n tutanota-desktop-dicts -v ${electronVersion} dictionaries/=${target}-desktop/dictionaries`.split(" "), {
-		cwd: __dirname + "/build",
+		cwd: "build",
 		stdio: [process.stdin, process.stdout, process.stderr]
 	}))
 
 	// copy spell checker dictionaries.
 	console.log("copying dictionaries")
 	exitOnFail(spawnSync("/bin/cp", `-f build/${deb} /opt/repository/tutanota/`.split(" "), {
-		cwd: __dirname,
 		stdio: [process.stdin, process.stdout, process.stderr]
 	}))
 	exitOnFail(spawnSync("/bin/chmod", `o+r /opt/repository/tutanota/${deb}`.split(" "), {

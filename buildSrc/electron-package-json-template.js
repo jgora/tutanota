@@ -8,10 +8,10 @@ import {getElectronVersion, getInstalledModuleVersion} from "./buildUtils.js"
  * 2. copied to app-desktop/build/dist from dist.js (DesktopBuilder)
  */
 
-export default function generateTemplate({nameSuffix, version, updateUrl, iconPath, sign, notarize, unpacked}) {
+export default async function generateTemplate({nameSuffix, version, updateUrl, iconPath, sign, notarize, unpacked}) {
 	const appName = "tutanota-desktop" + nameSuffix
 	const appId = "de.tutao.tutanota" + nameSuffix
-	if(process.env.JENKINS && process.env.DEBUG_SIGN) throw new Error("Tried to DEBUG_SIGN in CI!")
+	if (process.env.JENKINS && process.env.DEBUG_SIGN) throw new Error("Tried to DEBUG_SIGN in CI!")
 	const debugkey = process.env.DEBUG_SIGN
 		? readFileSync(path.join(process.env.DEBUG_SIGN, "test.pubkey"), {encoding: 'utf8'})
 		: undefined
@@ -70,16 +70,17 @@ export default function generateTemplate({nameSuffix, version, updateUrl, iconPa
 			}
 		},
 		"dependencies": {
-			"electron-updater": getInstalledModuleVersion("electron-updater", log),
+			"electron-updater": await getInstalledModuleVersion("electron-updater", log),
 		},
 		"build": {
-			"electronVersion": getElectronVersion(),
+			"electronVersion": await getElectronVersion(log),
 			"icon": iconPath,
 			"appId": appId,
 			"productName": nameSuffix.length > 0
 				? nameSuffix.slice(1) + " Tutanota Desktop"
 				: "Tutanota Desktop",
 			"artifactName": "${name}-${os}.${ext}",
+			"asarUnpack": "desktop/*.node",
 			"afterSign": notarize ? "buildSrc/notarize.cjs" : undefined,
 			"protocols": [
 				{
@@ -176,4 +177,3 @@ export default function generateTemplate({nameSuffix, version, updateUrl, iconPa
 		}
 	}
 }
-

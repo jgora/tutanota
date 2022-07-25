@@ -220,7 +220,7 @@ export class PressReleaseForm implements Component<PressReleaseFormAttrs> {
 			(html, _) =>
 				htmlSanitizer.sanitizeFragment(html, {
 					blockExternalContent: false,
-				}).html,
+				}).fragment,
 		)
 		this.editor.initialized.promise.then(() => {
 			this.editor.setHTML(bodyHtml())
@@ -243,7 +243,8 @@ export class PressReleaseForm implements Component<PressReleaseFormAttrs> {
 			}),
 			m(TextFieldN, {
 				label: "subject_label",
-				value: subject,
+				value: subject(),
+				oninput: subject,
 			}),
 			m(this.toolbar),
 			m(".border-top", m(this.editor)),

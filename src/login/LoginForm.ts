@@ -1,5 +1,6 @@
 import m, {ChildArray, Children, Component, Vnode} from "mithril"
 import stream from "mithril/stream"
+import Stream from "mithril/stream"
 import {BootstrapFeatureType} from "../api/common/TutanotaConstants"
 import {ButtonN, ButtonType} from "../gui/base/ButtonN"
 import {liveDataAttrs} from "../gui/AriaUtils"
@@ -8,8 +9,8 @@ import {TextFieldAttrs, TextFieldN, TextFieldType} from "../gui/base/TextFieldN"
 import {CheckboxN} from "../gui/base/CheckboxN"
 import {client} from "../misc/ClientDetector"
 import {getWhitelabelCustomizations} from "../misc/WhitelabelCustomizations"
-import Stream from "mithril/stream";
 import {assertNotNull} from "@tutao/tutanota-utils"
+import {isOfflineStorageAvailable} from "../api/common/Env"
 
 export type LoginFormAttrs = {
 	onSubmit: (username: string, password: string) => unknown
@@ -58,17 +59,6 @@ export class LoginForm implements Component<LoginFormAttrs> {
 
 	view(vnode: Vnode<LoginFormAttrs>): Children {
 		const a = vnode.attrs
-		const mailAddressFieldAttrs = {
-			label: "mailAddress_label" as TranslationKey,
-			value: a.mailAddress,
-			autocomplete: "username",
-			type: TextFieldType.Email,
-		}
-		const passwordFieldAttrs: TextFieldAttrs = {
-			label: "password_label",
-			value: a.password,
-			type: TextFieldType.Password,
-		}
 		const canSaveCredentials = !!client.localStorage()
 		return m(
 			"form",
@@ -88,7 +78,12 @@ export class LoginForm implements Component<LoginFormAttrs> {
 							this.mailAddressTextField = child.state
 						},
 					},
-					m(TextFieldN, mailAddressFieldAttrs),
+					m(TextFieldN, {
+						label: "mailAddress_label" as TranslationKey,
+						value: a.mailAddress(),
+						oninput: a.mailAddress,
+						type: TextFieldType.Email,
+					}),
 				),
 				m(
 					"",
@@ -99,13 +94,21 @@ export class LoginForm implements Component<LoginFormAttrs> {
 							this.passwordTextField = child.state
 						},
 					},
-					m(TextFieldN, passwordFieldAttrs),
+					m(TextFieldN, {
+						label: "password_label",
+						value: a.password(),
+						oninput: a.password,
+						type: TextFieldType.Password,
+					}),
 				),
 				a.savePassword && !this._passwordDisabled()
 					? m(CheckboxN, {
 						label: () => lang.get("storePassword_action"),
-						checked: a.savePassword,
-						helpLabel: canSaveCredentials ? "onlyPrivateComputer_msg" : "functionNotSupported_msg",
+						checked: a.savePassword(),
+						onChecked: a.savePassword,
+						helpLabel: (canSaveCredentials)
+							? () => lang.get("onlyPrivateComputer_msg") + (isOfflineStorageAvailable() ? "\n" + lang.get("dataWillBeStored_msg") : "")
+							: "functionNotSupported_msg",
 						disabled: !canSaveCredentials,
 					})
 					: null,

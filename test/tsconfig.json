@@ -6,14 +6,18 @@
 	"noImplicitAny": false,
 	"noImplicitThis": false,
 	"strictPropertyInitialization": false,
-	"strictBindCallApply": false
+	"strictBindCallApply": false,
+	"outDir": "build",
+	"resolveJsonModule": true
   },
   "include": [
 	"../src/*d.ts",
 	"../libs/*d.ts",
 	"../types/*d.ts",
-	"api/**/*.ts",
-	"client/**/*.ts",
+	"tests/**/*.ts",
 	"types/*.d.ts"
+  ],
+  "types": [
+	"node_modules/@types/node"
   ]
 }

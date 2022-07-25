@@ -1,14 +1,20 @@
-import {Type, ValueType} from "./EntityConstants"
+import {Type} from "./EntityConstants"
 import {TypeRef} from "@tutao/tutanota-utils"
-import sysModelMap from "../entities/sys/sysModelMap"
-import tutanotaModelMap from "../entities/tutanota/tutanotaModelMap"
-import monitorModelMap from "../entities/monitor/monitorModelMap"
-import {customIdToString, firstBiggerThanSecond} from "./utils/EntityUtils"
-import accountingModelMap from "../entities/accounting/accountingModelMap"
-import baseModelMap from "../entities/base/baseModelMap"
-import gossipModelMap from "../entities/gossip/gossipModelMap"
-import storageModelMap from "../entities/storage/storageModelMap"
 import type {TypeModel} from "./EntityTypes"
+import {typeModels as baseTypeModels} from "../entities/base/TypeModels.js"
+import {typeModels as sysTypeModels} from "../entities/sys/TypeModels.js"
+import {typeModels as tutanotaTypeModels} from "../entities/tutanota/TypeModels.js"
+import {typeModels as monitorTypeModels} from "../entities/monitor/TypeModels.js"
+import {typeModels as accountingTypeModels} from "../entities/accounting/TypeModels.js"
+import {typeModels as gossipTypeModels} from "../entities/gossip/TypeModels.js"
+import {typeModels as storageTypeModels} from "../entities/storage/TypeModels.js"
+import sysModelInfo from "../entities/sys/ModelInfo.js"
+import baseModelInfo from "../entities/base/ModelInfo.js"
+import tutanotaModelInfo from "../entities/tutanota/ModelInfo.js"
+import monitorModelInfo from "../entities/monitor/ModelInfo.js"
+import accountingModelInfo from "../entities/accounting/ModelInfo.js"
+import gossipModelInfo from "../entities/gossip/ModelInfo.js"
+import storageModelInfo from "../entities/storage/ModelInfo.js"
 
 export const enum HttpMethod {
 	GET = "GET",
@@ -28,44 +34,36 @@ export const enum MediaType {
  * We access most types through the TypeRef but also sometimes we include them completely dynamically (e.g. encryption of aggregates).
  * This means that we need to tell our bundler which ones do exist so that they are included.
  */
-const modelMaps = {
-	base: baseModelMap,
-	sys: sysModelMap,
-	tutanota: tutanotaModelMap,
-	monitor: monitorModelMap,
-	accounting: accountingModelMap,
-	gossip: gossipModelMap,
-	storage: storageModelMap,
+const typeModels = {
+	base: baseTypeModels,
+	sys: sysTypeModels,
+	tutanota: tutanotaTypeModels,
+	monitor: monitorTypeModels,
+	accounting: accountingTypeModels,
+	gossip: gossipTypeModels,
+	storage: storageTypeModels,
 } as const
 
-export function resolveTypeReference(typeRef: TypeRef<any>): Promise<TypeModel> {
+export const modelInfos = {
+	base: baseModelInfo,
+	sys: sysModelInfo,
+	tutanota: tutanotaModelInfo,
+	monitor: monitorModelInfo,
+	accounting: accountingModelInfo,
+	gossip: gossipModelInfo,
+	storage: storageModelInfo,
+} as const
+export type ModelInfos = typeof modelInfos
+
+export async function resolveTypeReference(typeRef: TypeRef<any>): Promise<TypeModel> {
 	// @ts-ignore
-	const modelMap = modelMaps[typeRef.app]
+	const modelMap = typeModels[typeRef.app]
 
-	if (modelMap[typeRef.type] == null) {
-		return Promise.reject(new Error("Cannot find TypeRef: " + JSON.stringify(typeRef)))
+	const typeModel = modelMap[typeRef.type]
+	if (typeModel == null) {
+		throw new Error("Cannot find TypeRef: " + JSON.stringify(typeRef))
 	} else {
-		return modelMap[typeRef.type]().then((module: any) => {
-			return module._TypeModel
-		})
-	}
-}
-
-/**
- * Return appropriate id sorting function for typeModel.
- *
- * For generated IDs we use base64ext which is sortable. For custom IDs we use base64url which is not sortable.
- *
- * Important: works only with custom IDs which are derived from strings.
- *
- * @param typeModel
- * @return {(function(string, string): boolean)}
- */
-export function getFirstIdIsBiggerFnForType(typeModel: TypeModel): (arg0: Id, arg1: Id) => boolean {
-	if (typeModel.values["_id"].type === ValueType.CustomId) {
-		return (left, right) => firstBiggerThanSecond(customIdToString(left), customIdToString(right))
-	} else {
-		return firstBiggerThanSecond
+		return typeModel
 	}
 }
 

@@ -1,7 +1,8 @@
 import DOMPurify, {Config, DOMPurifyI, HookEvent} from "dompurify"
 import {ReplacementImage} from "../gui/base/icons/Icons"
 import {client} from "./ClientDetector"
-import {downcast} from "@tutao/tutanota-utils"
+import {downcast, stringToUtf8Uint8Array, utf8Uint8ArrayToString} from "@tutao/tutanota-utils"
+import {DataFile} from "../api/common/DataFile"
 // the svg data string must contain ' instead of " to avoid display errors in Edge
 // '#' character is reserved in URL and FF won't display SVG otherwise
 export const PREVENT_EXTERNAL_IMAGE_LOADING_ICON: string = "data:image/svg+xml;utf8," + ReplacementImage.replace(/"/g, "'").replace(/#/g, "%23")
@@ -18,8 +19,8 @@ const DEFAULT_CONFIG_EXTRA: SanitizeConfigExtra = {
 	usePlaceholderForInlineImages: true,
 }
 
-export type SanitizeResult = {
-	text: string
+export type SanitizedHTML = {
+	html: string
 	externalContent: Array<string>
 	inlineImageCids: Array<string>
 	links: Array<HTMLElement>
@@ -28,8 +29,8 @@ type SanitizeConfig = SanitizeConfigExtra & DOMPurify.Config
 
 export type Link = HTMLElement
 
-export type SanitizedHTML = {
-	html: DocumentFragment
+export type SanitizedFragment = {
+	fragment: DocumentFragment
 	externalContent: Array<string>
 	inlineImageCids: Array<string>
 	links: Array<Link>
@@ -44,25 +45,22 @@ const ADD_URI_SAFE_ATTR = ["poster"] as const
 const FORBID_TAGS = ["style"] as const
 
 const HTML_CONFIG: DOMPurify.Config & {RETURN_DOM_FRAGMENT?: undefined, RETURN_DOM?: undefined} = {
-	ADD_ATTR,
-	// @ts-ignore This should be in the type definition, but it isn't
-	ADD_URI_SAFE_ATTR,
-	FORBID_TAGS,
+	ADD_ATTR: ADD_ATTR.slice(),
+	ADD_URI_SAFE_ATTR: ADD_URI_SAFE_ATTR.slice(),
+	FORBID_TAGS: FORBID_TAGS.slice(),
 } as const
 
 const SVG_CONFIG: DOMPurify.Config & {RETURN_DOM_FRAGMENT?: undefined, RETURN_DOM?: undefined} = {
-	ADD_ATTR,
-	// @ts-ignore This should be in the type definition, but it isn't
-	ADD_URI_SAFE_ATTR,
-	FORBID_TAGS,
+	ADD_ATTR: ADD_ATTR.slice(),
+	ADD_URI_SAFE_ATTR: ADD_URI_SAFE_ATTR.slice(),
+	FORBID_TAGS: FORBID_TAGS.slice(),
 	NAMESPACE: "http://www.w3.org/2000/svg"
 } as const
 
 const FRAGMENT_CONFIG: DOMPurify.Config & {RETURN_DOM_FRAGMENT: true} = {
-	ADD_ATTR,
-	// @ts-ignore This should be in the type definition, but it isn't
-	ADD_URI_SAFE_ATTR,
-	FORBID_TAGS,
+	ADD_ATTR: ADD_ATTR.slice(),
+	ADD_URI_SAFE_ATTR: ADD_URI_SAFE_ATTR.slice(),
+	FORBID_TAGS: FORBID_TAGS.slice(),
 	RETURN_DOM_FRAGMENT: true,
 	ALLOWED_URI_REGEXP: /^(?:(?:(?:f|ht)tps?|mailto|tel|callto|cid|xmpp|tutatemplate):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
 } as const
@@ -86,11 +84,11 @@ export class HtmlSanitizer {
 	/**
 	 * Sanitizes the given html. Returns as HTML
 	 */
-	sanitizeHTML(html: string, configExtra?: Partial<SanitizeConfigExtra>): SanitizeResult {
+	sanitizeHTML(html: string, configExtra?: Partial<SanitizeConfigExtra>): SanitizedHTML {
 		const config = this.init(HTML_CONFIG, configExtra ?? {})
 		const cleanHtml = this.purifier.sanitize(html, config)
 		return {
-			text: cleanHtml,
+			html: cleanHtml,
 			externalContent: this.externalContent,
 			inlineImageCids: this.inlineImageCids,
 			links: this.links,
@@ -100,11 +98,11 @@ export class HtmlSanitizer {
 	/**
 	 * Sanitizes the given SVG. Returns as SVG
 	 */
-	sanitizeSVG(svg: string, configExtra?: Partial<SanitizeConfigExtra>): SanitizeResult {
+	sanitizeSVG(svg: string, configExtra?: Partial<SanitizeConfigExtra>): SanitizedHTML {
 		const config = this.init(SVG_CONFIG, configExtra ?? {})
 		const cleanSvg = this.purifier.sanitize(svg, config)
 		return {
-			text: cleanSvg,
+			html: cleanSvg,
 			externalContent: this.externalContent,
 			inlineImageCids: this.inlineImageCids,
 			links: this.links,
@@ -112,13 +110,57 @@ export class HtmlSanitizer {
 	}
 
 	/**
+	 * inline images are attachments that are rendered as part of an <img> tag with a blob URL in the
+	 * mail body when it's displayed
+	 *
+	 * svg images can contain malicious code, so we need to sanitize them before we display them.
+	 * DOMPurify can do that, but can't handle the xml declaration at the start of well-formed svg documents.
+	 *
+	 * 1. parse the document as xml
+	 * 2. strip the declaration
+	 * 3. sanitize
+	 * 4. add the declaration back on
+	 *
+	 * NOTE: currently, we only allow UTF-8 inline SVG.
+	 * NOTE: SVG with incompatible encodings will be replaced with an empty file.
+	 *
+	 * @param dirtyFile the svg DataFile as received in the mail
+	 * @returns clean a sanitized svg document as a DataFile
+	 */
+	sanitizeInlineAttachment(dirtyFile: DataFile): DataFile {
+		if (dirtyFile.mimeType === "image/svg+xml") {
+			let cleanedData = Uint8Array.from([])
+			try {
+				const dirtySVG = utf8Uint8ArrayToString(dirtyFile.data)
+				const parser = new DOMParser()
+				const dirtyTree = parser.parseFromString(dirtySVG, "image/svg+xml")
+				const errs = dirtyTree.getElementsByTagName("parsererror")
+				if (errs.length === 0) {
+					const svgElement = dirtyTree.getElementsByTagName("svg")[0]
+					if (svgElement != null) {
+						const config = this.init(SVG_CONFIG, {})
+						const cleanText = this.purifier.sanitize(svgElement.outerHTML, config)
+						cleanedData = stringToUtf8Uint8Array('<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n' + cleanText)
+					}
+				} else {
+					console.log("svg sanitization failed, possibly due to wrong input encoding.")
+				}
+			} catch (e) {
+				console.log("svg sanitization failed")
+			}
+			dirtyFile.data = cleanedData
+		}
+		return dirtyFile
+	}
+
+	/**
 	 * Sanitizes given HTML. Returns a DocumentFragment instead of an HTML string
 	 */
-	sanitizeFragment(html: string, configExtra?: Partial<SanitizeConfigExtra>): SanitizedHTML {
+	sanitizeFragment(html: string, configExtra?: Partial<SanitizeConfigExtra>): SanitizedFragment {
 		const config = this.init(FRAGMENT_CONFIG, configExtra ?? {})
 		const cleanFragment = this.purifier.sanitize(html, config)
 		return {
-			html: cleanFragment,
+			fragment: cleanFragment,
 			externalContent: this.externalContent,
 			inlineImageCids: this.inlineImageCids,
 			links: this.links,
@@ -132,7 +174,8 @@ export class HtmlSanitizer {
 		return Object.assign({}, config, DEFAULT_CONFIG_EXTRA, configExtra)
 	}
 
-	private afterSanitizeAttributes(currentNode: Element, data: HookEvent, config: SanitizeConfig) {
+	private afterSanitizeAttributes(currentNode: Element, data: HookEvent, config: Config) {
+		const typedConfig = config as SanitizeConfig
 		// remove custom css classes as we do not allow style definitions. custom css classes can be in conflict to our self defined classes.
 		// just allow our own "tutanota_quote" class and MsoListParagraph classes for compatibility with Outlook 2010/2013 emails. see main-styles.js
 		let allowedClasses = ["tutanota_quote", "MsoListParagraph", "MsoListParagraphCxSpFirst", "MsoListParagraphCxSpMiddle", "MsoListParagraphCxSpLast"]
@@ -149,9 +192,9 @@ export class HtmlSanitizer {
 			}
 		}
 
-		this.replaceAttributes(currentNode as HTMLElement, config)
+		this.replaceAttributes(currentNode as HTMLElement, typedConfig)
 
-		this.processLink(currentNode as HTMLElement, config)
+		this.processLink(currentNode as HTMLElement, typedConfig)
 
 		return currentNode
 
@@ -282,11 +325,6 @@ export class HtmlSanitizer {
 }
 
 function isAllowedLink(link: string): boolean {
-	if (client.isIE()) {
-		// No support for creating URLs in IE11
-		return true
-	}
-
 	try {
 		// We create URL without explicit base (second argument). It is an error for relative links
 		return new URL(link).protocol !== "file"

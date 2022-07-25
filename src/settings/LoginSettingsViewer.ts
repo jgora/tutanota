@@ -7,7 +7,7 @@ import {InfoLink, lang} from "../misc/LanguageViewModel"
 import {PasswordForm} from "./PasswordForm"
 import {logins} from "../api/main/LoginController"
 import {Icons} from "../gui/base/icons/Icons"
-import {Session, SessionTypeRef} from "../api/entities/sys/Session"
+import {Session, SessionTypeRef} from "../api/entities/sys/TypeRefs.js"
 import {LazyLoaded, neverNull, noOp, ofClass} from "@tutao/tutanota-utils"
 import {formatDateTimeFromYesterdayOn} from "../misc/Formatter"
 import {SessionState} from "../api/common/TutanotaConstants"
@@ -30,6 +30,7 @@ import {showCredentialsEncryptionModeDialog} from "../gui/dialogs/SelectCredenti
 import {assertMainOrNode} from "../api/common/Env"
 import {locator} from "../api/main/MainLocator"
 import {elementIdPart, getElementId} from "../api/common/utils/EntityUtils"
+import {showChangeOwnPasswordDialog} from "./ChangePasswordDialogs.js";
 
 assertMainOrNode()
 
@@ -55,17 +56,19 @@ export class LoginSettingsViewer implements UpdatableSettingsViewer {
 	view(): Children {
 		const mailAddressAttrs: TextFieldAttrs = {
 			label: "mailAddress_label",
-			value: this._mailAddress,
+			value: this._mailAddress(),
+			oninput: this._mailAddress,
 			disabled: true,
 		}
 		const changePasswordButtonAttrs: ButtonAttrs = {
 			label: "changePassword_label",
-			click: () => PasswordForm.showChangeOwnPasswordDialog(),
+			click: () => showChangeOwnPasswordDialog(),
 			icon: () => Icons.Edit,
 		}
 		const passwordAttrs: TextFieldAttrs = {
 			label: "password_label",
-			value: this._stars,
+			value: this._stars(),
+			oninput: this._stars,
 			disabled: true,
 			injectionsRight: () => m(ButtonN, changePasswordButtonAttrs),
 		}
@@ -99,7 +102,8 @@ export class LoginSettingsViewer implements UpdatableSettingsViewer {
 					m("span.text-break", [m(`a[href=${link}][target=_blank]`, link)]),
 				])
 			},
-			value: this._stars,
+			value: this._stars(),
+			oninput: this._stars,
 			disabled: true,
 			injectionsRight: () => m(ButtonN, recoveryCodeDropdownButtonAttrs),
 		}
@@ -121,12 +125,13 @@ export class LoginSettingsViewer implements UpdatableSettingsViewer {
 						m(".h4", lang.get("closedSessions_label")),
 						m(ExpanderButtonN, {
 							label: "show_action",
-							expanded: this._closedSessionsExpanded,
+							expanded: this._closedSessionsExpanded(),
+							onExpandedChange: this._closedSessionsExpanded,
 							showWarning: false,
 						}),
 					]),
 					m(ExpanderPanelN, {
-							expanded: this._closedSessionsExpanded,
+							expanded: this._closedSessionsExpanded(),
 						},
 						this._renderClosedSessions(),
 					),
@@ -153,7 +158,7 @@ export class LoginSettingsViewer implements UpdatableSettingsViewer {
 
 		return m(TextFieldN, {
 			label: "credentialsEncryptionMode_label",
-			value: stream(this._credentialsEncryptionModeName(usedMode)),
+			value: this._credentialsEncryptionModeName(usedMode),
 			disabled: true,
 			injectionsRight: () =>
 				m(ButtonN, {

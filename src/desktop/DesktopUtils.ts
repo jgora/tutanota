@@ -1,24 +1,27 @@
 import path from "path"
 import {spawn} from "child_process"
 import type {Rectangle} from "electron"
-import {defer, delay, noOp, uint8ArrayToHex} from "@tutao/tutanota-utils"
+import {NativeImage} from "electron"
+import {base64ToBase64Url, defer, delay, noOp, uint8ArrayToBase64, uint8ArrayToHex} from "@tutao/tutanota-utils"
 import {log} from "./DesktopLog"
-import {DesktopCryptoFacade} from "./DesktopCryptoFacade"
 import {fileExists, swapFilename} from "./PathUtils"
-import url from "url"
 import {makeRegisterKeysScript, makeUnregisterKeysScript, RegistryRoot} from "./reg-templater"
 import type {ElectronExports, FsExports} from "./ElectronExportTypes";
-import {DataFile} from "../api/common/DataFile";
 import {ProgrammingError} from "../api/common/error/ProgrammingError"
+import {CryptoFunctions} from "./CryptoFns"
+import {getResourcePath} from "./resources.js"
 
 export class DesktopUtils {
-	private readonly topLevelDownloadDir: string = "tutanota"
+	private readonly topLevelTempDir = "tutanota"
+	/** we store all temporary files in a directory with a random name, so that the download location is not predictable */
+	private readonly randomDirectoryName: string
 
 	constructor(
 		private readonly fs: FsExports,
 		private readonly electron: ElectronExports,
-		private readonly desktopCrypto: DesktopCryptoFacade
+		private readonly cryptoFunctions: CryptoFunctions,
 	) {
+		this.randomDirectoryName = base64ToBase64Url(uint8ArrayToBase64(cryptoFunctions.randomBytes(16)))
 	}
 
 	checkIsMailtoHandler(): Promise<boolean> {
@@ -36,34 +39,6 @@ export class DesktopUtils {
 	 */
 	touch(path: string): void {
 		this.fs.closeSync(this.fs.openSync(path, "a"))
-	}
-
-	/**
-	 * try to read a file into a DataFile. return null if it fails.
-	 * @param uriOrPath a file path or a file URI to read the data from
-	 * @returns {Promise<null|DataFile>}
-	 */
-	async readDataFile(uriOrPath: string): Promise<DataFile | null> {
-		try {
-			uriOrPath = url.fileURLToPath(uriOrPath)
-		} catch (e) {
-			// the thing already was a path, or at least not an URI
-		}
-
-		try {
-			const data = await this.fs.promises.readFile(uriOrPath)
-			const name = path.basename(uriOrPath)
-			return {
-				_type: "DataFile",
-				data,
-				name,
-				mimeType: "application/octet-stream",
-				size: data.length,
-				id: undefined,
-			}
-		} catch (e) {
-			return null
-		}
 	}
 
 	async registerAsMailtoHandler(): Promise<void> {
@@ -190,8 +165,8 @@ export class DesktopUtils {
 	 * @returns path to the written file
 	 */
 	private async _writeToDisk(contents: string): Promise<string> {
-		const filename = uint8ArrayToHex(this.desktopCrypto.randomBytes(12))
-		const tmpPath = this.getTutanotaTempPath("reg")
+		const filename = uint8ArrayToHex(this.cryptoFunctions.randomBytes(12))
+		const tmpPath = path.join(this.getTutanotaTempPath(), "reg")
 		await this.fs.promises.mkdir(tmpPath, {recursive: true})
 		const filePath = path.join(tmpPath, filename)
 
@@ -219,7 +194,7 @@ export class DesktopUtils {
 		// with the value of the USERPROFILE env var.
 		const appData = path.join("%USERPROFILE%", "AppData")
 		const logPath = path.join(appData, "Roaming", this.electron.app.getName(), "logs")
-		const tmpPath = path.join(appData, "Local", "Temp", this.topLevelDownloadDir, "attach")
+		const tmpPath = path.join(appData, "Local", "Temp", this.topLevelTempDir, "attach")
 		const tmpRegScript = makeRegisterKeysScript(RegistryRoot.CURRENT_USER, {execPath, dllPath, logPath, tmpPath})
 		await this._executeRegistryScript(tmpRegScript)
 		this.electron.app.setAsDefaultProtocolClient("mailto")
@@ -246,18 +221,57 @@ export class DesktopUtils {
 	}
 
 	/**
-	 * Get a path to a directory under tutanota's temporary directory. Will not create if it doesn't exist
-	 * @param subdirs
+	 * Get a path to the tutanota temporary directory
+	 * the hierarchy is
+	 * [electron tmp dir]
+	 * [tutanota tmp]
+	 *
+	 * the directory will be created if it doesn't already exist
+	 *
+	 * a randomly named subdirectory will be included
+	 *
+	 * if `noRandomDirectory` then random directory will not be included in the path,
+	 * and the whole directory will not be created
 	 * @returns {string}
 	 */
-	getTutanotaTempPath(...subdirs: string[]): string {
-		return path.join(this.electron.app.getPath("temp"), this.topLevelDownloadDir, ...subdirs)
+	getTutanotaTempPath(): string {
+		const directory = path.join(this.electron.app.getPath("temp"), this.topLevelTempDir, this.randomDirectoryName)
+
+		// only readable by owner (current user)
+		this.fs.mkdirSync(directory, {recursive: true, mode: 0o700})
+
+		return path.join(directory)
+	}
+
+	deleteTutanotaTempDir() {
+		const topLvlTmpDir = path.join(this.electron.app.getPath("temp"), this.topLevelTempDir)
+		try {
+			const tmps = this.fs.readdirSync(topLvlTmpDir)
+			for (const tmp of tmps) {
+				const tmpSubPath = path.join(topLvlTmpDir, tmp)
+				try {
+					this.fs.rmSync(tmpSubPath, {recursive: true})
+				} catch (e) {
+					// ignore if the file was deleted between readdir and delete
+					// or if it's not our tmp dir
+					if (e.code !== "ENOENT" && e.code !== "EACCES") throw e
+				}
+			}
+		} catch (e) {
+			// the tmp dir doesn't exist, everything's fine
+			if (e.code !== "ENOENT") throw e
+		}
 	}
 
 	getLockFilePath() {
 		// don't get temp dir path from DesktopDownloadManager because the path returned from there may be deleted at some point,
 		// we want to put the lockfile in root tmp so it persists
 		return path.join(this.electron.app.getPath("temp"), "tutanota_desktop_lockfile")
+	}
+
+	getIconByName(iconName: string): NativeImage {
+		const iconPath = getResourcePath(`icons/${iconName}`)
+		return this.electron.nativeImage.createFromPath(iconPath)
 	}
 
 }

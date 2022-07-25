@@ -6,7 +6,7 @@ import {ColumnWidth, TableN} from "../../gui/base/TableN"
 import {ButtonType} from "../../gui/base/ButtonN"
 import {Icons} from "../../gui/base/icons/Icons"
 import {attachDropdown} from "../../gui/base/DropdownN"
-import type {NotificationMailTemplate} from "../../api/entities/sys/NotificationMailTemplate"
+import type {NotificationMailTemplate} from "../../api/entities/sys/TypeRefs.js"
 import {downcast} from "@tutao/tutanota-utils"
 import type {LanguageCode} from "../../misc/LanguageViewModel"
 import Stream from "mithril/stream";
@@ -22,7 +22,7 @@ export class WhitelabelNotificationEmailSettings implements Component<Whitelabel
 	_notificationEmailsExpanded: Stream<boolean>
 
 	constructor(vnode: Vnode<WhitelabelNotificationEmailSettingsAttrs>) {
-		this._notificationEmailsExpanded = stream(false)
+		this._notificationEmailsExpanded = stream<boolean>(false)
 	}
 
 	view(vnode: Vnode<WhitelabelNotificationEmailSettingsAttrs>): Children {
@@ -41,13 +41,12 @@ export class WhitelabelNotificationEmailSettings implements Component<Whitelabel
 				m(".h4", lang.get("customNotificationEmails_label")),
 				m(ExpanderButtonN, {
 					label: "show_action",
-					expanded: this._notificationEmailsExpanded,
+					expanded: this._notificationEmailsExpanded(),
+					onExpandedChange: this._notificationEmailsExpanded,
 				}),
 			]),
-			m(
-				ExpanderPanelN,
-				{
-					expanded: this._notificationEmailsExpanded,
+			m(ExpanderPanelN, {
+					expanded: this._notificationEmailsExpanded(),
 				},
 				m(TableN, {
 					columnHeading: ["language_label", "subject_label"],

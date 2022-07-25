@@ -6,19 +6,19 @@ import {Dialog, DialogType} from "../gui/base/Dialog.js"
 import {lang, TranslationKey} from "../misc/LanguageViewModel.js"
 import {AccountType, BookingItemFeatureType, FeatureType} from "../api/common/TutanotaConstants.js"
 import {formatDate} from "../misc/Formatter.js"
-import {CustomerTypeRef} from "../api/entities/sys/Customer.js"
-import {CustomerInfoTypeRef} from "../api/entities/sys/CustomerInfo.js"
-import {AccountingInfoTypeRef} from "../api/entities/sys/AccountingInfo.js"
+import {CustomerTypeRef} from "../api/entities/sys/TypeRefs.js"
+import {CustomerInfoTypeRef} from "../api/entities/sys/TypeRefs.js"
+import {AccountingInfoTypeRef} from "../api/entities/sys/TypeRefs.js"
 import {logins} from "../api/main/LoginController.js"
 import {NotAuthorizedError} from "../api/common/error/RestError.js"
 import {formatPrice, getPriceItem} from "./PriceUtils.js"
 import {bookItem} from "./SubscriptionUtils.js"
-import type {PriceServiceReturn} from "../api/entities/sys/PriceServiceReturn.js"
-import type {PriceData} from "../api/entities/sys/PriceData.js"
+import type {PriceServiceReturn} from "../api/entities/sys/TypeRefs.js"
+import type {PriceData} from "../api/entities/sys/TypeRefs.js"
 import {showProgressDialog} from "../gui/dialogs/ProgressDialog.js"
 import {locator} from "../api/main/MainLocator.js"
 import {assertMainOrNode} from "../api/common/Env.js"
-import {PriceItemData} from "../api/entities/sys/PriceItemData.js"
+import {PriceItemData} from "../api/entities/sys/TypeRefs.js"
 
 assertMainOrNode()
 
@@ -161,7 +161,7 @@ class ConfirmSubscriptionView implements Component<ConfirmAttrs> {
 		return m("", [
 			m(TextFieldN, {
 				label: "bookingOrder_label",
-				value: stream(this.getBookingText(priceChangeModel, count, freeAmount)),
+				value: this.getBookingText(priceChangeModel, count, freeAmount),
 				type: TextFieldType.Area,
 				disabled: true,
 			}),
@@ -169,14 +169,14 @@ class ConfirmSubscriptionView implements Component<ConfirmAttrs> {
 				? m(TextFieldN, {
 					label: "subscription_label",
 					helpLabel: () => lang.get("nextChargeOn_label", {"{chargeDate}": formatDate(chargeDate)}),
-					value: stream(this.getSubscriptionText(priceChangeModel)),
+					value: this.getSubscriptionText(priceChangeModel),
 					disabled: true,
 				})
 				: null,
 			m(TextFieldN, {
 				label: "price_label",
 				helpLabel: () => this.getPriceInfoText(priceChangeModel),
-				value: stream(this.getPriceText(priceChangeModel)),
+				value: this.getPriceText(priceChangeModel),
 				disabled: true,
 			}),
 		])

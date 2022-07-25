@@ -1,6 +1,5 @@
 import type {App} from "electron"
 import type {WindowManager} from "./DesktopWindowManager"
-import type {IPC} from "./IPC"
 import {isMailAddress} from "../misc/FormatValidator"
 import {log} from "./DesktopLog"
 import type {TimeoutSetter} from "@tutao/tutanota-utils"
@@ -34,13 +33,13 @@ export class Socketeer {
 		})
 	}
 
-	attach(wm: WindowManager, ipc: IPC) {
+	attach(wm: WindowManager) {
 		this.startClient(async msg => {
-			const mailAddress = JSON.parse(msg).mailAddress
+		const mailAddress = JSON.parse(msg)
 
 			if (typeof mailAddress === "string" && isMailAddress(mailAddress, false)) {
-				const targetWindowId = (await wm.getLastFocused(false)).id
-				ipc.sendRequest(targetWindowId, "openCustomer", [mailAddress])
+				const targetWindow = (await wm.getLastFocused(false))
+				targetWindow.desktopFacade.openCustomer(mailAddress)
 			}
 		})
 	}

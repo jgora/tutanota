@@ -11,7 +11,7 @@ import {styles} from "../../gui/styles"
 import type {EntityEventsListener, EntityUpdateData, EventController} from "../../api/main/EventController"
 import {isUpdateForTypeRef} from "../../api/main/EventController"
 import {promptAndDeleteMails} from "./MailGuiUtils"
-import {MailTypeRef} from "../../api/entities/tutanota/Mail"
+import {MailTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
 import {OperationType} from "../../api/common/TutanotaConstants"
 import {isSameId} from "../../api/common/utils/EntityUtils"
 import {noOp, promiseMap} from "@tutao/tutanota-utils"
@@ -115,7 +115,7 @@ export class MinimizedEditorOverlay implements Component<MinimizedEditorOverlayA
 				const draft = model.draft
 
 				if (draft) {
-					await promptAndDeleteMails(model.mails(), [draft], noOp)
+					await promptAndDeleteMails(model.mailModel, [draft], noOp)
 				}
 			}
 		})

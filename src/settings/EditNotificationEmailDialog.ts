@@ -1,5 +1,5 @@
-import type {NotificationMailTemplate} from "../api/entities/sys/NotificationMailTemplate"
-import {createNotificationMailTemplate} from "../api/entities/sys/NotificationMailTemplate"
+import type {NotificationMailTemplate} from "../api/entities/sys/TypeRefs.js"
+import {createNotificationMailTemplate} from "../api/entities/sys/TypeRefs.js"
 import {HtmlEditor} from "../gui/editor/HtmlEditor"
 import {InfoLink, lang, languages} from "../misc/LanguageViewModel"
 import stream from "mithril/stream"
@@ -14,16 +14,16 @@ import {assertNotNull, LazyLoaded, memoized, neverNull, ofClass} from "@tutao/tu
 import {htmlSanitizer} from "../misc/HtmlSanitizer"
 import {getWhitelabelDomain} from "../api/common/utils/Utils"
 import {logins} from "../api/main/LoginController"
-import type {CustomerInfo} from "../api/entities/sys/CustomerInfo"
-import {CustomerInfoTypeRef} from "../api/entities/sys/CustomerInfo"
+import type {CustomerInfo} from "../api/entities/sys/TypeRefs.js"
+import {CustomerInfoTypeRef} from "../api/entities/sys/TypeRefs.js"
 import {PayloadTooLargeError} from "../api/common/error/RestError"
 import {SegmentControl} from "../gui/base/SegmentControl"
-import type {CustomerProperties} from "../api/entities/sys/CustomerProperties"
-import {CustomerPropertiesTypeRef} from "../api/entities/sys/CustomerProperties"
+import type {CustomerProperties} from "../api/entities/sys/TypeRefs.js"
+import {CustomerPropertiesTypeRef} from "../api/entities/sys/TypeRefs.js"
 import {insertInlineImageB64ClickHandler} from "../mail/view/MailViewerUtils"
 import {UserError} from "../api/main/UserError"
-import type {Booking} from "../api/entities/sys/Booking"
-import {BookingTypeRef} from "../api/entities/sys/Booking"
+import type {Booking} from "../api/entities/sys/TypeRefs.js"
+import {BookingTypeRef} from "../api/entities/sys/TypeRefs.js"
 import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
 import {isWhitelabelActive} from "../subscription/SubscriptionUtils"
 import {showWhitelabelBuyDialog} from "../subscription/BuyDialog"
@@ -31,7 +31,7 @@ import type {IUserController} from "../api/main/UserController"
 import {GENERATED_MAX_ID} from "../api/common/utils/EntityUtils"
 import {locator} from "../api/main/MainLocator"
 
-export function showAddOrEditNotificationEmailDialog(userController: IUserController, selectedNotificationLanguage?: Stream<string>) {
+export function showAddOrEditNotificationEmailDialog(userController: IUserController, selectedNotificationLanguage?: string) {
 	let existingTemplate: NotificationMailTemplate | undefined = undefined
 	userController.loadCustomer().then(customer => {
 		if (customer.properties) {
@@ -39,9 +39,9 @@ export function showAddOrEditNotificationEmailDialog(userController: IUserContro
 			return customerProperties
 				.getAsync()
 				.then(loadedCustomerProperties => {
-					if (selectedNotificationLanguage) {
+					if (selectedNotificationLanguage != null) {
 						existingTemplate = loadedCustomerProperties.notificationMailTemplates.find(
-							template => template.language === selectedNotificationLanguage(),
+							template => template.language === selectedNotificationLanguage,
 						)
 					}
 				})
@@ -139,17 +139,19 @@ export function show(existingTemplate: NotificationMailTemplate | null, customer
 			? m(TextFieldN, {
 				label: "notificationMailLanguage_label",
 				disabled: true,
-				value: stream(selectedLanguage.name),
+				value: selectedLanguage.name,
 			})
 			: m(DropDownSelectorN, {
 				label: "notificationMailLanguage_label",
 				items: sortedLanguages,
-				selectedValue: selectedLanguageStream,
+				selectedValue: selectedLanguageStream(),
+				selectionChangedHandler: selectedLanguageStream,
 				dropdownWidth: 250,
 			}),
 		m(TextFieldN, {
 			label: "subject_label",
-			value: subject,
+			value: subject(),
+			oninput: subject,
 		}),
 		m(editor),
 	]
@@ -163,13 +165,13 @@ export function show(existingTemplate: NotificationMailTemplate | null, customer
 	})
 	// Even though savedHtml is always sanitized changing it might lead to mXSS
 	const sanitizePreview = memoized<string, string>(html => {
-		return htmlSanitizer.sanitizeHTML(html).text
+		return htmlSanitizer.sanitizeHTML(html).html
 	})
 
 	const previewTabContent = () => [
 		m(TextFieldN, {
 			label: "subject_label",
-			value: stream(subject().replace(/{sender}/g, senderName)),
+			value: subject().replace(/{sender}/g, senderName),
 			disabled: true,
 		}),
 		m(".small.mt.mb", lang.get("mailBody_label")),
@@ -183,7 +185,8 @@ export function show(existingTemplate: NotificationMailTemplate | null, customer
 			return [
 				m(SegmentControl, {
 					items: [editSegment, previewSegment],
-					selectedValue: selectedTab,
+					selectedValue: selectedTab(),
+					onValueSelected: selectedTab,
 				}),
 				selectedTab() === editSegment.value ? editTabContent() : previewTabContent(),
 			]
@@ -221,10 +224,10 @@ export function show(existingTemplate: NotificationMailTemplate | null, customer
 
 					template.subject = htmlSanitizer.sanitizeHTML(subject(), {
 						blockExternalContent: false,
-					}).text
+					}).html
 					template.body = htmlSanitizer.sanitizeHTML(editor.getValue(), {
 						blockExternalContent: false,
-					}).text
+					}).html
 					template.language = selectedLanguageStream()
 					return locator.entityClient.update(customerProperties).then(() => dialog.close())
 				}),

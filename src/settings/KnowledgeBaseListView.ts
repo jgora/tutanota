@@ -1,7 +1,7 @@
 import m, {Children} from "mithril"
 import type {SettingsView, UpdatableSettingsDetailsViewer, UpdatableSettingsViewer} from "./SettingsView"
-import type {KnowledgeBaseEntry} from "../api/entities/tutanota/KnowledgeBaseEntry"
-import {KnowledgeBaseEntryTypeRef} from "../api/entities/tutanota/KnowledgeBaseEntry"
+import type {KnowledgeBaseEntry, TemplateGroupRoot} from "../api/entities/tutanota/TypeRefs.js"
+import {KnowledgeBaseEntryTypeRef} from "../api/entities/tutanota/TypeRefs.js"
 import {ButtonN, ButtonType} from "../gui/base/ButtonN"
 import {lang} from "../misc/LanguageViewModel"
 import type {ListConfig, VirtualRow} from "../gui/base/List"
@@ -9,14 +9,13 @@ import {List} from "../gui/base/List"
 import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
 import {size} from "../gui/size"
-import type {TemplateGroupRoot} from "../api/entities/tutanota/TemplateGroupRoot"
 import {EntityClient} from "../api/common/EntityClient"
 import {showKnowledgeBaseEditor} from "./KnowledgeBaseEditor"
 import {getElementId, isSameId, listIdPart} from "../api/common/utils/EntityUtils"
 import {hasCapabilityOnGroup} from "../sharing/GroupUtils"
 import {OperationType, ShareCapability} from "../api/common/TutanotaConstants"
 import type {LoginController} from "../api/main/LoginController"
-import type {Group} from "../api/entities/sys/Group"
+import type {Group} from "../api/entities/sys/TypeRefs.js"
 import {ListColumnWrapper} from "../gui/ListColumnWrapper"
 import {KnowledgeBaseEntryView} from "../knowledgebase/view/KnowledgeBaseEntryView"
 import {promiseMap} from "@tutao/tutanota-utils"
@@ -50,8 +49,9 @@ export class KnowledgeBaseListView implements UpdatableSettingsViewer {
 		const knowledgebaseListId = this._templateGroupRoot.knowledgeBase
 		const listConfig: ListConfig<KnowledgeBaseEntry, KnowledgeBaseRow> = {
 			rowHeight: size.list_row_height,
-			fetch: (startId, count) => {
-				return this._entityClient.loadRange(KnowledgeBaseEntryTypeRef, knowledgebaseListId, startId, count, true)
+			fetch: async (startId, count) => {
+				const items = await this._entityClient.loadRange(KnowledgeBaseEntryTypeRef, knowledgebaseListId, startId, count, true)
+				return {items, complete: items.length < count}
 			},
 			loadSingle: elementId => {
 				return this._entityClient.load<KnowledgeBaseEntry>(KnowledgeBaseEntryTypeRef, [knowledgebaseListId, elementId])
@@ -75,7 +75,6 @@ export class KnowledgeBaseListView implements UpdatableSettingsViewer {
 			createVirtualRow: () => {
 				return new KnowledgeBaseRow()
 			},
-			showStatus: false,
 			className: "knowledgeBase-list",
 			swipe: {
 				renderLeftSpacer: () => [],

@@ -1,39 +1,30 @@
-import m, {Children} from "mithril"
+import m from "mithril"
 import {Dialog} from "../gui/base/Dialog"
 import {formatDateWithMonth, formatStorageSize} from "../misc/Formatter"
 import {lang} from "../misc/LanguageViewModel"
-import {assertNotNull, neverNull, noOp} from "@tutao/tutanota-utils"
-import type {Group} from "../api/entities/sys/Group"
-import {GroupTypeRef} from "../api/entities/sys/Group"
+import {assertNotNull, firstThrow, LazyLoaded, neverNull, noOp, ofClass, promiseMap} from "@tutao/tutanota-utils"
+import type {Group, GroupInfo} from "../api/entities/sys/TypeRefs.js"
+import {AdministratedGroupTypeRef, CustomerTypeRef, GroupInfoTypeRef, GroupMemberTypeRef, GroupTypeRef, UserTypeRef} from "../api/entities/sys/TypeRefs.js"
 import {BookingItemFeatureType, GroupType, OperationType} from "../api/common/TutanotaConstants"
-import type {GroupInfo} from "../api/entities/sys/GroupInfo"
-import {GroupInfoTypeRef} from "../api/entities/sys/GroupInfo"
-import {LazyLoaded} from "@tutao/tutanota-utils"
 import {BadRequestError, NotAuthorizedError, PreconditionFailedError} from "../api/common/error/RestError"
 import type {TableAttrs} from "../gui/base/TableN"
 import {ColumnWidth, TableLineAttrs, TableN} from "../gui/base/TableN"
-import {GroupMemberTypeRef} from "../api/entities/sys/GroupMember"
 import {logins} from "../api/main/LoginController"
-import {UserTypeRef} from "../api/entities/sys/User"
 import {Icons} from "../gui/base/icons/Icons"
 import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
-import {AdministratedGroupTypeRef} from "../api/entities/sys/AdministratedGroup"
 import {localAdminGroupInfoModel} from "./LocalAdminGroupInfoModel"
-import stream from "mithril/stream"
 import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
-import {CustomerTypeRef} from "../api/entities/sys/Customer"
 import {compareGroupInfos, getGroupInfoDisplayName} from "../api/common/utils/GroupUtils"
 import {GENERATED_MAX_ID, GENERATED_MIN_ID, isSameId} from "../api/common/utils/EntityUtils"
 import {showBuyDialog} from "../subscription/BuyDialog"
 import type {TextFieldAttrs} from "../gui/base/TextFieldN"
 import {TextFieldN} from "../gui/base/TextFieldN"
 import {ButtonAttrs, ButtonN} from "../gui/base/ButtonN"
-import type {DropDownSelectorAttrs, SelectorItem, SelectorItemList} from "../gui/base/DropDownSelectorN"
+import type {DropDownSelectorAttrs, SelectorItemList} from "../gui/base/DropDownSelectorN"
 import {DropDownSelectorN} from "../gui/base/DropDownSelectorN"
 import type {EntityClient} from "../api/common/EntityClient"
-import {ofClass, promiseMap} from "@tutao/tutanota-utils"
-import type {UpdatableSettingsDetailsViewer, UpdatableSettingsViewer} from "./SettingsView"
+import type {UpdatableSettingsDetailsViewer} from "./SettingsView"
 import {locator} from "../api/main/MainLocator"
 import {assertMainOrNode} from "../api/common/Env"
 
@@ -103,7 +94,7 @@ export class GroupViewer implements UpdatableSettingsDetailsViewer {
 					m("", [
 						m(TextFieldN, {
 							label: "created_label",
-							value: stream(formatDateWithMonth(this.groupInfo.created)),
+							value: formatDateWithMonth(this.groupInfo.created),
 							disabled: true,
 						}),
 						this._isMailGroup() ? m(TextFieldN, this._createUsedStorageFieldAttrs()) : null,
@@ -122,7 +113,7 @@ export class GroupViewer implements UpdatableSettingsDetailsViewer {
 								m("", [
 									m(TextFieldN, {
 										label: "mailAddress_label",
-										value: stream(this.groupInfo.mailAddress ?? ""),
+										value: this.groupInfo.mailAddress ?? "",
 										disabled: true,
 									}),
 								]),
@@ -150,7 +141,7 @@ export class GroupViewer implements UpdatableSettingsDetailsViewer {
 					value: true,
 				},
 			],
-			selectedValue: stream(this._isActive),
+			selectedValue: this._isActive,
 			selectionChangedHandler: deactivate => {
 				this._onStatusSelected(deactivate)
 			},
@@ -210,7 +201,7 @@ export class GroupViewer implements UpdatableSettingsDetailsViewer {
 		return {
 			label: "administratedBy_label",
 			items: adminGroupIdToName,
-			selectedValue: stream(this.groupInfo.localAdmin),
+			selectedValue: this.groupInfo.localAdmin,
 			selectionChangedHandler: id => {
 				if (this.groupInfo.groupType === GroupType.LocalAdmin) {
 					Dialog.message("updateAdminshipLocalAdminGroupError_msg")
@@ -233,24 +224,26 @@ export class GroupViewer implements UpdatableSettingsDetailsViewer {
 		const editNameButtonAttrs = {
 			label: "edit_action",
 			click: () => {
-				Dialog.showTextInputDialog("edit_action", "name_label", null, this._name, newName => {
-					if (this._group.isLoaded() && this._group.getLoaded().type === GroupType.MailingList && newName.trim() === "") {
-						return "enterName_msg"
-					} else {
-						return null
-					}
-				}).then(newName => {
-					const newGroupInfo: GroupInfo = Object.assign({}, this.groupInfo)
-					newGroupInfo.name = newName
+				Dialog.showProcessTextInputDialog("edit_action", "name_label", null, this._name,
+					(newName) => {
+						const newGroupInfo: GroupInfo = Object.assign({}, this.groupInfo)
+						newGroupInfo.name = newName
 
-					this._entityClient.update(newGroupInfo)
-				})
+						return this._entityClient.update(newGroupInfo)
+					},
+					newName => {
+						if (this._group.isLoaded() && this._group.getLoaded().type === GroupType.MailingList && newName.trim() === "") {
+							return "enterName_msg"
+						} else {
+							return null
+						}
+					})
 			},
 			icon: () => Icons.Edit,
 		} as const
 		return {
 			label: "name_label",
-			value: stream(this._name),
+			value: this._name,
 			disabled: true,
 			injectionsRight: () => [m(ButtonN, editNameButtonAttrs)],
 		}
@@ -259,7 +252,7 @@ export class GroupViewer implements UpdatableSettingsDetailsViewer {
 	_createUsedStorageFieldAttrs(): TextFieldAttrs {
 		return {
 			label: "storageCapacityUsed_label",
-			value: this._usedStorageInBytes ? stream(formatStorageSize(this._usedStorageInBytes)) : stream(lang.get("loading_msg")),
+			value: this._usedStorageInBytes ? formatStorageSize(this._usedStorageInBytes) : lang.get("loading_msg"),
 			disabled: true,
 		}
 	}
@@ -283,27 +276,30 @@ export class GroupViewer implements UpdatableSettingsDetailsViewer {
 
 				if (availableUserGroupInfos.length > 0) {
 					availableUserGroupInfos.sort(compareGroupInfos)
-					let dropdownAttrs = {
-						label: "userSettings_label",
-						items: availableUserGroupInfos.map(g => {
-							return {
-								name: getGroupInfoDisplayName(g),
-								value: g,
-							}
-						}),
-						selectedValue: stream(availableUserGroupInfos[0]),
-						dropdownWidth: 250,
-					} as const
-
+					let selectedGroupInfo = firstThrow(availableUserGroupInfos)
 					let addUserToGroupOkAction = (dialog: Dialog) => {
-						showProgressDialog("pleaseWait_msg", this._addUserToGroup(dropdownAttrs.selectedValue().group))
+						showProgressDialog("pleaseWait_msg", this._addUserToGroup(selectedGroupInfo.group))
 						dialog.close()
 					}
 
 					Dialog.showActionDialog({
 						title: lang.get("addUserToGroup_label"),
 						child: {
-							view: () => m(DropDownSelectorN, dropdownAttrs),
+							view: () => m(DropDownSelectorN, {
+									label: "userSettings_label",
+									items: availableUserGroupInfos.map(g => {
+										return {
+											name: getGroupInfoDisplayName(g),
+											value: g,
+										}
+									}),
+									selectedValue: selectedGroupInfo,
+									selectionChangedHandler: (newSelected: GroupInfo) => {
+										selectedGroupInfo = newSelected
+									},
+									dropdownWidth: 250,
+								}
+							),
 						},
 						allowOkWithReturn: true,
 						okAction: addUserToGroupOkAction,

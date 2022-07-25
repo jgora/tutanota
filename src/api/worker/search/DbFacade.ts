@@ -2,7 +2,7 @@ import {DbError} from "../../common/error/DbError"
 import {delay, downcast, LazyLoaded, stringToUtf8Uint8Array, uint8ArrayToBase64} from "@tutao/tutanota-utils"
 import {IndexingNotSupportedError} from "../../common/error/IndexingNotSupportedError"
 import {QuotaExceededError} from "../../common/error/QuotaExceededError"
-import type {User} from "../../entities/sys/User"
+import type {User} from "../../entities/sys/TypeRefs.js"
 import {getEtId} from "../../common/utils/EntityUtils"
 import type {IndexName} from "./Indexer"
 import {sha256Hash} from "@tutao/tutanota-crypto"
@@ -141,6 +141,7 @@ export class DbFacade {
 				return new Promise((resolve, reject) => {
 					let deleteRequest = self.indexedDB.deleteDatabase(this._db.getLoaded().name)
 
+					// @ts-ignore
 					deleteRequest.onerror = (event: ErrorEvent) => {
 						reject(new DbError(`could not delete database ${this._db.getLoaded().name}`, downcast<Error>(event)))
 					}

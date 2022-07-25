@@ -1,8 +1,6 @@
-import type {RecipientInfo} from "../../api/common/RecipientInfo"
-import {isTutanotaMailAddress, RecipientInfoType} from "../../api/common/RecipientInfo"
-import type {Contact} from "../../api/entities/tutanota/Contact"
-import {createContact} from "../../api/entities/tutanota/Contact"
-import {createContactMailAddress} from "../../api/entities/tutanota/ContactMailAddress"
+import type {Contact} from "../../api/entities/tutanota/TypeRefs.js"
+import {createContact} from "../../api/entities/tutanota/TypeRefs.js"
+import {createContactMailAddress} from "../../api/entities/tutanota/TypeRefs.js"
 import {
 	ContactAddressType,
 	ConversationType,
@@ -12,6 +10,7 @@ import {
 	MailState,
 	MAX_ATTACHMENT_SIZE,
 	ReplyType,
+	TUTANOTA_MAIL_ADDRESS_DOMAINS,
 } from "../../api/common/TutanotaConstants"
 import {assertNotNull, contains, endsWith, neverNull, noOp, ofClass} from "@tutao/tutanota-utils"
 import {assertMainOrNode, isDesktop} from "../../api/common/Env"
@@ -24,80 +23,39 @@ import {Icons} from "../../gui/base/icons/Icons"
 import type {MailboxDetail} from "./MailModel"
 import {getContactDisplayName} from "../../contacts/model/ContactUtils"
 import type {lazyIcon} from "../../gui/base/Icon"
-import type {MailFolder} from "../../api/entities/tutanota/MailFolder"
-import type {GroupInfo} from "../../api/entities/sys/GroupInfo"
+import type {MailFolder} from "../../api/entities/tutanota/TypeRefs.js"
+import type {GroupInfo} from "../../api/entities/sys/TypeRefs.js"
 import type {IUserController} from "../../api/main/UserController"
-import type {Mail} from "../../api/entities/tutanota/Mail"
+import type {Mail} from "../../api/entities/tutanota/TypeRefs.js"
 import type {ContactModel} from "../../contacts/model/ContactModel"
-import type {User} from "../../api/entities/sys/User"
-import type {EncryptedMailAddress} from "../../api/entities/tutanota/EncryptedMailAddress"
-import {createEncryptedMailAddress} from "../../api/entities/tutanota/EncryptedMailAddress"
+import type {User} from "../../api/entities/sys/TypeRefs.js"
+import type {EncryptedMailAddress} from "../../api/entities/tutanota/TypeRefs.js"
+import {createEncryptedMailAddress} from "../../api/entities/tutanota/TypeRefs.js"
 import type {EntityClient} from "../../api/common/EntityClient"
-import {CustomerPropertiesTypeRef} from "../../api/entities/sys/CustomerProperties"
+import {CustomerPropertiesTypeRef} from "../../api/entities/sys/TypeRefs.js"
 import {getEnabledMailAddressesForGroupInfo, getGroupInfoDisplayName} from "../../api/common/utils/GroupUtils"
-import type {InboxRule} from "../../api/entities/tutanota/InboxRule"
-import type {TutanotaProperties} from "../../api/entities/tutanota/TutanotaProperties"
+import type {InboxRule} from "../../api/entities/tutanota/TypeRefs.js"
+import type {TutanotaProperties} from "../../api/entities/tutanota/TypeRefs.js"
 import type {MailFacade} from "../../api/worker/facades/MailFacade"
 import {fullNameToFirstAndLastName, mailAddressToFirstAndLastName} from "../../misc/parsing/MailAddressParser"
-import type {DraftRecipient} from "../../api/entities/tutanota/DraftRecipient"
-import {createDraftRecipient} from "../../api/entities/tutanota/DraftRecipient"
+import type {DraftRecipient} from "../../api/entities/tutanota/TypeRefs.js"
+import {createDraftRecipient} from "../../api/entities/tutanota/TypeRefs.js"
 import type {Attachment} from "../editor/SendMailModel"
+import {PartialRecipient, RecipientType} from "../../api/common/recipients/Recipient"
 
 assertMainOrNode()
 export const LINE_BREAK = "<br>"
 
-/**
- *
- * @param mailAddress
- * @param name Null if the name shall be taken from the contact found with the email address.
- * @param contact
- * @returns {{_type: string, type: string, mailAddress: string, name: ?string, contact: *}}
- */
-export function createRecipientInfo(mailAddress: string, name: string | null, contact: Contact | null): RecipientInfo {
-	let type = isTutanotaMailAddress(mailAddress) ? RecipientInfoType.INTERNAL : RecipientInfoType.UNKNOWN
-	const usedName = name != null ? name : contact != null ? getContactDisplayName(contact) : ""
-	return {
-		type,
-		mailAddress,
-		name: usedName,
-		contact: contact,
-		resolveContactPromise: null,
+export function isTutanotaMailAddress(mailAddress: string): boolean {
+	var tutanotaDomains = TUTANOTA_MAIL_ADDRESS_DOMAINS
+
+	for (var i = 0; i < tutanotaDomains.length; i++) {
+		if (mailAddress.endsWith("@" + tutanotaDomains[i])) {
+			return true
+		}
 	}
-}
 
-/**
- * Resolves the existing contact for the recipient info if it has not contact. Creates a new contact if no contact has been found.
- * Caller can either wait until promise is resolved or read the stored promise on the recipient info.
- */
-export function resolveRecipientInfoContact(recipientInfo: RecipientInfo, contactModel: ContactModel, user: User): Promise<Contact> {
-	if (!recipientInfo.contact) {
-		const p = contactModel
-			.searchForContact(recipientInfo.mailAddress)
-			.then(contact => {
-				if (contact) {
-					if (!recipientInfo.name) {
-						recipientInfo.name = getContactDisplayName(contact)
-					}
-
-					recipientInfo.contact = contact
-				} else {
-					recipientInfo.contact = createNewContact(user, recipientInfo.mailAddress, recipientInfo.name)
-				}
-
-				recipientInfo.resolveContactPromise = null
-				return recipientInfo.contact
-			})
-			.catch(e => {
-				console.log("error resolving contact", e)
-				recipientInfo.contact = createNewContact(user, recipientInfo.mailAddress, recipientInfo.name)
-				recipientInfo.resolveContactPromise = null
-				return recipientInfo.contact
-			})
-		recipientInfo.resolveContactPromise = p
-		return p
-	} else {
-		return Promise.resolve(recipientInfo.contact)
-	}
+	return false
 }
 
 /**
@@ -123,22 +81,8 @@ export function createNewContact(user: User, mailAddress: string, name: string):
 	return contact
 }
 
-/**
- * @throws TooManyRequestsError if the recipient could not be resolved because of too many requests.
- */
-export function resolveRecipientInfo(mailFacade: MailFacade, recipientInfo: RecipientInfo): Promise<RecipientInfo> {
-	if (recipientInfo.type !== RecipientInfoType.UNKNOWN) {
-		return Promise.resolve(recipientInfo)
-	} else {
-		return mailFacade.getRecipientKeyData(recipientInfo.mailAddress).then(keyData => {
-			recipientInfo.type = keyData == null ? RecipientInfoType.EXTERNAL : RecipientInfoType.INTERNAL
-			return recipientInfo
-		})
-	}
-}
-
-export function getDisplayText(name: string, mailAddress: string, preferNameOnly: boolean): string {
-	if (!name || name === "") {
+export function getDisplayText(name: string | null, mailAddress: string, preferNameOnly: boolean): string {
+	if (!name) {
 		return mailAddress
 	} else if (preferNameOnly) {
 		return name
@@ -406,26 +350,6 @@ export function getExistingRuleForType(props: TutanotaProperties, cleanValue: st
 
 export function canDoDragAndDropExport(): boolean {
 	return isDesktop()
-}
-
-/**
- * Lossily convert a RecipientInfo to a DraftRecipient
- */
-export function recipientInfoToDraftRecipient({name, mailAddress}: RecipientInfo): DraftRecipient {
-	return createDraftRecipient({
-		name,
-		mailAddress,
-	})
-}
-
-/**
- * Lossily convert a RecipientInfo to an EncryptedMailAddress
- */
-export function recipientInfoToEncryptedMailAddress({name, mailAddress}: RecipientInfo): EncryptedMailAddress {
-	return createEncryptedMailAddress({
-		name,
-		address: mailAddress,
-	})
 }
 
 type AttachmentSizeCheckResult = {

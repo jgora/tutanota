@@ -1,4 +1,4 @@
-import {MailTypeRef} from "../../entities/tutanota/Mail"
+import {MailTypeRef} from "../../entities/tutanota/TypeRefs.js"
 import {DbTransaction} from "./DbFacade"
 import {resolveTypeReference} from "../../common/EntityFunctions"
 import {tokenize} from "./Tokenizer"
@@ -11,7 +11,8 @@ import {
 	downcast,
 	flat,
 	getDayShifted,
-	getStartOfDay, isNotNull,
+	getStartOfDay,
+	isNotNull,
 	isSameTypeRef,
 	neverNull,
 	promiseMap,
@@ -50,7 +51,6 @@ import {
 import {FULL_INDEXED_TIMESTAMP, NOTHING_INDEXED_TIMESTAMP} from "../../common/TutanotaConstants"
 import {compareNewestFirst, firstBiggerThanSecond, timestampToGeneratedId} from "../../common/utils/EntityUtils"
 import {INITIAL_MAIL_INDEX_INTERVAL_DAYS, MailIndexer} from "./MailIndexer"
-import {LoginFacadeImpl} from "../facades/LoginFacade"
 import {SuggestionFacade} from "./SuggestionFacade"
 import {AssociationType, Cardinality, ValueType} from "../../common/EntityConstants"
 import {NotAuthorizedError, NotFoundError} from "../../common/error/RestError"
@@ -59,6 +59,7 @@ import type {BrowserData} from "../../../misc/ClientConstants"
 import {ElementDataOS, SearchIndexMetaDataOS, SearchIndexOS, SearchIndexWordsIndex} from "./Indexer"
 import type {TypeModel} from "../../common/EntityTypes"
 import {EntityClient} from "../../common/EntityClient"
+import {UserFacade} from "../facades/UserFacade"
 
 type RowsToReadForIndexKey = {
 	indexKey: string
@@ -66,7 +67,6 @@ type RowsToReadForIndexKey = {
 }
 
 export class SearchFacade {
-	_loginFacade: LoginFacadeImpl
 	_db: Db
 	_mailIndexer: MailIndexer
 	_suggestionFacades: SuggestionFacade<any>[]
@@ -74,14 +74,13 @@ export class SearchFacade {
 	_entityClient: EntityClient
 
 	constructor(
-		loginFacade: LoginFacadeImpl,
+		private readonly userFacade: UserFacade,
 		db: Db,
 		mailIndexer: MailIndexer,
 		suggestionFacades: SuggestionFacade<any>[],
 		browserData: BrowserData,
 		entityClient: EntityClient,
 	) {
-		this._loginFacade = loginFacade
 		this._db = db
 		this._mailIndexer = mailIndexer
 		this._suggestionFacades = suggestionFacades
@@ -255,7 +254,7 @@ export class SearchFacade {
 			&& !this._mailIndexer.isIndexing
 		) {
 			this._mailIndexer.extendIndexIfNeeded(
-				this._loginFacade.getLoggedInUser(),
+				this.userFacade.getLoggedInUser(),
 				getStartOfDay(getDayShifted(new Date(), -INITIAL_MAIL_INDEX_INTERVAL_DAYS)).getTime(),
 			)
 		}
@@ -632,7 +631,6 @@ export class SearchFacade {
 	): Promise<void> {
 		indexEntries.sort((l, r) => compareNewestFirst(l.id, r.id))
 		// We filter out everything we've processed from moreEntries, even if we didn't include it
-		const {resolve: stop, promise: whenToStop} = defer()
 		// downcast: Array of optional elements in not subtype of non-optional elements
 		const entriesCopy: Array<MoreResultsIndexEntry | null> = downcast(indexEntries.slice())
 		// Results are added in the random order and we may filter some of them out. We need to sort them.

@@ -1,5 +1,5 @@
 import m, {Params} from "mithril"
-import {assertMainOrNodeBoot, isAdminClient, isApp, isDesktop, isIOSApp, Mode} from "../api/common/Env"
+import {assertMainOrNodeBoot, isApp, isElectronClient, isIOSApp, Mode} from "../api/common/Env"
 import {lang} from "./LanguageViewModel"
 import type {WorkerClient} from "../api/main/WorkerClient"
 import {client} from "./ClientDetector"
@@ -214,16 +214,16 @@ class WindowFacade {
 		}
 	}
 
-	addOnlineListener(listener: (...args: Array<any>) => any) {
+	addOnlineListener(listener: () => void) {
 		window.addEventListener("online", listener)
 	}
 
-	addOfflineListener(listener: (...args: Array<any>) => any) {
+	addOfflineListener(listener: () => void) {
 		window.addEventListener("offline", listener)
 	}
 
 	async reload(args: Params) {
-		if (isApp() || isDesktop() || isAdminClient()) {
+		if (isApp() || isElectronClient()) {
 			if (!args.hasOwnProperty("noAutoLogin")) {
 				args.noAutoLogin = true
 			}
@@ -231,7 +231,14 @@ class WindowFacade {
 			// Convert all values to strings so that native has easier time dealing with it
 			const preparedArgs = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, String(v)]))
 			const {locator} = await import("../api/main/MainLocator")
-			locator.systemApp.reloadNative(preparedArgs)
+
+			const stringifiedArgs: Record<string, string> = {}
+			for (const [k, v] of Object.entries(args)) {
+				if (v != null) {
+					stringifiedArgs[k] = String(v)
+				}
+			}
+			locator.commonSystemFacade.reload(stringifiedArgs)
 		} else {
 			window.location.reload()
 		}

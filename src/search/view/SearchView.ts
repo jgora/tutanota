@@ -1,23 +1,16 @@
 import m, {Children} from "mithril"
-import {ViewSlider} from "../../gui/base/ViewSlider"
+import {ViewSlider} from "../../gui/nav/ViewSlider.js"
 import {ColumnType, ViewColumn} from "../../gui/base/ViewColumn"
 import type {TranslationKey} from "../../misc/LanguageViewModel"
 import {lang} from "../../misc/LanguageViewModel"
-import {
-	FeatureType,
-	FULL_INDEXED_TIMESTAMP,
-	Keys,
-	MailFolderType,
-	NOTHING_INDEXED_TIMESTAMP,
-	OperationType
-} from "../../api/common/TutanotaConstants"
+import {FeatureType, FULL_INDEXED_TIMESTAMP, Keys, MailFolderType, NOTHING_INDEXED_TIMESTAMP, OperationType} from "../../api/common/TutanotaConstants"
 import stream from "mithril/stream"
 import {assertMainOrNode} from "../../api/common/Env"
 import {keyManager, Shortcut} from "../../misc/KeyManager"
 import type {NavButtonAttrs} from "../../gui/base/NavButtonN"
 import {isNavButtonSelected, NavButtonColor, NavButtonN} from "../../gui/base/NavButtonN"
 import {BootIcons} from "../../gui/base/icons/BootIcons"
-import {ContactTypeRef} from "../../api/entities/tutanota/Contact"
+import {ContactTypeRef, MailTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
 import {SearchListView, SearchResultListEntry} from "./SearchListView"
 import {size} from "../../gui/size"
 import {SearchResultDetailsViewer} from "./SearchResultDetailsViewer"
@@ -30,31 +23,19 @@ import {
 	SEARCH_MAIL_FIELDS,
 	setSearchUrl,
 } from "../model/SearchUtils"
-import {MailTypeRef} from "../../api/entities/tutanota/Mail"
 import {Dialog} from "../../gui/base/Dialog"
 import {locator} from "../../api/main/MainLocator"
 import {DropDownSelector} from "../../gui/base/DropDownSelector"
 import {getFolderName, getSortedCustomFolders, getSortedSystemFolders} from "../../mail/model/MailUtils"
-import {
-	getEndOfDay,
-	getStartOfDay,
-	isSameDay,
-	isSameTypeRef,
-	isToday,
-	neverNull,
-	noOp,
-	ofClass,
-	promiseMap,
-	TypeRef
-} from "@tutao/tutanota-utils"
+import {getEndOfDay, getStartOfDay, isSameDay, isSameTypeRef, isToday, neverNull, noOp, ofClass, promiseMap, TypeRef} from "@tutao/tutanota-utils"
 import {formatDateWithMonth, formatDateWithTimeIfNotEven} from "../../misc/Formatter"
 import {showDateRangeSelectionDialog} from "../../gui/date/DatePickerDialog"
 import {Icons} from "../../gui/base/icons/Icons"
 import {logins} from "../../api/main/LoginController"
 import {PageSize} from "../../gui/base/List"
 import {MultiSelectionBar} from "../../gui/base/MultiSelectionBar"
-import type {CurrentView} from "../../gui/base/Header"
-import {header} from "../../gui/base/Header"
+import type {CurrentView} from "../../gui/Header.js"
+import {header} from "../../gui/Header.js"
 import type {EntityUpdateData} from "../../api/main/EventController"
 import {isUpdateForTypeRef} from "../../api/main/EventController"
 import {getStartOfTheWeekOffsetForUser} from "../../calendar/date/CalendarUtils"
@@ -62,7 +43,7 @@ import {ButtonColor, ButtonN, ButtonType} from "../../gui/base/ButtonN"
 import {PermissionError} from "../../api/common/error/PermissionError"
 import {ContactEditor} from "../../contacts/ContactEditor"
 import {styles} from "../../gui/styles"
-import {FolderColumnView} from "../../gui/base/FolderColumnView"
+import {FolderColumnView} from "../../gui/FolderColumnView.js"
 import {ActionBar} from "../../gui/base/ActionBar"
 import {getGroupInfoDisplayName} from "../../api/common/utils/GroupUtils"
 import {isNewMailActionAvailable} from "../../gui/nav/NavFunctions"
@@ -70,7 +51,7 @@ import {showNotAvailableForFreeDialog} from "../../misc/SubscriptionDialogs"
 import {TextFieldN} from "../../gui/base/TextFieldN"
 import {SidebarSection} from "../../gui/SidebarSection"
 import type {clickHandler} from "../../gui/base/GuiUtils"
-import {Entity, SomeEntity} from "../../api/common/EntityTypes"
+import {SomeEntity} from "../../api/common/EntityTypes"
 
 assertMainOrNode()
 
@@ -239,7 +220,7 @@ export class SearchView implements CurrentView {
 			size.third_col_min_width,
 			size.third_col_max_width,
 		)
-		this.viewSlider = new ViewSlider([this.folderColumn, this.resultListColumn, this.resultDetailsColumn], "ContactView")
+		this.viewSlider = new ViewSlider(header,[this.folderColumn, this.resultListColumn, this.resultDetailsColumn], "ContactView")
 
 		this.view = (): Children => {
 			return m("#search.main-view", m(this.viewSlider))
@@ -344,45 +325,45 @@ export class SearchView implements CurrentView {
 		}
 
 		const timeDisplayValue = start + " - " + end
-		const changeTimeButtonAttrs = {
-			label: "selectPeriodOfTime_label",
-			click: async () => {
-				if (logins.getUserController().isFreeAccount()) {
-					showNotAvailableForFreeDialog(true)
-				} else {
-					const startOfWeek = getStartOfTheWeekOffsetForUser(logins.getUserController().userSettingsGroupRoot)
-					const {end, start} = await showDateRangeSelectionDialog(
-						startOfWeek,
-						this._startDate ?? this._getCurrentMailIndexDate() ?? new Date(),
-						this._endDate ?? new Date(),
-					)
-
-					if (end && isToday(end)) {
-						this._endDate = null
-					} else {
-						this._endDate = end
-					}
-
-					let current = this._getCurrentMailIndexDate()
-
-					if (start && current && isSameDay(current, start)) {
-						this._startDate = null
-					} else {
-						this._startDate = start
-					}
-
-					this._searchAgain()
-				}
-			},
-			icon: () => Icons.Edit,
-		} as const
-		const timeDisplayAttrs = {
+		return m(TextFieldN, {
 			label: "periodOfTime_label",
-			value: stream(timeDisplayValue),
+			value: timeDisplayValue,
 			disabled: true,
-			injectionsRight: () => [m(ButtonN, changeTimeButtonAttrs)],
-		} as const
-		return m(TextFieldN, timeDisplayAttrs)
+			injectionsRight: () => [m(ButtonN, {
+				label: "selectPeriodOfTime_label",
+				click: () => this.selectTimePeriod(),
+				icon: () => Icons.Edit,
+			})],
+		})
+	}
+
+	private async selectTimePeriod() {
+		if (logins.getUserController().isFreeAccount()) {
+			showNotAvailableForFreeDialog(true)
+		} else {
+			const startOfWeek = getStartOfTheWeekOffsetForUser(logins.getUserController().userSettingsGroupRoot)
+			const {end, start} = await showDateRangeSelectionDialog(
+				startOfWeek,
+				this._startDate ?? this._getCurrentMailIndexDate() ?? new Date(),
+				this._endDate ?? new Date(),
+			)
+
+			if (end && isToday(end)) {
+				this._endDate = null
+			} else {
+				this._endDate = end
+			}
+
+			let current = this._getCurrentMailIndexDate()
+
+			if (start && current && isSameDay(current, start)) {
+				this._startDate = null
+			} else {
+				this._startDate = start
+			}
+
+			this._searchAgain()
+		}
 	}
 
 	_searchAgain(): void {
@@ -572,10 +553,10 @@ export class SearchView implements CurrentView {
 			this._doNotUpdateQuery = false
 		}
 
-		if (args.id && this._searchList.isListAvailable() && !this._searchList.isEntitySelected(args.id)) {
+		if (args.id && !this._searchList.isEntitySelected(args.id)) {
 			// the mail list is visible already, just the selected mail is changed
 			this._searchList.scrollToIdAndSelect(args.id)
-		} else if (!args.id && this._searchList.isListAvailable() && this._searchList.getSelectedEntities().length > 0) {
+		} else if (!args.id && this._searchList.getSelectedEntities().length > 0) {
 			this._searchList.selectNone()
 		}
 	}

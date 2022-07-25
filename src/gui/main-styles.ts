@@ -3,10 +3,9 @@ import {px, size} from "./size"
 import {client} from "../misc/ClientDetector"
 import {lang} from "../misc/LanguageViewModel"
 import {noselect, position_absolute, positionValue} from "./mixins"
-import {assertMainOrNodeBoot, isAdminClient, isApp, isDesktop} from "../api/common/Env"
-import {theme} from "./theme"
+import {assertMainOrNodeBoot, isAdminClient, isApp, isElectronClient} from "../api/common/Env"
+import {getContentButtonIconBackground, getElevatedBackground, getNavigationMenuBg, theme} from "./theme"
 import {BrowserType} from "../misc/ClientConstants"
-import {getContentButtonIconBackground, getElevatedBackground, getNavigationMenuBg} from "./theme"
 
 assertMainOrNodeBoot()
 
@@ -37,7 +36,7 @@ const boxShadow = `0 2px 12px rgba(0, 0, 0, 0.4), 0 10px 40px rgba(0, 0, 0, 0.3)
 styles.registerStyle("main", () => {
 	return {
 		"#link-tt":
-			isDesktop() || isAdminClient()
+			isElectronClient()
 				? {
 					"pointer-events": "none",
 					"font-size": px(size.font_size_small),
@@ -58,7 +57,7 @@ styles.registerStyle("main", () => {
 				}
 				: {},
 		"#link-tt.reveal":
-			isDesktop() || isAdminClient()
+			isElectronClient()
 				? {
 					opacity: 1,
 					transition: "opacity .1s linear",
@@ -538,9 +537,6 @@ styles.registerStyle("main", () => {
 			"will-change": "alpha",
 		},
 		// borders
-		".password-indicator-border": {
-			border: `1px solid ${theme.content_button}`,
-		},
 		".border-bottom": {
 			"border-bottom": `1px solid ${theme.content_border}`,
 		},
@@ -592,9 +588,6 @@ styles.registerStyle("main", () => {
 		},
 		".list-header": {
 			"border-bottom": `1px solid ${theme.list_border}`,
-		},
-		".password-indicator-bg": {
-			"background-color": theme.content_button,
 		},
 		".accent-bg": {
 			"background-color": theme.content_accent,
@@ -674,7 +667,8 @@ styles.registerStyle("main", () => {
 		"::-webkit-scrollbar": !client.isMobileDevice()
 			? {
 				background: "transparent",
-				width: "8px",
+				width: "8px", // width of vertical scrollbar
+				height: "8px", // width of horizontal scrollbar
 			}
 			: {},
 		"::-webkit-scrollbar-thumb": !client.isMobileDevice()
@@ -1110,11 +1104,13 @@ styles.registerStyle("main", () => {
 			bottom: 0,
 		},
 		".nav-bar-spacer": {
-			width: "2px",
-			height: "24px",
+			width: "0px",
+			height: "22px",
 			"margin-left": "2px",
 			"margin-top": "10px",
-			"background-color": theme.navigation_border,
+			"border-color": theme.navigation_border,
+			"border-width": "1px",
+			"border-style": "solid"
 		},
 		".search-bar > .text-field": {
 			"padding-top": "0 !important",

@@ -1,7 +1,7 @@
-import type {KnowledgeBaseEntry} from "../../api/entities/tutanota/KnowledgeBaseEntry"
-import {KnowledgeBaseEntryTypeRef} from "../../api/entities/tutanota/KnowledgeBaseEntry"
-import type {EmailTemplate} from "../../api/entities/tutanota/EmailTemplate"
-import {EmailTemplateTypeRef} from "../../api/entities/tutanota/EmailTemplate"
+import type {KnowledgeBaseEntry} from "../../api/entities/tutanota/TypeRefs.js"
+import {KnowledgeBaseEntryTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
+import type {EmailTemplate} from "../../api/entities/tutanota/TypeRefs.js"
+import {EmailTemplateTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
 import type {EntityEventsListener, EntityUpdateData} from "../../api/main/EventController"
 import {EventController, isUpdateForTypeRef} from "../../api/main/EventController"
 import {EntityClient} from "../../api/common/EntityClient"
@@ -49,7 +49,7 @@ export class KnowledgeBaseModel {
 		this._allKeywords = []
 		this._matchedKeywordsInContent = []
 		this.filteredEntries = stream(this._allEntries.array)
-		this.selectedEntry = stream(null)
+		this.selectedEntry = stream<KnowledgeBaseEntry | null>(null)
 		this._filterValue = ""
 
 		this._entityEventReceived = updates => {

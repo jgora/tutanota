@@ -3,20 +3,24 @@ import {size} from "./size"
 import {assertMainOrNodeBoot, isAdminClient, isTest} from "../api/common/Env"
 import {windowFacade} from "../misc/WindowFacade"
 import {theme, themeController} from "./theme"
-import {neverNull} from "@tutao/tutanota-utils"
+import {assertNotNull, neverNull} from "@tutao/tutanota-utils"
 import {client} from "../misc/ClientDetector"
 
 assertMainOrNodeBoot()
+
+export type StyleSheetId = "main" | "outline"
 
 /**
  * Writes all styles to a single dom <style>-tag
  */
 
 class Styles {
-	styles: Map<string, (...args: Array<any>) => any>
+	styles: Map<StyleSheetId, (...args: Array<any>) => any>
 	initialized: boolean
 	bodyWidth: number
 	bodyHeight: number
+
+	private styleSheets = new Map<StyleSheetId, HTMLStyleElement>()
 
 	constructor() {
 		this.initialized = false
@@ -28,7 +32,7 @@ class Styles {
 			this.bodyHeight = height
 		})
 		themeController.themeIdChangedStream.map(() => {
-			this._updateDomStyles()
+			this.updateDomStyles()
 		})
 	}
 
@@ -36,63 +40,13 @@ class Styles {
 		if (this.initialized) return
 		this.initialized = true
 
-		this._updateDomStyles()
+		this.updateDomStyles()
 	}
 
-	registerStyle(id: string, styleCreator: (...args: Array<any>) => any) {
-		if (!this.initialized && this.styles.has(id)) {
-			throw new Error("duplicate style definition: " + id)
-		}
-
-		this.styles.set(id, styleCreator)
-
-		if (this.initialized) {
-			log(Cat.css, "update style", id, styleCreator(theme))
-
-			this._updateDomStyle(id, styleCreator)
-		}
+	getStyleSheetElement(id: StyleSheetId): Node {
+		return assertNotNull(this.styleSheets.get(id)).cloneNode(true)
 	}
 
-	updateStyle(id: string) {
-		if (!this.initialized || !this.styles.has(id)) {
-			throw new Error("cannot update nonexistent style " + id)
-		}
-
-		const creator = neverNull(this.styles.get(id))
-		log(Cat.css, "update style", id, creator(theme))
-
-		this._updateDomStyle(id, creator)
-	}
-
-	_updateDomStyles() {
-		// This is hacking but we currently import gui stuff from a lot of tested things
-		if (isTest()) {
-			return
-		}
-
-		let time = timer(Cat.css)
-		Array.from(this.styles.entries()).map(entry => {
-			this._updateDomStyle(entry[0], entry[1])
-		})
-		log(Cat.css, "creation time", time())
-	}
-
-	_updateDomStyle(id: string, styleCreator: (...args: Array<any>) => any) {
-		this._getDomStyleSheet(id).textContent = toCss(styleCreator())
-	}
-
-	_getDomStyleSheet(id: string): HTMLElement {
-		let styleDomElement = document.getElementById("css-" + id)
-
-		if (!styleDomElement) {
-			styleDomElement = document.createElement("style")
-			styleDomElement.setAttribute("type", "text/css")
-			styleDomElement.id = "css-" + id
-			styleDomElement = document.getElementsByTagName("head")[0].appendChild(styleDomElement)
-		}
-
-		return styleDomElement
-	}
 
 	isDesktopLayout(): boolean {
 		return this.bodyWidth >= size.desktop_layout_width
@@ -104,6 +58,63 @@ class Styles {
 
 	isUsingBottomNavigation(): boolean {
 		return !isAdminClient() && (client.isMobileDevice() || !this.isDesktopLayout())
+	}
+
+	registerStyle(id: StyleSheetId, styleCreator: (...args: Array<any>) => any) {
+		if (!this.initialized && this.styles.has(id)) {
+			throw new Error("duplicate style definition: " + id)
+		}
+
+		this.styles.set(id, styleCreator)
+
+		if (this.initialized) {
+			log(Cat.css, "update style", id, styleCreator(theme))
+
+			this.updateDomStyle(id, styleCreator)
+		}
+	}
+
+	updateStyle(id: StyleSheetId) {
+		if (!this.initialized || !this.styles.has(id)) {
+			throw new Error("cannot update nonexistent style " + id)
+		}
+
+		const creator = neverNull(this.styles.get(id))
+		log(Cat.css, "update style", id, creator(theme))
+
+		this.updateDomStyle(id, creator)
+	}
+
+	private updateDomStyles() {
+		// This is hacking but we currently import gui stuff from a lot of tested things
+		if (isTest()) {
+			return
+		}
+
+		let time = timer(Cat.css)
+		Array.from(this.styles.entries()).map(entry => {
+			this.updateDomStyle(entry[0], entry[1])
+		})
+		log(Cat.css, "creation time", time())
+	}
+
+	private updateDomStyle(id: StyleSheetId, styleCreator: (...args: Array<any>) => any) {
+		const styleSheet = this.getDomStyleSheet(`css-${id}`)
+		styleSheet.textContent = toCss(styleCreator())
+		this.styleSheets.set(id, styleSheet)
+	}
+
+	private getDomStyleSheet(id: string): HTMLStyleElement {
+		let styleDomElement = document.getElementById(id)
+
+		if (!styleDomElement) {
+			styleDomElement = document.createElement("style")
+			styleDomElement.setAttribute("type", "text/css")
+			styleDomElement.id = id
+			styleDomElement = document.getElementsByTagName("head")[0].appendChild(styleDomElement)
+		}
+
+		return styleDomElement as HTMLStyleElement
 	}
 }
 

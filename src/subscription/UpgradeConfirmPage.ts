@@ -4,7 +4,7 @@ import {Dialog} from "../gui/base/Dialog"
 import {lang} from "../misc/LanguageViewModel"
 import {formatPriceWithInfo, getPaymentMethodName, isYearlyPayment} from "./PriceUtils"
 import {HabReminderImage} from "../gui/base/icons/Icons"
-import {createSwitchAccountTypeData} from "../api/entities/sys/SwitchAccountTypeData"
+import {createSwitchAccountTypeData} from "../api/entities/sys/TypeRefs.js"
 import {AccountType, Const, PaidSubscriptionType} from "../api/common/TutanotaConstants"
 import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
 import {HttpMethod} from "../api/common/EntityFunctions"
@@ -94,23 +94,23 @@ export class UpgradeConfirmPage implements WizardPageN<UpgradeSubscriptionData> 
 				m(".flex-grow-shrink-half.plr-l", [
 					m(TextFieldN, {
 						label: "subscription_label",
-						value: stream(getDisplayNameOfSubscriptionType(attrs.data.type)),
+						value: getDisplayNameOfSubscriptionType(attrs.data.type),
 						disabled: true,
 					}),
 					m(TextFieldN, {
 						label: "paymentInterval_label",
-						value: stream(subscription),
+						value: subscription,
 						disabled: true,
 					}),
 					m(TextFieldN, {
 						label: isYearly ? "priceFirstYear_label" : "price_label",
-						value: stream(buildPriceString(attrs.data.price, attrs.data.options)),
+						value: buildPriceString(attrs.data.price, attrs.data.options),
 						disabled: true,
 					}),
 					this.renderPriceNextYear(attrs),
 					m(TextFieldN, {
 						label: "paymentMethod_label",
-						value: stream(getPaymentMethodName(attrs.data.paymentData.paymentMethod)),
+						value: getPaymentMethodName(attrs.data.paymentData.paymentMethod),
 						disabled: true,
 					}),
 				]),
@@ -148,7 +148,7 @@ export class UpgradeConfirmPage implements WizardPageN<UpgradeSubscriptionData> 
 		return attrs.data.priceNextYear
 			? m(TextFieldN, {
 				label: "priceForNextYear_label",
-				value: stream(buildPriceString(attrs.data.priceNextYear, attrs.data.options)),
+				value: buildPriceString(attrs.data.priceNextYear, attrs.data.options),
 				disabled: true,
 			})
 			: null

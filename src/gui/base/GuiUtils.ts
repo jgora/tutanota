@@ -9,13 +9,14 @@ import {Icons} from "./icons/Icons"
 import type {DropdownChildAttrs} from "./DropdownN"
 import {attachDropdown} from "./DropdownN"
 import type {$Promisable, lazy, MaybeLazy} from "@tutao/tutanota-utils"
-import {assertNotNull, mapLazily, noOp} from "@tutao/tutanota-utils"
+import {assertNotNull, lazyMemoized, mapLazily, memoized, noOp} from "@tutao/tutanota-utils"
 import {Dialog} from "./Dialog"
 import {logins} from "../../api/main/LoginController"
 import type {AllIcons} from "./Icon"
 import {ProgrammingError} from "../../api/common/error/ProgrammingError"
-import {Children} from "mithril";
+import m, {Children} from "mithril";
 import Stream from "mithril/stream";
+import {DropDownSelectorN} from "./DropDownSelectorN.js"
 
 export type dropHandler = (dragData: string) => void
 // not all browsers have the actual button as e.currentTarget, but all of them send it as a second argument (see https://github.com/tutao/tutanota/issues/1110)
@@ -41,6 +42,32 @@ export function createCountryDropdown(
 		.setSelectionChangedHandler(value => {
 			selectedCountry(value)
 		})
+}
+
+// lazy because of global dependencies
+const dropdownCountries = lazyMemoized(() => Countries.map(c => ({value: c, name: c.n})))
+
+export function renderCountryDropdown(
+	params: {
+		selectedCountry: Country | null,
+		onSelectionChanged: (country: Country) => void,
+		helpLabel?: lazy<string>,
+		label?: TranslationKey | lazy<string>
+	},
+): Children {
+	return m(DropDownSelectorN, {
+		label: params.label ?? "invoiceCountry_label",
+		helpLabel: params.helpLabel,
+		items: [
+			...dropdownCountries(),
+			{
+				value: null,
+				name: lang.get("choose_label"),
+			}
+		],
+		selectedValue: params.selectedCountry,
+		selectionChangedHandler: params.onSelectionChanged
+	})
 }
 
 export function createMoreSecondaryButtonAttrs(
@@ -155,22 +182,25 @@ export function getCoordsOfMouseOrTouchEvent(
 
 export function makeListSelectionChangedScrollHandler(scrollDom: HTMLElement, entryHeight: number, getSelectedEntryIndex: lazy<number>): () => void {
 	return function () {
-		const selectedIndex = getSelectedEntryIndex()
-		const scrollWindowHeight = scrollDom.getBoundingClientRect().height
-		const scrollOffset = scrollDom.scrollTop
-		// Actual position in the list
-		const selectedTop = entryHeight * selectedIndex
-		const selectedBottom = selectedTop + entryHeight
-		// Relative to the top of the scroll window
-		const selectedRelativeTop = selectedTop - scrollOffset
-		const selectedRelativeBottom = selectedBottom - scrollOffset
+		scrollListDom(scrollDom, entryHeight, getSelectedEntryIndex())
+	}
+}
 
-		// clamp the selected item to stay between the top and bottom of the scroll window
-		if (selectedRelativeTop < 0) {
-			scrollDom.scrollTop = selectedTop
-		} else if (selectedRelativeBottom > scrollWindowHeight) {
-			scrollDom.scrollTop = selectedBottom - scrollWindowHeight
-		}
+export function scrollListDom(scrollDom: HTMLElement, entryHeight: number, selectedIndex: number) {
+	const scrollWindowHeight = scrollDom.getBoundingClientRect().height
+	const scrollOffset = scrollDom.scrollTop
+	// Actual position in the list
+	const selectedTop = entryHeight * selectedIndex
+	const selectedBottom = selectedTop + entryHeight
+	// Relative to the top of the scroll window
+	const selectedRelativeTop = selectedTop - scrollOffset
+	const selectedRelativeBottom = selectedBottom - scrollOffset
+
+	// clamp the selected item to stay between the top and bottom of the scroll window
+	if (selectedRelativeTop < 0) {
+		scrollDom.scrollTop = selectedTop
+	} else if (selectedRelativeBottom > scrollWindowHeight) {
+		scrollDom.scrollTop = selectedBottom - scrollWindowHeight
 	}
 }
 

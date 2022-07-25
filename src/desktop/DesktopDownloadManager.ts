@@ -1,11 +1,9 @@
-import type {Session} from "electron"
 import type {DesktopConfig} from "./config/DesktopConfig.js"
 import path from "path"
 import {assertNotNull, uint8ArrayToBase64} from "@tutao/tutanota-utils"
 import {lang} from "../misc/LanguageViewModel.js"
 import type {DesktopNetworkClient} from "./DesktopNetworkClient.js"
 import {FileOpenError} from "../api/common/error/FileOpenError.js"
-import {log} from "./DesktopLog.js"
 import {looksExecutable, nonClobberingFilename} from "./PathUtils.js"
 import type {DesktopUtils} from "./DesktopUtils.js"
 import type * as FsModule from "fs"
@@ -13,55 +11,31 @@ import {CancelledError} from "../api/common/error/CancelledError.js"
 import {BuildConfigKey, DesktopConfigKey} from "./config/ConfigKeys.js"
 import {WriteStream} from "fs-extra"
 // Make sure to only import the type
-import type {DownloadTaskResponse, FileUri} from "../native/common/FileApp.js"
+import type {FileUri} from "../native/common/FileApp.js"
 import type http from "http"
 import type * as stream from "stream"
 import {DateProvider} from "../api/common/DateProvider"
 import {sha256Hash} from "@tutao/tutanota-crypto"
+import {DownloadTaskResponse} from "../native/common/generatedipc/DownloadTaskResponse"
+import {DataFile} from "../api/common/DataFile.js"
+import url from "url"
 
 type FsExports = typeof FsModule
 type ElectronExports = typeof Electron.CrossProcessExports
 
-const TAG = "[DownloadManager]"
-
 export class DesktopDownloadManager {
-	private readonly _conf: DesktopConfig
-	private readonly _net: DesktopNetworkClient
-	private readonly _dateProvider: DateProvider
-
 	/** We don't want to spam opening file manager all the time so we throttle it. This field is set to the last time we opened it. */
-	private _lastOpenedFileManagerAt: number | null
-	private readonly _desktopUtils: DesktopUtils
-	private readonly _fs: FsExports
-	private readonly _electron: ElectronExports
+	private lastOpenedFileManagerAt: number | null
 
 	constructor(
-		conf: DesktopConfig,
-		net: DesktopNetworkClient,
-		desktopUtils: DesktopUtils,
-		dateProvider: DateProvider,
-		fs: FsExports,
-		electron: ElectronExports,
+		private readonly conf: DesktopConfig,
+		private readonly net: DesktopNetworkClient,
+		private readonly desktopUtils: DesktopUtils,
+		private readonly dateProvider: DateProvider,
+		private readonly fs: FsExports,
+		private readonly electron: ElectronExports,
 	) {
-		this._conf = conf
-		this._net = net
-		this._dateProvider = dateProvider
-		this._lastOpenedFileManagerAt = null
-		this._desktopUtils = desktopUtils
-		this._fs = fs
-		this._electron = electron
-	}
-
-	manageDownloadsForSession(session: Session, dictUrl: string) {
-		dictUrl = dictUrl + "/dictionaries/"
-		log.debug(TAG, "getting dictionaries from:", dictUrl)
-		session.setSpellCheckerDictionaryDownloadURL(dictUrl)
-		session
-			.removeAllListeners("spellcheck-dictionary-download-failure")
-			.on("spellcheck-dictionary-initialized", (ev, lcode) => log.debug(TAG, "spellcheck-dictionary-initialized", lcode))
-			.on("spellcheck-dictionary-download-begin", (ev, lcode) => log.debug(TAG, "spellcheck-dictionary-download-begin", lcode))
-			.on("spellcheck-dictionary-download-success", (ev, lcode) => log.debug(TAG, "spellcheck-dictionary-download-success", lcode))
-			.on("spellcheck-dictionary-download-failure", (ev, lcode) => log.debug(TAG, "spellcheck-dictionary-download-failure", lcode))
+		this.lastOpenedFileManagerAt = null
 	}
 
 	/**
@@ -69,7 +43,7 @@ export class DesktopDownloadManager {
 	 * @throws Error if file is not found
 	 */
 	async hashFile(fileUri: string): Promise<string> {
-		const data = await this._fs.promises.readFile(fileUri)
+		const data = await this.fs.promises.readFile(fileUri)
 		const checksum = sha256Hash(data)
 		return uint8ArrayToBase64(checksum)
 	}
@@ -83,7 +57,7 @@ export class DesktopDownloadManager {
 		headers: Dict,
 	): Promise<DownloadTaskResponse> {
 		// Propagate error in initial request if it occurs (I/O errors and such)
-		const response = await this._net.executeRequest(sourceUrl, {
+		const response = await this.net.executeRequest(sourceUrl, {
 			method: "GET",
 			timeout: 20000,
 			headers,
@@ -94,7 +68,8 @@ export class DesktopDownloadManager {
 
 		let encryptedFilePath
 		if (statusCode == 200) {
-			const downloadDirectory = await this.getTutanotaTempDirectory("encrypted")
+			const downloadDirectory = path.join(this.desktopUtils.getTutanotaTempPath(), "encrypted")
+			await this.fs.promises.mkdir(downloadDirectory, {recursive: true})
 			encryptedFilePath = path.join(downloadDirectory, fileName)
 			await this.pipeIntoFile(response, encryptedFilePath)
 		} else {
@@ -119,13 +94,14 @@ export class DesktopDownloadManager {
 	 */
 	open(itemPath: string): Promise<void> {
 		const tryOpen = () =>
-			this._electron.shell
+			this.electron.shell
 				.openPath(itemPath) // may resolve with "" or an error message
 				.catch(() => "failed to open path.")
 				.then(errMsg => (errMsg === "" ? Promise.resolve() : Promise.reject(new FileOpenError("Could not open " + itemPath + ", " + errMsg))))
 
-		if (looksExecutable(itemPath)) {
-			return this._electron.dialog
+		// only windows will happily execute a just downloaded program
+		if (process.platform === "win32" && looksExecutable(itemPath)) {
+			return this.electron.dialog
 					   .showMessageBox({
 						   type: "warning",
 						   buttons: [lang.get("yes_label"), lang.get("no_label")],
@@ -146,15 +122,44 @@ export class DesktopDownloadManager {
 	}
 
 	/**
-	 * Save {@param data} to the disk. Will pick the path based on user download dir preference and {@param filename}.
+	 * Save {@param file} to the disk. Will pick the path based on user download dir preference and the name contained
+	 * in {@param file}.
 	 */
-	async saveDataFile(filename: string, data: Uint8Array): Promise<FileUri> {
-		const savePath = await this._pickSavePath(filename)
-		await this._fs.promises.mkdir(path.dirname(savePath), {
+	async writeDataFile(file: DataFile): Promise<FileUri> {
+		const savePath = await this.pickSavePath(file.name)
+		await this.fs.promises.mkdir(path.dirname(savePath), {
 			recursive: true,
 		})
-		await this._fs.promises.writeFile(savePath, data)
+		await this.fs.promises.writeFile(savePath, file.data)
 		return savePath
+	}
+
+	/**
+	 * try to read a file into a DataFile. return null if it fails.
+	 * @param uriOrPath a file path or a file URI to read the data from
+	 * @returns {Promise<null|DataFile>}
+	 */
+	async readDataFile(uriOrPath: string): Promise<DataFile | null> {
+		try {
+			uriOrPath = url.fileURLToPath(uriOrPath)
+		} catch (e) {
+			// the thing already was a path, or at least not an URI
+		}
+
+		try {
+			const data = await this.fs.promises.readFile(uriOrPath)
+			const name = path.basename(uriOrPath)
+			return {
+				_type: "DataFile",
+				data,
+				name,
+				mimeType: "application/octet-stream",
+				size: data.length,
+				id: undefined,
+			}
+		} catch (e) {
+			return null
+		}
 	}
 
 
@@ -163,36 +168,36 @@ export class DesktopDownloadManager {
 	 */
 	async putFileIntoDownloadsFolder(fileUri: string): Promise<FileUri> {
 		const filename = path.basename(fileUri)
-		const savePath = await this._pickSavePath(filename)
-		await this._fs.promises.mkdir(path.dirname(savePath), {
+		const savePath = await this.pickSavePath(filename)
+		await this.fs.promises.mkdir(path.dirname(savePath), {
 			recursive: true,
 		})
-		await this._fs.promises.copyFile(fileUri, savePath)
+		await this.fs.promises.copyFile(fileUri, savePath)
 		await this.showInFileExplorer(savePath)
 		return savePath
 	}
 
 	async showInFileExplorer(savePath: string): Promise<void> {
 		// See doc for _lastOpenedFileManagerAt on why we do this throttling.
-		const lastOpenedFileManagerAt = this._lastOpenedFileManagerAt
-		const fileManagerTimeout = await this._conf.getConst(BuildConfigKey.fileManagerTimeout)
+		const lastOpenedFileManagerAt = this.lastOpenedFileManagerAt
+		const fileManagerTimeout = await this.conf.getConst(BuildConfigKey.fileManagerTimeout)
 
-		if (lastOpenedFileManagerAt == null || this._dateProvider.now() - lastOpenedFileManagerAt > fileManagerTimeout) {
-			this._lastOpenedFileManagerAt = this._dateProvider.now()
-			await this._electron.shell.openPath(path.dirname(savePath))
+		if (lastOpenedFileManagerAt == null || this.dateProvider.now() - lastOpenedFileManagerAt > fileManagerTimeout) {
+			this.lastOpenedFileManagerAt = this.dateProvider.now()
+			await this.electron.shell.openPath(path.dirname(savePath))
 		}
 	}
 
 
-	private async _pickSavePath(filename: string): Promise<string> {
-		const defaultDownloadPath = await this._conf.getVar(DesktopConfigKey.defaultDownloadPath)
+	private async pickSavePath(filename: string): Promise<string> {
+		const defaultDownloadPath = await this.conf.getVar(DesktopConfigKey.defaultDownloadPath)
 
 		if (defaultDownloadPath != null) {
 			const fileName = path.basename(filename)
-			return path.join(defaultDownloadPath, nonClobberingFilename(await this._fs.promises.readdir(defaultDownloadPath), fileName))
+			return path.join(defaultDownloadPath, nonClobberingFilename(await this.fs.promises.readdir(defaultDownloadPath), fileName))
 		} else {
-			const {canceled, filePath} = await this._electron.dialog.showSaveDialog({
-				defaultPath: path.join(this._electron.app.getPath("downloads"), filename),
+			const {canceled, filePath} = await this.electron.dialog.showSaveDialog({
+				defaultPath: path.join(this.electron.app.getPath("downloads"), filename),
 			})
 
 			if (canceled) {
@@ -203,28 +208,8 @@ export class DesktopDownloadManager {
 		}
 	}
 
-	/**
-	 * Get a directory under tutanota's temporary directory, will create it if it doesn't exist
-	 */
-	async getTutanotaTempDirectory(...subdirs: string[]): Promise<string> {
-		const dirPath = this._desktopUtils.getTutanotaTempPath(...subdirs)
-
-		await this._fs.promises.mkdir(dirPath, {
-			recursive: true,
-		})
-		return dirPath
-	}
-
-	deleteTutanotaTempDirectory() {
-		if (this._fs.existsSync(this._desktopUtils.getTutanotaTempPath())) {
-			this._fs.rmSync(this._desktopUtils.getTutanotaTempPath(), {
-				recursive: true,
-			})
-		}
-	}
-
 	private async pipeIntoFile(response: stream.Readable, encryptedFilePath: string) {
-		const fileStream: WriteStream = this._fs.createWriteStream(encryptedFilePath, {emitClose: true})
+		const fileStream: WriteStream = this.fs.createWriteStream(encryptedFilePath, {emitClose: true})
 		try {
 			await pipeStream(response, fileStream)
 			await closeFileStream(fileStream)
@@ -235,19 +220,21 @@ export class DesktopDownloadManager {
 			// > If an error occurs, it will be necessary to manually close each stream in order to prevent memory leaks.
 			// see https://nodejs.org/api/stream.html#readablepipedestination-options
 			await closeFileStream(fileStream)
-			await this._fs.promises.unlink(encryptedFilePath)
+			await this.fs.promises.unlink(encryptedFilePath)
 			throw e
 		}
 	}
 
 	async joinFiles(filename: string, files: Array<FileUri>): Promise<string> {
-		const downloadDirectory = await this.getTutanotaTempDirectory("download")
+		const downloadDirectory = path.join(this.desktopUtils.getTutanotaTempPath(), "download")
+		await this.fs.promises.mkdir(downloadDirectory, {recursive: true,})
+
 		const fileUri = path.join(downloadDirectory, filename)
-		const outStream = this._fs.createWriteStream(fileUri, {autoClose: false})
+		const outStream = this.fs.createWriteStream(fileUri, {autoClose: false})
 
 		for (const infile of files) {
 			await new Promise((resolve, reject) => {
-				const readStream = this._fs.createReadStream(infile)
+				const readStream = this.fs.createReadStream(infile)
 				readStream.on('end', resolve)
 				readStream.on('error', reject)
 				readStream.pipe(outStream, {end: false})
@@ -261,12 +248,16 @@ export class DesktopDownloadManager {
 	}
 
 	async deleteFile(filename: string): Promise<void> {
-		return this._fs.promises.unlink(filename)
+		return this.fs.promises.unlink(filename)
 	}
 
 	async getSize(fileUri: FileUri): Promise<number> {
-		const stats = await this._fs.promises.stat(fileUri)
+		const stats = await this.fs.promises.stat(fileUri)
 		return stats.size
+	}
+
+	deleteTutanotaTempDirectory() {
+		return this.desktopUtils.deleteTutanotaTempDir()
 	}
 }
 

@@ -2,17 +2,18 @@ import m, {Children, Component, Vnode} from "mithril"
 import stream from "mithril/stream"
 import {assertMainOrNode, isApp, isDesktop, isIOSApp, isTutanotaDomain} from "../api/common/Env"
 import {ColumnType, ViewColumn} from "../gui/base/ViewColumn"
-import {ViewSlider} from "../gui/base/ViewSlider"
+import {ViewSlider} from "../gui/nav/ViewSlider.js"
 import {SettingsFolder} from "./SettingsFolder"
 import {lang} from "../misc/LanguageViewModel"
-import type {CurrentView} from "../gui/base/Header"
+import type {CurrentView} from "../gui/Header.js"
+import {header} from "../gui/Header.js"
 import {LoginSettingsViewer} from "./LoginSettingsViewer"
 import {GlobalSettingsViewer} from "./GlobalSettingsViewer"
 import {DesktopSettingsViewer} from "./DesktopSettingsViewer"
 import {MailSettingsViewer} from "./MailSettingsViewer"
 import {UserListView} from "./UserListView"
-import type {User} from "../api/entities/sys/User"
-import {UserTypeRef} from "../api/entities/sys/User"
+import type {ReceivedGroupInvitation, User} from "../api/entities/sys/TypeRefs.js"
+import {CustomerInfoTypeRef, UserTypeRef} from "../api/entities/sys/TypeRefs.js"
 import {logins} from "../api/main/LoginController"
 import {GroupListView} from "./GroupListView"
 import {ContactFormListView} from "./contactform/ContactFormListView.js"
@@ -30,7 +31,6 @@ import {isUpdateForTypeRef} from "../api/main/EventController"
 import {showUserImportDialog} from "./UserViewer"
 import {LazyLoaded, partition, promiseMap} from "@tutao/tutanota-utils"
 import {getAvailableDomains} from "./AddUserDialog"
-import {CustomerInfoTypeRef} from "../api/entities/sys/CustomerInfo"
 import {AppearanceSettingsViewer} from "./AppearanceSettingsViewer"
 import type {NavButtonAttrs} from "../gui/base/NavButtonN"
 import {NavButtonColor} from "../gui/base/NavButtonN";
@@ -38,7 +38,7 @@ import {Dialog} from "../gui/base/Dialog"
 import {AboutDialog} from "./AboutDialog"
 import {navButtonRoutes, SETTINGS_PREFIX} from "../misc/RouteChange"
 import {size} from "../gui/size"
-import {FolderColumnView} from "../gui/base/FolderColumnView"
+import {FolderColumnView} from "../gui/FolderColumnView.js"
 import {getEtId, isSameId} from "../api/common/utils/EntityUtils"
 import {TemplateListView} from "./TemplateListView"
 import {KnowledgeBaseListView} from "./KnowledgeBaseListView"
@@ -52,14 +52,14 @@ import {getDefaultGroupName, getSharedGroupName, isSharedGroupOwner} from "../sh
 import {DummyTemplateListView} from "./DummyTemplateListView"
 import {SettingsFolderRow} from "./SettingsFolderRow"
 import {isCustomizationEnabledForCustomer} from "../api/common/utils/Utils"
-import type {ReceivedGroupInvitation} from "../api/entities/sys/ReceivedGroupInvitation"
 import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
-import {HttpMethod} from "../api/common/EntityFunctions"
 import {TextFieldN} from "../gui/base/TextFieldN"
-import {createGroupSettings} from "../api/entities/tutanota/GroupSettings"
-import {createUserAreaGroupDeleteData} from "../api/entities/tutanota/UserAreaGroupDeleteData"
+import {createGroupSettings, createUserAreaGroupDeleteData} from "../api/entities/tutanota/TypeRefs.js"
 import {GroupInvitationFolderRow} from "../sharing/view/GroupInvitationFolderRow"
 import {TemplateGroupService} from "../api/entities/tutanota/Services"
+import {attachDropdown} from "../gui/base/DropdownN.js"
+import {exportUserCsv} from "./UserDataExporter.js"
+import {ButtonType} from "../gui/base/ButtonN.js"
 
 assertMainOrNode()
 
@@ -355,7 +355,7 @@ export class SettingsView implements CurrentView {
 			2400,
 			() => lang.get("settings_label"),
 		)
-		this.viewSlider = new ViewSlider([this._settingsFoldersColumn, this._settingsColumn, this._settingsDetailsColumn], "SettingsView")
+		this.viewSlider = new ViewSlider(header, [this._settingsFoldersColumn, this._settingsColumn, this._settingsDetailsColumn], "SettingsView")
 
 		this.view = (): Vnode<any> => {
 			return m("#settings.main-view", m(this.viewSlider))
@@ -451,11 +451,29 @@ export class SettingsView implements CurrentView {
 						mainButtonAttrs: buttonAttrs,
 						extraButtonAttrs:
 							canImportUsers && folder.path === "users"
-								? {
-									label: "importUsers_action",
-									click: () => showUserImportDialog(this._customDomains.getLoaded()),
-									icon: () => Icons.ContactImport,
-								}
+								? attachDropdown({
+									mainButtonAttrs: {
+										label: "more_label",
+										icon: () => Icons.More,
+									},
+									childAttrs: () => [
+										{
+											label: "importUsers_action",
+											click: () => showUserImportDialog(this._customDomains.getLoaded()),
+											type: ButtonType.Dropdown
+										},
+										{
+											label: "exportUsers_action",
+											click: () => exportUserCsv(
+												locator.entityClient,
+												locator.userManagementFacade,
+												logins,
+												locator.fileController
+											),
+											type: ButtonType.Dropdown
+										},
+									]
+								})
 								: null,
 					})
 				}),
@@ -671,7 +689,8 @@ function showRenameTemplateListDialog(instance: TemplateGroupInstance) {
 		child: {
 			view: () =>
 				m(TextFieldN, {
-					value: name,
+					value: name(),
+					oninput: name,
 					label: "templateGroupName_label",
 				}),
 		},

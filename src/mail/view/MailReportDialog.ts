@@ -1,5 +1,4 @@
-import type {MailboxProperties} from "../../api/entities/tutanota/MailboxProperties"
-import stream from "mithril/stream"
+import type {Mail, MailboxProperties} from "../../api/entities/tutanota/TypeRefs.js"
 import type {CheckboxAttrs} from "../../gui/base/CheckboxN"
 import {CheckboxN} from "../../gui/base/CheckboxN"
 import {lang} from "../../misc/LanguageViewModel"
@@ -9,22 +8,20 @@ import {loadMailboxProperties, saveReportMovedMails} from "../../misc/MailboxPro
 import {ButtonAttrs, ButtonType} from "../../gui/base/ButtonN"
 import {Dialog} from "../../gui/base/Dialog"
 import type {MailModel} from "../model/MailModel"
-import type {Mail} from "../../api/entities/tutanota/Mail"
 import {showSnackBar} from "../../gui/base/SnackBar"
 
 function confirmMailReportDialog(mailboxProperties: MailboxProperties | null): Promise<boolean> {
 	return new Promise(resolve => {
-		const shallRememberDecision = stream(false)
-		const rememberDecisionCheckboxAttrs: CheckboxAttrs = {
+		let shallRememberDecision = false
+		const child = () => m(CheckboxN, {
 			label: () => lang.get("rememberDecision_msg"),
 			checked: shallRememberDecision,
+			onChecked: (v) => shallRememberDecision = v,
 			helpLabel: () => lang.get("changeMailSettings_msg"),
-		}
-
-		const child = () => m(CheckboxN, rememberDecisionCheckboxAttrs)
+		})
 
 		function updateSpamReportSetting(areMailsReported: boolean) {
-			if (shallRememberDecision()) {
+			if (shallRememberDecision) {
 				const reportMovedMails = areMailsReported ? ReportMovedMailsType.AUTOMATICALLY_ONLY_SPAM : ReportMovedMailsType.NEVER
 				saveReportMovedMails(mailboxProperties, reportMovedMails)
 			}

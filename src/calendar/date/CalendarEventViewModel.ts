@@ -9,21 +9,14 @@ import {
 	ShareCapability,
 	TimeFormat,
 } from "../../api/common/TutanotaConstants"
-import {createCalendarEventAttendee} from "../../api/entities/tutanota/CalendarEventAttendee"
-import type {CalendarEvent} from "../../api/entities/tutanota/CalendarEvent"
-import {createCalendarEvent} from "../../api/entities/tutanota/CalendarEvent"
-import type {AlarmInfo} from "../../api/entities/sys/AlarmInfo"
-import {createAlarmInfo} from "../../api/entities/sys/AlarmInfo"
+import type {CalendarEvent, CalendarRepeatRule, Contact, EncryptedMailAddress, Mail} from "../../api/entities/tutanota/TypeRefs.js"
+import {createCalendarEvent, createCalendarEventAttendee, createEncryptedMailAddress} from "../../api/entities/tutanota/TypeRefs.js"
+import type {AlarmInfo, RepeatRule} from "../../api/entities/sys/TypeRefs.js"
+import {createAlarmInfo} from "../../api/entities/sys/TypeRefs.js"
 import type {MailboxDetail} from "../../mail/model/MailModel"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
-import {
-	copyMailAddress,
-	getDefaultSenderFromUser,
-	getEnabledMailAddressesWithUser,
-	getSenderNameForUser,
-	RecipientField
-} from "../../mail/model/MailUtils"
+import {copyMailAddress, getDefaultSenderFromUser, getEnabledMailAddressesWithUser, getSenderNameForUser, RecipientField} from "../../mail/model/MailUtils"
 import {
 	createRepeatRuleWithValues,
 	generateUid,
@@ -52,24 +45,17 @@ import {
 	neverNull,
 	noOp,
 	ofClass,
-	promiseMap,
 } from "@tutao/tutanota-utils"
 import {generateEventElementId, isAllDayEvent} from "../../api/common/utils/CommonCalendarUtils"
 import type {CalendarInfo} from "../model/CalendarModel"
 import {CalendarModel} from "../model/CalendarModel"
 import {DateTime} from "luxon"
-import type {EncryptedMailAddress} from "../../api/entities/tutanota/EncryptedMailAddress"
-import {createEncryptedMailAddress} from "../../api/entities/tutanota/EncryptedMailAddress"
 import {NotFoundError, PayloadTooLargeError, TooManyRequestsError} from "../../api/common/error/RestError"
 import type {CalendarUpdateDistributor} from "./CalendarUpdateDistributor"
 import {calendarUpdateDistributor} from "./CalendarUpdateDistributor"
 import type {IUserController} from "../../api/main/UserController"
-import {isExternal, RecipientInfo, RecipientInfoType} from "../../api/common/RecipientInfo"
-import type {Contact} from "../../api/entities/tutanota/Contact"
 import type {SendMailModel} from "../../mail/editor/SendMailModel"
-import type {RepeatRule} from "../../api/entities/sys/RepeatRule"
 import {UserError} from "../../api/main/UserError"
-import type {Mail} from "../../api/entities/tutanota/Mail"
 import {logins} from "../../api/main/LoginController"
 import {locator} from "../../api/main/MainLocator"
 import {EntityClient} from "../../api/common/EntityClient"
@@ -77,7 +63,8 @@ import {BusinessFeatureRequiredError} from "../../api/main/BusinessFeatureRequir
 import {hasCapabilityOnGroup} from "../../sharing/GroupUtils"
 import {Time} from "../../api/common/utils/Time"
 import {hasError} from "../../api/common/utils/ErrorCheckUtils"
-import type {CalendarRepeatRule} from "../../api/entities/tutanota/CalendarRepeatRule"
+import {Recipient, RecipientType} from "../../api/common/recipients/Recipient"
+import {ResolveMode} from "../../api/main/RecipientsModel.js"
 
 const TIMESTAMP_ZERO_YEAR = 1970
 // whether to close dialog
@@ -95,7 +82,7 @@ const enum EventType {
 
 export type Guest = {
 	address: EncryptedMailAddress
-	type: RecipientInfoType
+	type: RecipientType
 	status: CalendarAttendeeStatus
 }
 type SendMailPurpose = "invite" | "update" | "cancel" | "response"
@@ -107,6 +94,12 @@ export type RepeatData = {
 	endValue: number
 }
 type ShowProgressCallback = (arg0: Promise<unknown>) => unknown
+type InitEventTypeReturn = {
+	eventType: EventType,
+	organizer: EncryptedMailAddress | null,
+	possibleOrganizers: Array<EncryptedMailAddress>
+}
+
 
 /**
  * ViewModel for viewing/editing the event. Takes care of sending out updates.
@@ -185,34 +178,27 @@ export class CalendarEventViewModel {
 		this._sendModelFactory = () => sendMailModelFactory(mailboxDetail, "response")
 
 		this._ownMailAddresses = getEnabledMailAddressesWithUser(mailboxDetail, userController.userGroupInfo)
-		this._ownAttendee = stream(null)
-		this.sendingOutUpdate = stream(false)
+		this._ownAttendee = stream<EncryptedMailAddress | null>(null)
+		this.sendingOutUpdate = stream<boolean>(false)
 		this._processing = false
-		this.hasBusinessFeature = stream(false)
-		this.hasPremiumLegacy = stream(false)
-		this.isForceUpdates = stream(false)
+		this.hasBusinessFeature = stream<boolean>(false)
+		this.hasPremiumLegacy = stream<boolean>(false)
+		this.isForceUpdates = stream<boolean>(false)
 		this.location = stream("")
 		this.note = ""
-		this.allDay = stream(false)
+		this.allDay = stream<boolean>(false)
 		this.amPmFormat = userController.userSettingsGroupRoot.timeFormat === TimeFormat.TWELVE_HOURS
 		this.existingEvent = existingEvent ?? null
 		this._zone = zone
 		this._guestStatuses = this._initGuestStatus(existingEvent, resolveRecipientsLazily)
 		this.attendees = this._initAttendees()
-		this._eventType = this._initEventType(existingEvent, calendars)
-		const existingOrganizer = existingEvent && existingEvent.organizer
-		this.possibleOrganizers =
-			existingOrganizer && !this.canModifyOrganizer()
-				? [existingOrganizer]
-				: existingOrganizer && !this._ownMailAddresses.includes(existingOrganizer.address)
-					? [existingOrganizer].concat(this._ownPossibleOrganizers(mailboxDetail, userController))
-					: this._ownPossibleOrganizers(mailboxDetail, userController)
-		this.organizer = existingOrganizer
-			? copyMailAddress(existingOrganizer)
-			: addressToMailAddress(getDefaultSenderFromUser(userController), mailboxDetail, userController)
+		const {eventType, organizer, possibleOrganizers} = this.initEventTypeAndOrganizers(existingEvent, calendars, mailboxDetail, userController)
+		this._eventType = eventType
+		this.organizer = organizer
+		this.possibleOrganizers = possibleOrganizers
 		this.alarms = []
 		this.calendars = calendars
-		this.selectedCalendar = stream(this.getAvailableCalendars()[0])
+		this.selectedCalendar = stream<CalendarInfo | null>(this.getAvailableCalendars()[0] ?? null)
 		this.initialized = Promise.resolve().then(async () => {
 			if (existingEvent) {
 				if (existingEvent.invitedConfidentially != null) {
@@ -316,45 +302,86 @@ export class CalendarEventViewModel {
 	}
 
 	/**
+	 * Determines the event type, the organizer of the event and possible organizers in accordance with the capabilities for events (see table).
+	 * Note that the only "real" organizer that an event can have is the owner of the calendar.
+	 * If events are created by someone we share our personal calendar with, the organizer is overwritten and set to our own primary address.
+	 * Possible organizers are all email addresses of the user, allowed to modify the organizer. This is only the owner of the calendar ("real" organizer)
+	 * and only if there are no guests.
+	 *
 	 * Capability for events is fairly complicated:
 	 * Note: share "shared" means "not owner of the calendar". Calendar always looks like personal for the owner.
 	 *
-	 * | Calendar | edit details    | own attendance | guests | organizer
-	 * |----------|-----------------|----------------|--------|----------
-	 * | Personal | yes             | yes            | yes    | yes
-	 * | Personal | yes (local)     | yes            | no     | no
-	 * | Shared   | yes***          | no             | no*    | no*
-	 * | Shared   | yes*** (local)  | no**           | no*    | no*
+	 * | Calendar           | is organizer     | can edit details    | can modify own attendance | can modify guests | can modify organizer
+	 * |--------------------|------------------|---------------------|---------------------------|-------------------|----------
+	 * | Personal (own)     | yes              | yes                 | yes                       | yes               | yes
+	 * | Personal  (invite) | no               | yes (local)         | yes                       | no                | no
+	 * | Personal  (own)    | no****           | yes                 | yes                       | yes               | yes
+	 * | Shared             | yes****          | yes***              | no                        | no*               | no*
+	 * | Shared             | no               | no                  | no**                      | no*               | no*
 	 *
-	 *   * we don't allow sharing in other people's calendar because later only organizer can modify event and
+	 *   * we don't allow inviting guests in other people's calendar because later only organizer can modify event and
 	 *   we don't want to prevent calendar owner from editing events in their own calendar.
 	 *
 	 *   ** this is not "our" copy of the event, from the point of organizer we saw it just accidentally.
 	 *   Later we might support proposing ourselves as attendee but currently organizer should be asked to
 	 *   send out the event.
 	 *
-	 *   *** depends on share capability. Cannot edit if it's not a copy and there are attendees.
+	 *   *** depends on share capability and whether there are attendees.
+	 *
+	 *   **** The creator of the event. Will be overwritten with owner of the calendar by this function.
 	 */
-	_initEventType(existingEvent: CalendarEvent | null, calendars: ReadonlyMap<Id, CalendarInfo>): EventType {
+	private initEventTypeAndOrganizers(existingEvent: CalendarEvent | null, calendars: ReadonlyMap<Id, CalendarInfo>, mailboxDetail: MailboxDetail, userController: IUserController): InitEventTypeReturn {
+		const ownDefaultSender = addressToMailAddress(getDefaultSenderFromUser(userController), mailboxDetail, userController)
+
 		if (!existingEvent) {
-			return EventType.OWN
+			return {
+				eventType: EventType.OWN,
+				organizer: ownDefaultSender,
+				possibleOrganizers: this._ownPossibleOrganizers(mailboxDetail, userController)
+			}
 		} else {
 			// OwnerGroup is not set for events from file
 			const calendarInfoForEvent = existingEvent._ownerGroup && calendars.get(existingEvent._ownerGroup)
+			const existingOrganizer = existingEvent.organizer
 
 			if (calendarInfoForEvent) {
 				if (calendarInfoForEvent.shared) {
-					return hasCapabilityOnGroup(this._userController.user, calendarInfoForEvent.group, ShareCapability.Write)
-						? EventType.SHARED_RW
-						: EventType.SHARED_RO
+					return {
+						eventType: hasCapabilityOnGroup(this._userController.user, calendarInfoForEvent.group, ShareCapability.Write)
+							? EventType.SHARED_RW
+							: EventType.SHARED_RO,
+						organizer: existingOrganizer ? copyMailAddress(existingOrganizer) : null,
+						possibleOrganizers: existingOrganizer ? [existingOrganizer] : []
+					}
 				} else {
-					return existingEvent.organizer == null || this._ownMailAddresses.includes(existingEvent.organizer.address)
-						? EventType.OWN
-						: EventType.INVITE
+					//For an event in a personal calendar there are 3 options (see table)
+					//1. We are the organizer of the event (or the event does not have an organizer yet and we become the organizer of the event)
+					//2. If we are not the organizer and the event does not have guests, it was created by someone we shared our calendar with (also considered our own event)
+					if (!existingOrganizer || this._ownMailAddresses.includes(existingOrganizer.address) || existingEvent.attendees.length === 0) {
+						//we want to keep the existing organizer if it is one of our email addresses in all other cases we use our primary address
+						const actualOrganizer = existingOrganizer && this._ownMailAddresses.includes(existingOrganizer.address) ? existingOrganizer : ownDefaultSender
+						return {
+							eventType: EventType.OWN,
+							organizer: copyMailAddress(actualOrganizer),
+							possibleOrganizers: this.hasGuests() ? [actualOrganizer] : this._ownPossibleOrganizers(mailboxDetail, userController)
+						}
+					}
+					//3. the event is an invitation
+					else {
+						return {
+							eventType: EventType.INVITE,
+							organizer: existingOrganizer,
+							possibleOrganizers: [existingOrganizer]
+						}
+					}
 				}
 			} else {
 				// We can edit new invites (from files)
-				return EventType.INVITE
+				return {
+					eventType: EventType.INVITE,
+					organizer: existingOrganizer ? copyMailAddress(existingOrganizer) : null,
+					possibleOrganizers: existingOrganizer ? [existingOrganizer] : []
+				}
 			}
 		}
 	}
@@ -372,13 +399,13 @@ export class CalendarEventViewModel {
 							 if (this._ownMailAddresses.includes(attendee.address.address)) {
 								 this._ownAttendee(copyMailAddress(attendee.address))
 							 } else {
-								 this._updateModel.addOrGetRecipient(
+								 this._updateModel.addRecipient(
 									 RecipientField.BCC,
 									 {
 										 name: attendee.address.name,
 										 address: attendee.address.address,
 									 },
-									 resolveRecipientsLazily,
+									 resolveRecipientsLazily ? ResolveMode.Lazy : ResolveMode.Eager,
 								 )
 							 }
 
@@ -386,7 +413,7 @@ export class CalendarEventViewModel {
 						 })
 		}
 
-		return stream(newStatuses)
+		return stream<ReadonlyMap<string, CalendarAttendeeStatus>>(newStatuses)
 	}
 
 	async updateCustomerFeatures(): Promise<void> {
@@ -400,17 +427,17 @@ export class CalendarEventViewModel {
 		}
 	}
 
-	_initAttendees(): Stream<Array<Guest>> {
-		return stream.merge([this._inviteModel.onMailChanged, this._updateModel.onMailChanged, this._guestStatuses, this._ownAttendee]).map(() => {
+	_initAttendees(): Stream<ReadonlyArray<Guest>> {
+		return stream.merge([this._inviteModel.onMailChanged, this._updateModel.onMailChanged, this._guestStatuses, this._ownAttendee] as Stream<unknown>[]).map(() => {
 			const makeGuestList = (model: SendMailModel) => {
-				return model.bccRecipients().map(recipientInfo => {
+				return model.bccRecipients().map(recipient => {
 					const guest = {
 						address: createEncryptedMailAddress({
-							name: recipientInfo.name,
-							address: recipientInfo.mailAddress,
+							name: recipient.name,
+							address: recipient.address,
 						}),
-						status: this._guestStatuses().get(recipientInfo.mailAddress) || CalendarAttendeeStatus.NEEDS_ACTION,
-						type: recipientInfo.type,
+						status: this._guestStatuses().get(recipient.address) || CalendarAttendeeStatus.NEEDS_ACTION,
+						type: recipient.type,
 					}
 					return guest
 				})
@@ -424,11 +451,11 @@ export class CalendarEventViewModel {
 				guests.unshift({
 					address: ownAttendee,
 					status: this._guestStatuses().get(ownAttendee.address) || CalendarAttendeeStatus.ACCEPTED,
-					type: RecipientInfoType.INTERNAL,
+					type: RecipientType.INTERNAL,
 				})
 			}
 
-			return guests
+			return guests as ReadonlyArray<Guest>
 		})
 	}
 
@@ -477,11 +504,13 @@ export class CalendarEventViewModel {
 		// SendMailModel handles deduplication
 		// this.attendees will be updated when the model's recipients are updated
 		if (!isOwnAttendee)
-			this._inviteModel.addOrGetRecipient(RecipientField.BCC, {
-				address: mailAddress,
-				contact,
-				name: null,
-			})
+			this._inviteModel.addRecipient(
+				RecipientField.BCC,
+				{
+					address: mailAddress,
+					contact,
+				}
+			)
 		const status = isOwnAttendee ? CalendarAttendeeStatus.ACCEPTED : CalendarAttendeeStatus.ADDED
 
 		// If we exist as an attendee and the added guest is also an attendee, then remove the existing ownAttendee
@@ -520,6 +549,17 @@ export class CalendarEventViewModel {
 	}
 
 	isReadOnlyEvent(): boolean {
+		// For the RW calendar we have two similar cases:
+		//
+		// Case 1:
+		// Owner of the calendar created the event and invited some people. We, user with whom calendar was shared as RW, are seeing this event.
+		// We cannot modify that event even though we have RW permission because we are the not organizer.
+		// If the event is changed, the update must be sent out and we cannot do that because we are not the organizer.
+		//
+		// Case 2:
+		// Owner of the calendar received an invite and saved the event to the calendar. We, user with whom the calendar was shared as RW, are seeing this event.
+		// We can (theoretically) modify the event locally because we don't need to send any updates but we cannot change attendance because this would require sending an email.
+		// But we don't want to allow editing the event to make it more understandable for everyone.
 		return this._eventType === EventType.SHARED_RO || (this._eventType === EventType.SHARED_RW && this.attendees().length > 0)
 	}
 
@@ -669,22 +709,21 @@ export class CalendarEventViewModel {
 		const existingRecipient = this.existingEvent && this.existingEvent.attendees.find(a => a.address.address === guest.address.address)
 
 		for (const model of [this._inviteModel, this._updateModel, this._cancelModel]) {
-			const recipientInfo = model.bccRecipients().find(r => r.mailAddress === guest.address.address)
+			const recipientInfo = model.bccRecipients().find(r => r.address === guest.address.address)
 
 			if (recipientInfo) {
 				model.removeRecipient(recipientInfo, RecipientField.BCC)
 				const newStatuses = new Map(this._guestStatuses())
-				newStatuses.delete(recipientInfo.mailAddress)
+				newStatuses.delete(recipientInfo.address)
 
 				this._guestStatuses(newStatuses)
 			}
 		}
 
 		if (existingRecipient) {
-			this._cancelModel.addOrGetRecipient(RecipientField.BCC, {
+			this._cancelModel.addRecipient(RecipientField.BCC, {
 				address: existingRecipient.address.address,
 				name: existingRecipient.address.name,
-				contact: null,
 			})
 		}
 	}
@@ -697,11 +736,13 @@ export class CalendarEventViewModel {
 	canModifyOrganizer(): boolean {
 		// We can only modify the organizer if it is our own event and there are no guests
 		return (
-			this._eventType === EventType.OWN &&
-			(!this.existingEvent ||
-				this.existingEvent.attendees.length === 0 ||
-				(this.existingEvent.attendees.length === 1 && this._ownMailAddresses.includes(this.existingEvent.attendees[0].address.address)))
+			this._eventType === EventType.OWN && !this.hasGuests()
 		)
+	}
+
+	private hasGuests() {
+		return this.existingEvent && this.existingEvent.attendees.length > 0 &&
+			!(this.existingEvent.attendees.length === 1 && this._ownMailAddresses.includes(this.existingEvent.attendees[0].address.address))
 	}
 
 	setOrganizer(newOrganizer: EncryptedMailAddress): void {
@@ -717,15 +758,20 @@ export class CalendarEventViewModel {
 		return this._eventType === EventType.OWN || this._eventType === EventType.INVITE || this._eventType === EventType.SHARED_RW
 	}
 
-	deleteEvent(): Promise<void> {
+	async deleteEvent(): Promise<void> {
 		const event = this.existingEvent
-
 		if (event) {
-			// We must always be in attendees so we just check that there's more than one attendee
-			const awaitCancellation = this._eventType === EventType.OWN && event.attendees.length > 1 ? this._sendCancellation(event) : Promise.resolve()
-			return awaitCancellation.then(() => this._calendarModel.deleteEvent(event)).catch(ofClass(NotFoundError, noOp))
-		} else {
-			return Promise.resolve()
+			try {
+				// We must always be in attendees so we just check that there's more than one attendee
+				if (this._eventType === EventType.OWN && event.attendees.length > 1) {
+					await this.sendCancellation(event)
+				}
+				return this._calendarModel.deleteEvent(event).catch(ofClass(NotFoundError, noOp))
+			} catch (e) {
+				if (!(e instanceof NotFoundError)) {
+					throw e
+				}
+			}
 		}
 	}
 
@@ -794,38 +840,40 @@ export class CalendarEventViewModel {
 					  })
 	}
 
-	_sendCancellation(event: CalendarEvent): Promise<any> {
+	private async sendCancellation(event: CalendarEvent): Promise<any> {
 		const updatedEvent = clone(event)
+
 		// This is guaranteed to be our own event.
 		updatedEvent.sequence = incrementSequence(updatedEvent.sequence, true)
 		const cancelAddresses = event.attendees.filter(a => !this._ownMailAddresses.includes(a.address.address)).map(a => a.address)
-		return promiseMap(cancelAddresses, a => {
-			const [recipientInfo, recipientInfoPromise] = this._cancelModel.addOrGetRecipient(RecipientField.BCC, {
-				name: a.name,
-				address: a.address,
-				contact: null,
-			})
 
-			//We cannot send a notification to external recipients without a password, so we exclude them
-			if (this._cancelModel.isConfidential()) {
-				return Promise.all([recipientInfo.resolveContactPromise, recipientInfoPromise]).then(() => {
-					if (isExternal(recipientInfo) && !this._cancelModel.getPassword(recipientInfo.mailAddress)) {
-						this._cancelModel.removeRecipient(recipientInfo, RecipientField.BCC, false)
-					}
+		try {
+			for (const address of cancelAddresses) {
+				this._cancelModel.addRecipient(RecipientField.BCC, {
+					name: address.name,
+					address: address.address,
+					contact: null,
 				})
-			} else {
-				return Promise.resolve()
+
+				const recipient = await this._cancelModel.getRecipient(RecipientField.BCC, address.address)!.resolved()
+
+				// We cannot send a notification to external recipients without a password, so we exclude them
+				if (this._cancelModel.isConfidential()) {
+					if (recipient.type === RecipientType.EXTERNAL && !this._cancelModel.getPassword(recipient.address)) {
+						this._cancelModel.removeRecipient(recipient, RecipientField.BCC, false)
+					}
+				}
 			}
-		})
-			.then(() => {
-				//We check if there are any attendees left to send the cancellation to
-				return this._cancelModel.allRecipients().length ? this._distributor.sendCancellation(updatedEvent, this._cancelModel) : Promise.resolve()
-			})
-			.catch(
-				ofClass(TooManyRequestsError, () => {
-					throw new UserError("mailAddressDelay_msg") // This will be caught and open error dialog
-				}),
-			)
+			if (this._cancelModel.allRecipients().length) {
+				await this._distributor.sendCancellation(updatedEvent, this._cancelModel)
+			}
+		} catch (e) {
+			if (e instanceof TooManyRequestsError) {
+				throw new UserError("mailAddressDelay_msg") // This will be caught and open error dialog
+			} else {
+				throw e
+			}
+		}
 	}
 
 	_saveEvent(newEvent: CalendarEvent, newAlarms: Array<AlarmInfo>): Promise<void> {
@@ -932,10 +980,9 @@ export class CalendarEventViewModel {
 			const sendResponseModel = this._sendModelFactory()
 
 			const organizer = assertNotNull(existingEvent.organizer)
-			sendResponseModel.addOrGetRecipient(RecipientField.TO, {
+			sendResponseModel.addRecipient(RecipientField.TO, {
 				name: organizer.name,
 				address: organizer.address,
-				contact: null,
 			})
 			sendPromise = this._distributor
 							  .sendResponse(newEvent, sendResponseModel, ownAttendee.address.address, this._responseTo, assertNotNull(selectedOwnAttendeeStatus))
@@ -1010,22 +1057,22 @@ export class CalendarEventViewModel {
 	}
 
 	updatePassword(guest: Guest, password: string) {
-		const inInvite = this._inviteModel.bccRecipients().find(r => r.mailAddress === guest.address.address)
+		const inInvite = this._inviteModel.bccRecipients().find(r => r.address === guest.address.address)
 
 		if (inInvite) {
-			this._inviteModel.setPassword(inInvite.mailAddress, password)
+			this._inviteModel.setPassword(inInvite.address, password)
 		}
 
-		const inUpdate = this._updateModel.bccRecipients().find(r => r.mailAddress === guest.address.address)
+		const inUpdate = this._updateModel.bccRecipients().find(r => r.address === guest.address.address)
 
 		if (inUpdate) {
-			this._updateModel.setPassword(inUpdate.mailAddress, password)
+			this._updateModel.setPassword(inUpdate.address, password)
 		}
 
-		const inCancel = this._cancelModel.bccRecipients().find(r => r.mailAddress === guest.address.address)
+		const inCancel = this._cancelModel.bccRecipients().find(r => r.address === guest.address.address)
 
 		if (inCancel) {
-			this._updateModel.setPassword(inCancel.mailAddress, password)
+			this._updateModel.setPassword(inCancel.address, password)
 		}
 	}
 
@@ -1037,7 +1084,7 @@ export class CalendarEventViewModel {
 		const address = guest.address.address
 
 		const getStrength = (model: SendMailModel) => {
-			const recipient = model.allRecipients().find(r => address === r.mailAddress)
+			const recipient = model.allRecipients().find(r => address === r.address)
 			return recipient ? model.getPasswordStrength(recipient) : null
 		}
 
@@ -1081,7 +1128,7 @@ export class CalendarEventViewModel {
 		}
 	}
 
-	_allRecipients(): Array<RecipientInfo> {
+	_allRecipients(): Array<Recipient> {
 		return this._inviteModel.allRecipients().concat(this._updateModel.allRecipients()).concat(this._cancelModel.allRecipients())
 	}
 

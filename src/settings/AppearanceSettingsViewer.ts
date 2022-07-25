@@ -4,14 +4,13 @@ import {getLanguage, lang, languageCodeToTag, languages} from "../misc/LanguageV
 import {styles} from "../gui/styles"
 import type {DropDownSelectorAttrs} from "../gui/base/DropDownSelectorN"
 import {DropDownSelectorN, SelectorItemList} from "../gui/base/DropDownSelectorN"
-import stream from "mithril/stream"
 import {deviceConfig} from "../misc/DeviceConfig"
 import {TimeFormat, WeekStart} from "../api/common/TutanotaConstants"
 import {logins} from "../api/main/LoginController"
 import {downcast, incrementDate, noOp, promiseMap} from "@tutao/tutanota-utils"
 import type {EntityUpdateData} from "../api/main/EventController"
 import {isUpdateForTypeRef} from "../api/main/EventController"
-import {UserSettingsGroupRootTypeRef} from "../api/entities/tutanota/UserSettingsGroupRoot"
+import {UserSettingsGroupRootTypeRef} from "../api/entities/tutanota/TypeRefs.js"
 import {getHourCycle} from "../misc/Formatter"
 import type {ThemeId} from "../gui/theme"
 import {themeController} from "../gui/theme"
@@ -48,7 +47,7 @@ export class AppearanceSettingsViewer implements UpdatableSettingsViewer {
 			label: "language_label",
 			items: languageItems,
 			// DropdownSelectorN uses `===` to compare items so if the language is not set then `undefined` will not match `null`
-			selectedValue: stream(deviceConfig.getLanguage() || null),
+			selectedValue: deviceConfig.getLanguage() || null,
 			selectionChangedHandler: async value => {
 				deviceConfig.setLanguage(value)
 				const newLanguage = value
@@ -60,7 +59,7 @@ export class AppearanceSettingsViewer implements UpdatableSettingsViewer {
 				await lang.setLanguage(newLanguage)
 
 				if (isDesktop()) {
-					await locator.systemApp.changeSystemLanguage(newLanguage)
+					await locator.desktopSettingsFacade.changeLanguage(newLanguage.code, newLanguage.languageTag)
 				}
 
 				styles.updateStyle("main")
@@ -80,7 +79,7 @@ export class AppearanceSettingsViewer implements UpdatableSettingsViewer {
 					value: TimeFormat.TWELVE_HOURS,
 				},
 			],
-			selectedValue: stream(downcast(userSettingsGroupRoot.timeFormat)),
+			selectedValue: downcast(userSettingsGroupRoot.timeFormat),
 			selectionChangedHandler: value => {
 				userSettingsGroupRoot.timeFormat = value
 				locator.entityClient.update(userSettingsGroupRoot)
@@ -112,7 +111,7 @@ export class AppearanceSettingsViewer implements UpdatableSettingsViewer {
 					value: WeekStart.SUNDAY,
 				},
 			],
-			selectedValue: stream(downcast(userSettingsGroupRoot.startOfTheWeek)),
+			selectedValue: downcast(userSettingsGroupRoot.startOfTheWeek),
 			selectionChangedHandler: value => {
 				userSettingsGroupRoot.startOfTheWeek = value
 				locator.entityClient.update(userSettingsGroupRoot)
@@ -156,7 +155,7 @@ export class AppearanceSettingsViewer implements UpdatableSettingsViewer {
 					value: "blue",
 				},
 			].concat(customOptions),
-			selectedValue: stream(themeController.themeId),
+			selectedValue: themeController.themeId,
 			selectionChangedHandler: value => themeController.setThemeId(value),
 			dropdownWidth: 300,
 		}
