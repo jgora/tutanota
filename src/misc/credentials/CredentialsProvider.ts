@@ -1,12 +1,11 @@
-import type {CredentialEncryptionMode} from "./CredentialEncryptionMode"
-import type {ICredentialsKeyMigrator} from "./CredentialsKeyMigrator"
-import type {Base64, Base64Url} from "@tutao/tutanota-utils"
-import {assertNotNull} from "@tutao/tutanota-utils"
-import type {Credentials} from "./Credentials"
-import {DatabaseKeyFactory} from "./DatabaseKeyFactory"
-import {OfflineDbFacade} from "../../desktop/db/OfflineDbFacade"
-import {InterWindowEventBus} from "../../native/common/InterWindowEventBus"
-import {InterWindowEventTypes} from "../../native/common/InterWindowEventTypes"
+import type { CredentialEncryptionMode } from "./CredentialEncryptionMode"
+import type { Base64, Base64Url } from "@tutao/tutanota-utils"
+import { assertNotNull } from "@tutao/tutanota-utils"
+import type { Credentials } from "./Credentials"
+import { DatabaseKeyFactory } from "./DatabaseKeyFactory"
+import { CredentialsKeyMigrator } from "./CredentialsKeyMigrator.js"
+import { InterWindowEventFacadeSendDispatcher } from "../../native/common/generatedipc/InterWindowEventFacadeSendDispatcher.js"
+import { SqlCipherFacade } from "../../native/common/generatedipc/SqlCipherFacade.js"
 
 /**
  * Type for persistent credentials, that contain the full credentials data.
@@ -102,80 +101,27 @@ export interface CredentialsStorage {
 }
 
 export type CredentialsAndDatabaseKey = {
-	credentials: Credentials,
+	credentials: Credentials
 	databaseKey?: Uint8Array | null
 }
 
 /**
  * Main entry point to interact with credentials, i.e. storing and retrieving credentials from/to persistence.
  */
-export interface ICredentialsProvider {
+export class CredentialsProvider {
+	constructor(
+		private readonly credentialsEncryption: CredentialsEncryption,
+		private readonly storage: CredentialsStorage,
+		private readonly keyMigrator: CredentialsKeyMigrator,
+		private readonly databaseKeyFactory: DatabaseKeyFactory,
+		private readonly sqliteCipherFacade: SqlCipherFacade | null,
+		private readonly interWindowEventSender: InterWindowEventFacadeSendDispatcher | null,
+	) {}
+
 	/**
 	 * Stores credentials. If credentials already exist for login, they will be overwritten.
 	 * Also creates a database key
 	 */
-	store(credentialsAndKey: CredentialsAndDatabaseKey): Promise<void>
-
-	getCredentialsInfoByUserId(userId: Id): Promise<CredentialsInfo | null>
-
-	/**
-	 * Returns the full credentials for the userId passed in.
-	 * @param userId
-	 */
-	getCredentialsByUserId(userId: Id): Promise<CredentialsAndDatabaseKey | null>
-
-	/**
-	 * Returns the stored credentials infos of all internal users, i.e. users that have a "real" tutanota account and not the ones that
-	 * have a secure external mailbox.
-	 */
-	getInternalCredentialsInfos(): Promise<Array<CredentialsInfo>>
-
-	/**
-	 * Deletes stored credentials with specified userId.
-	 * No-op if credentials are not there.
-	 * @param opts.deleteOfflineDb whether to delete offline database. Will delete by default.
-	 */
-	deleteByUserId(userId: Id, opts?: {deleteOfflineDb: boolean}): Promise<void>
-
-	/**
-	 * Sets the credentials encryption mode, i.e. how the intermediate key used for encrypting credentials is protected.
-	 * @param encryptionMode
-	 * @throws KeyPermanentlyInvalidatedError
-	 * @throws CredentialAuthenticationError
-	 */
-	setCredentialsEncryptionMode(encryptionMode: CredentialEncryptionMode): Promise<void>
-
-	/**
-	 * Returns the credentials encryption mode, i.e. how the intermediate key used for encrypting credentials is protected.
-	 */
-	getCredentialsEncryptionMode(): CredentialEncryptionMode | null
-
-	/**
-	 * Returns all credentials encryption modes that are supported by the device.
-	 */
-	getSupportedEncryptionModes(): Promise<ReadonlyArray<CredentialEncryptionMode>>
-
-	/**
-	 * Removes all stored credentials as well as any settings associated with credentials encryption.
-	 */
-	clearCredentials(reason: Error | string): Promise<void>
-}
-
-/**
- * Platoform-independent implementation for ICredentialsProvider.
- */
-export class CredentialsProvider implements ICredentialsProvider {
-
-	constructor(
-		private readonly credentialsEncryption: CredentialsEncryption,
-		private readonly storage: CredentialsStorage,
-		private readonly keyMigrator: ICredentialsKeyMigrator,
-		private readonly databaseKeyFactory: DatabaseKeyFactory,
-		private readonly offlineDbFacade: OfflineDbFacade | null,
-		private readonly interWindowEventBus: InterWindowEventBus<InterWindowEventTypes> | null,
-	) {
-	}
-
 	async store(credentialsAndKey: CredentialsAndDatabaseKey): Promise<void> {
 		const encryptedCredentials = await this.credentialsEncryption.encrypt(credentialsAndKey)
 		this.storage.store(encryptedCredentials)
@@ -187,6 +133,10 @@ export class CredentialsProvider implements ICredentialsProvider {
 		return persistentCredentials?.credentialInfo ?? null
 	}
 
+	/**
+	 * Returns the full credentials for the userId passed in.
+	 * @param userId
+	 */
 	async getCredentialsByUserId(userId: Id): Promise<CredentialsAndDatabaseKey | null> {
 		const persistentCredentials = this.storage.loadByUserId(userId)
 
@@ -211,21 +161,36 @@ export class CredentialsProvider implements ICredentialsProvider {
 		return decrypted
 	}
 
-	async getInternalCredentialsInfos(): Promise<Array<CredentialsInfo>> {
-		const allCredentials = this.storage.loadAll().map(persistentCredentials => persistentCredentials.credentialInfo)
-		return allCredentials.filter(credential => {
+	/**
+	 * Returns the stored credentials infos of all internal users, i.e. users that have a "real" tutanota account and not the ones that
+	 * have a secure external mailbox.
+	 */
+	async getInternalCredentialsInfos(): Promise<ReadonlyArray<CredentialsInfo>> {
+		const allCredentials = this.storage.loadAll().map((persistentCredentials) => persistentCredentials.credentialInfo)
+		return allCredentials.filter((credential) => {
 			return credential.type === "internal"
 		})
 	}
 
-	async deleteByUserId(userId: Id, opts: {deleteOfflineDb: boolean} = {deleteOfflineDb: true}): Promise<void> {
-		await this.interWindowEventBus?.send("credentialsDeleted", {userId})
-		if (opts?.deleteOfflineDb) {
-			await this.offlineDbFacade?.deleteDatabaseForUser(userId)
+	/**
+	 * Deletes stored credentials with specified userId.
+	 * No-op if credentials are not there.
+	 * @param opts.deleteOfflineDb whether to delete offline database. Will delete by default.
+	 */
+	async deleteByUserId(userId: Id, opts: { deleteOfflineDb: boolean } = { deleteOfflineDb: true }): Promise<void> {
+		await this.interWindowEventSender?.localUserDataInvalidated(userId)
+		if (opts.deleteOfflineDb) {
+			await this.sqliteCipherFacade?.deleteDb(userId)
 		}
 		this.storage.deleteByUserId(userId)
 	}
 
+	/**
+	 * Sets the credentials encryption mode, i.e. how the intermediate key used for encrypting credentials is protected.
+	 * @param encryptionMode
+	 * @throws KeyPermanentlyInvalidatedError
+	 * @throws CredentialAuthenticationError
+	 */
 	async setCredentialsEncryptionMode(encryptionMode: CredentialEncryptionMode): Promise<void> {
 		if (encryptionMode === this.getCredentialsEncryptionMode()) {
 			return
@@ -244,14 +209,23 @@ export class CredentialsProvider implements ICredentialsProvider {
 		this.storage.setCredentialEncryptionMode(encryptionMode)
 	}
 
+	/**
+	 * Returns the credentials encryption mode, i.e. how the intermediate key used for encrypting credentials is protected.
+	 */
 	getCredentialsEncryptionMode(): CredentialEncryptionMode | null {
 		return this.storage.getCredentialEncryptionMode()
 	}
 
+	/**
+	 * Returns all credentials encryption modes that are supported by the device.
+	 */
 	async getSupportedEncryptionModes(): Promise<ReadonlyArray<CredentialEncryptionMode>> {
 		return await this.credentialsEncryption.getSupportedEncryptionModes()
 	}
 
+	/**
+	 * Removes all stored credentials as well as any settings associated with credentials encryption.
+	 */
 	async clearCredentials(reason: Error | string): Promise<void> {
 		console.warn("clearing all stored credentials:", reason)
 		const storedCredentials = this.storage.loadAll()

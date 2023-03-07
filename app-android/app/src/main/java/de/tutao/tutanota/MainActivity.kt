@@ -6,24 +6,25 @@ import android.app.job.JobScheduler
 import android.content.*
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.Rect
 import android.net.MailTo
 import android.net.Uri
 import android.os.Bundle
 import android.os.PowerManager
-import android.preference.PreferenceManager
 import android.provider.Settings
 import android.util.Log
 import android.view.ContextMenu
 import android.view.ContextMenu.ContextMenuInfo
 import android.view.View
-import android.webkit.CookieManager
-import android.webkit.WebView
+import android.webkit.*
 import android.webkit.WebView.HitTestResult
-import android.webkit.WebViewClient
 import android.widget.Toast
 import androidx.annotation.MainThread
 import androidx.annotation.RequiresPermission
+import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat.setSystemGestureExclusionRects
+import androidx.core.view.doOnLayout
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import de.tutao.tutanota.alarms.AlarmNotificationsManager
@@ -31,13 +32,20 @@ import de.tutao.tutanota.alarms.SystemAlarmFacade
 import de.tutao.tutanota.credentials.CredentialsEncryptionFactory
 import de.tutao.tutanota.data.AppDatabase
 import de.tutao.tutanota.ipc.*
+import de.tutao.tutanota.offline.AndroidSqlCipherFacade
 import de.tutao.tutanota.push.*
+import de.tutao.tutanota.webauthn.AndroidWebauthnFacade
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.json.JSONException
 import org.json.JSONObject
+import java.io.File
+import java.io.IOException
 import java.io.UnsupportedEncodingException
 import java.net.URLEncoder
 import java.security.SecureRandom
@@ -48,20 +56,30 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.coroutines.suspendCoroutine
 
+const val SYSTEM_GESTURES_EXCLUSION_WIDTH_DP = 40
+const val SYSTEM_GESTURES_EXCLUSION_HEIGHT_DP = 200 // max exclusion height allowed by the system is 200 dp
+
+interface WebauthnHandler {
+	fun onResult(result: String)
+	fun onNoResult()
+}
+
 class MainActivity : FragmentActivity() {
 	lateinit var webView: WebView
 		private set
-	lateinit var sseStorage: SseStorage
-	lateinit var themeFacade: AndroidThemeFacade
-	lateinit var remoteBridge: RemoteBridge
-	lateinit var mobileFacade: MobileFacade
-	lateinit var commonNativeFacade: CommonNativeFacade
-	lateinit var commonSystemFacade: AndroidCommonSystemFacade
+	private lateinit var sseStorage: SseStorage
+	private lateinit var themeFacade: AndroidThemeFacade
+	private lateinit var remoteBridge: RemoteBridge
+	private lateinit var mobileFacade: MobileFacade
+	private lateinit var commonNativeFacade: CommonNativeFacade
+	private lateinit var commonSystemFacade: AndroidCommonSystemFacade
+	private lateinit var sqlCipherFacade: SqlCipherFacade
 
 	private val permissionsRequests: MutableMap<Int, Continuation<Unit>> = ConcurrentHashMap()
 	private val activityRequests: MutableMap<Int, Continuation<ActivityResult>> = ConcurrentHashMap()
 
 	private var firstLoaded = false
+	private var webauthnResultHandler: WebauthnHandler? = null
 
 	@SuppressLint("SetJavaScriptEnabled", "StaticFieldLeak")
 	override fun onCreate(savedInstanceState: Bundle?) {
@@ -88,8 +106,12 @@ class MainActivity : FragmentActivity() {
 		val ipcJson = Json { ignoreUnknownKeys = true }
 
 		themeFacade = AndroidThemeFacade(this, this)
-		commonSystemFacade = AndroidCommonSystemFacade(this, fileFacade.tempDir)
 		val contact = Contact(this)
+
+		sqlCipherFacade = AndroidSqlCipherFacade(this)
+		commonSystemFacade = AndroidCommonSystemFacade(this, sqlCipherFacade, fileFacade.tempDir)
+
+		val webauthnFacade = AndroidWebauthnFacade(this, ipcJson)
 
 		val globalDispatcher = AndroidGlobalDispatcher(
 				ipcJson,
@@ -99,7 +121,9 @@ class MainActivity : FragmentActivity() {
 				CredentialsEncryptionFactory.create(this, cryptoFacade),
 				cryptoFacade,
 				nativePushFacade,
+				sqlCipherFacade,
 				themeFacade,
+				webauthnFacade,
 		)
 		remoteBridge = RemoteBridge(
 				ipcJson,
@@ -120,7 +144,6 @@ class MainActivity : FragmentActivity() {
 		webView = WebView(this)
 		webView.setBackgroundColor(Color.TRANSPARENT)
 
-		setContentView(webView)
 		if (BuildConfig.DEBUG) {
 			WebView.setWebContentsDebuggingEnabled(true)
 		}
@@ -129,31 +152,26 @@ class MainActivity : FragmentActivity() {
 			javaScriptEnabled = true
 			domStorageEnabled = true
 			javaScriptCanOpenWindowsAutomatically = false
-			allowUniversalAccessFromFileURLs = true
+			allowFileAccess = false
+			allowContentAccess = false
+			cacheMode = WebSettings.LOAD_NO_CACHE
+			// needed for external content in mail
+			mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
 		}
+
+		webView.clearCache(true)
 
 		// Reject cookies by external content
 		CookieManager.getInstance().setAcceptCookie(false)
 		CookieManager.getInstance().removeAllCookies(null)
 
-		if (!firstLoaded) {
-			handleIntent(intent)
-		}
-		firstLoaded = true
-		webView.post { // use webView.post to switch to main thread again to be able to observe sseStorage
-			sseStorage.observeUsers().observe(this@MainActivity) { userInfos ->
-				if (userInfos!!.isEmpty()) {
-					Log.d(TAG, "invalidateAlarms")
-					lifecycleScope.launchWhenCreated {
-						commonNativeFacade.invalidateAlarms()
-					}
-				}
-			}
-		}
-
-
 		webView.webViewClient = object : WebViewClient() {
+			@Deprecated("shouldOverrideUrlLoading is deprecated")
 			override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+				Log.d(TAG, "see if should override $url")
+				if (url.startsWith(BASE_WEB_VIEW_URL)) {
+					return false
+				}
 				val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
 				try {
 					startActivity(intent)
@@ -163,18 +181,150 @@ class MainActivity : FragmentActivity() {
 				}
 				return true
 			}
+
+			override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+				val url = request.url
+				return if (request.method == "OPTIONS") {
+					Log.v(TAG, "replacing OPTIONS response to $url")
+					WebResourceResponse(
+							"text/html",
+							"UTF-8",
+							200,
+							"OK",
+							mutableMapOf(
+									"Access-Control-Allow-Origin" to "*",
+									"Access-Control-Allow-Methods" to "POST, GET, PUT, DELETE",
+									"Access-Control-Allow-Headers" to "*"
+							),
+							null
+					)
+				} else if (request.method == "GET" && url.toString().startsWith(BASE_WEB_VIEW_URL)) {
+					Log.v(TAG, "replacing asset GET response to ${url.path}")
+					val assetPath = File(BuildConfig.RES_ADDRESS + url.path!!).canonicalPath.run {
+						slice(1..lastIndex)
+					}
+					try {
+						if (!assetPath.startsWith(BuildConfig.RES_ADDRESS)) throw IOException("can't find this")
+						val mimeType = getMimeTypeForUrl(url.toString())
+						WebResourceResponse(
+								mimeType,
+								null,
+								200,
+								"OK",
+								null,
+								assets.open(assetPath)
+						)
+					} catch (e: IOException) {
+						Log.w(TAG, "Resource not found ${url.path}")
+						WebResourceResponse(
+								null,
+								null,
+								404,
+								"Not Found",
+								null,
+								null
+						)
+					}
+				} else {
+					Log.v(TAG, "forwarding ${request.method} request to $url")
+					null
+				}
+			}
+
+			override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+				Log.e(TAG, "Error loading WebView ${error?.errorCode} | ${error?.description} @ ${request?.url?.path}")
+			}
 		}
 
 		// Handle long click on links in the WebView
 		registerForContextMenu(webView)
 
-		val queryParameters = mutableMapOf<String, String>()
-		// If opened from notifications, tell Web app to not login automatically, we will pass
-		// mailbox later when loaded (in handleIntent())
-		if (intent != null && (OPEN_USER_MAILBOX_ACTION == intent.action || OPEN_CALENDAR_ACTION == intent.action)) {
-			queryParameters["noAutoLogin"] = "true"
+		setContentView(webView)
+
+		lifecycleScope.launch {
+			val queryParameters = mutableMapOf<String, String>()
+			// If opened from notifications, tell Web app to not login automatically, we will pass
+			// mailbox later when loaded (in handleIntent())
+			if (intent != null && (OPEN_USER_MAILBOX_ACTION == intent.action || OPEN_CALENDAR_ACTION == intent.action)) {
+				queryParameters["noAutoLogin"] = "true"
+			}
+
+			webView.post { // use webView.post to switch to main thread again to be able to observe sseStorage
+				sseStorage.observeUsers().observe(this@MainActivity) { userInfos ->
+					if (userInfos!!.isEmpty()) {
+						Log.d(TAG, "invalidateAlarms")
+						lifecycleScope.launchWhenCreated {
+							commonNativeFacade.invalidateAlarms()
+						}
+					}
+				}
+			}
+
+			startWebApp(queryParameters)
 		}
-		startWebApp(queryParameters)
+
+		// Exclude bottom left screen area from system (back) gestures to open the drawer menu with a swipe from the
+		// left on android devices that have system (back) gesture navigation enabled.
+		webView.doOnLayout {
+			val exclusionWidth = SYSTEM_GESTURES_EXCLUSION_WIDTH_DP.toPx()
+			val exclusionHeight = SYSTEM_GESTURES_EXCLUSION_HEIGHT_DP.toPx()
+			val exclusions = listOf(Rect(0, (it.height - exclusionHeight), exclusionWidth, it.height))
+			setSystemGestureExclusionRects(it, exclusions)
+		}
+
+		if (!firstLoaded) {
+			handleIntent(intent)
+		}
+		firstLoaded = true
+	}
+
+	/** @return "result" extra value */
+	suspend fun startWebauthn(uri: Uri): String {
+		val customIntent = CustomTabsIntent.Builder()
+				.build()
+		val intent = customIntent.intent.apply {
+			data = uri
+			// close custom tabs activity as soon as user navigates away from it, otherwise it will linger as a separate
+			// task
+			addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY)
+		}
+
+		return suspendCoroutine { cont ->
+			// if there was already a handler, finish it
+			webauthnResultHandler?.onNoResult()
+
+			webauthnResultHandler = object : WebauthnHandler {
+				override fun onResult(result: String) {
+					cont.resume(result)
+				}
+
+				override fun onNoResult() {
+					cont.resumeWithException(CancelledError())
+				}
+			}
+			startActivity(intent)
+		}
+	}
+
+	private fun getMimeTypeForUrl(url: String): String {
+		// Opening devTools requests some URL that looks like https://assets.tutanota.com/index-app.html/login?theme=blah
+		// and MimeTypeMap fails to handle it because of that /login path.
+		// There should be no actual resource under index-app.html/, it's only "virtual" paths (handled by JS) for the
+		// app so we assume that it is html.
+		if (url.startsWith("https://assets.tutanota.com/index-app.html/")) {
+			return "text/html"
+		}
+		val ext = MimeTypeMap.getFileExtensionFromUrl(url)
+		// on old android mimetypemap doesn't contain js and returns null
+		// we add a few more for safety.
+		val mimeType = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext)
+		return mimeType ?: when (ext) {
+			"js", "mjs" -> "text/javascript"
+			"json" -> "application/json"
+			"html" -> "text/html"
+			"ttf" -> "font/ttf"
+			else -> error("Unknown extension $ext for url $url")
+		}
 	}
 
 	override fun onStart() {
@@ -185,10 +335,24 @@ class MainActivity : FragmentActivity() {
 		}
 	}
 
+	override fun onResume() {
+		super.onResume()
+		this.webauthnResultHandler?.onNoResult()
+		this.webauthnResultHandler = null
+	}
+
 	override fun onStop() {
 		Log.d(TAG, "onStop")
 		lifecycleScope.launch { mobileFacade.visibilityChange(false) }
 		super.onStop()
+	}
+
+	override fun onDestroy() {
+		Log.d(TAG, "onDestroy")
+		runBlocking {
+			sqlCipherFacade.closeDb()
+		}
+		super.onDestroy()
 	}
 
 	@MainThread
@@ -203,20 +367,41 @@ class MainActivity : FragmentActivity() {
 	}
 
 	private fun handleIntent(intent: Intent) = lifecycleScope.launchWhenCreated {
-
 		// When we redirect to the app from outside, for example after doing payment verification,
 		// we don't want to do any kind of intent handling
 		val data = intent.data
+
+		if (data != null && data.scheme == "tutanota" && data.host == "webauthn") {
+			handleWebauthn(intent, data)
+		}
+
 		if (data != null && data.toString().startsWith("tutanota://")) {
 			return@launchWhenCreated
 		}
 
 		if (intent.action != null) {
 			when (intent.action) {
-				Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE, Intent.ACTION_SENDTO, Intent.ACTION_VIEW -> share(intent)
+				Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE, Intent.ACTION_SENDTO, Intent.ACTION_VIEW -> share(
+						intent
+				)
 				OPEN_USER_MAILBOX_ACTION -> openMailbox(intent)
 				OPEN_CALENDAR_ACTION -> openCalendar(intent)
 			}
+		}
+	}
+
+	private fun handleWebauthn(intent: Intent, data: Uri) {
+		if (webauthnResultHandler != null) {
+			val result = intent.getStringExtra("result")
+			if (result != null) {
+				webauthnResultHandler?.onResult(result)
+			} else {
+				Log.w(TAG, "Webauthn result is not defined! $data")
+				webauthnResultHandler?.onNoResult()
+			}
+			this.webauthnResultHandler = null
+		} else {
+			Log.w(TAG, "Webauthn handler is not set!")
 		}
 	}
 
@@ -227,10 +412,12 @@ class MainActivity : FragmentActivity() {
 
 	suspend fun askBatteryOptimizationsIfNeeded() {
 		val powerManager = getSystemService(POWER_SERVICE) as PowerManager
-		val preferences = PreferenceManager.getDefaultSharedPreferences(this)
+
+		@Suppress("DEPRECATION")
+		val preferences = android.preference.PreferenceManager.getDefaultSharedPreferences(this)
 
 		if (
-				!preferences.getBoolean(ASKED_BATTERY_OPTIMIZTAIONS_PREF, false)
+				!preferences.getBoolean(ASKED_BATTERY_OPTIMIZATIONS_PREF, false)
 				&& !powerManager.isIgnoringBatteryOptimizations(packageName)
 		) {
 
@@ -249,7 +436,7 @@ class MainActivity : FragmentActivity() {
 	}
 
 	private fun saveAskedBatteryOptimizations(preferences: SharedPreferences) {
-		preferences.edit().putBoolean(ASKED_BATTERY_OPTIMIZTAIONS_PREF, true).apply()
+		preferences.edit().putBoolean(ASKED_BATTERY_OPTIMIZATIONS_PREF, true).apply()
 	}
 
 	private fun getInitialUrl(parameters: MutableMap<String, String>, theme: Theme?): String {
@@ -261,7 +448,7 @@ class MainActivity : FragmentActivity() {
 		for ((key, value) in parameters) {
 			try {
 				val escapedValue = URLEncoder.encode(value, "UTF-8")
-				if (queryBuilder.length == 0) {
+				if (queryBuilder.isEmpty()) {
 					queryBuilder.append("?")
 				} else {
 					queryBuilder.append("&")
@@ -273,12 +460,12 @@ class MainActivity : FragmentActivity() {
 				throw RuntimeException(e)
 			}
 		}
-		// additional path information like app.html/login are not handled properly by the webview
+		// additional path information like app.html/login are not handled properly by the WebView
 		// when loaded from local file system. so we are just adding parameters to the Url e.g. ../app.html?noAutoLogin=true.
-		return baseUrl + queryBuilder.toString()
+		return BASE_WEB_VIEW_URL + "index-app.html" + queryBuilder.toString()
 	}
 
-	private val baseUrl: String
+	private val baseAssetPath: String
 		get() = BuildConfig.RES_ADDRESS
 
 
@@ -286,7 +473,7 @@ class MainActivity : FragmentActivity() {
 		return ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 	}
 
-	suspend fun getPermission(permission: String) = suspendCoroutine<Unit> { continuation ->
+	suspend fun getPermission(permission: String) = suspendCoroutine { continuation ->
 		if (hasPermission(permission)) {
 			continuation.resume(Unit)
 		} else {
@@ -310,13 +497,14 @@ class MainActivity : FragmentActivity() {
 		}
 	}
 
-	suspend fun startActivityForResult(@RequiresPermission intent: Intent?): ActivityResult = suspendCoroutine { continuation ->
-		val requestCode = getNextRequestCode()
-		activityRequests[requestCode] = continuation
-		// we need requestCode to identify the request which is not possible with new API
-		@Suppress("DEPRECATION")
-		super.startActivityForResult(intent, requestCode)
-	}
+	suspend fun startActivityForResult(@RequiresPermission intent: Intent?): ActivityResult =
+			suspendCoroutine { continuation ->
+				val requestCode = getNextRequestCode()
+				activityRequests[requestCode] = continuation
+				// we need requestCode to identify the request which is not possible with new API
+				@Suppress("DEPRECATION")
+				super.startActivityForResult(intent, requestCode)
+			}
 
 	@Deprecated("Deprecated in Java")
 	override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -331,20 +519,31 @@ class MainActivity : FragmentActivity() {
 	}
 
 	fun setupPushNotifications() {
-		startService(PushNotificationService.startIntent(this, "MainActivity#setupPushNotifications"))
+		try {
+			val serviceIntent = PushNotificationService.startIntent(
+					this,
+					"MainActivity#setupPushNotifications",
+					attemptForeground = true,
+			)
+			startService(serviceIntent)
+		} catch (e: IllegalStateException) {
+			// We can run into this if the app is in the background for some reason
+			Log.w(TAG, e)
+		}
 		val jobScheduler = getSystemService(JOB_SCHEDULER_SERVICE) as JobScheduler
 		jobScheduler.schedule(
 				JobInfo.Builder(1, ComponentName(this, PushNotificationService::class.java))
 						.setPeriodic(TimeUnit.MINUTES.toMillis(15))
 						.setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
-						.setPersisted(true).build())
+						.setPersisted(true).build()
+		)
 	}
 
 	/**
 	 * The sharing activity. Either invoked from MainActivity (if the app was not active when the
 	 * share occurred) or from onCreate.
 	 */
-	suspend fun share(intent: Intent) {
+	private suspend fun share(intent: Intent) {
 		val action = intent.action
 		val clipData = intent.clipData
 		val files: List<String>
@@ -375,14 +574,23 @@ class MainActivity : FragmentActivity() {
 		} else {
 			""
 		}
-
-		commonNativeFacade.createMailEditor(
-				files,
-				text ?: "",
-				addresses,
-				subject ?: "",
-				mailToUrlString
-		)
+		try {
+			commonNativeFacade.createMailEditor(
+					files,
+					text ?: "",
+					addresses,
+					subject ?: "",
+					mailToUrlString
+			)
+		} catch (e: RemoteExecutionException) {
+			val name = if (e.message != null) {
+				val element = Json.parseToJsonElement(e.message)
+				element.jsonObject["name"]?.jsonPrimitive?.content
+			} else {
+				null
+			}
+			Log.d(TAG, "failed to create a mail editor because of a ${name ?: "unknown error"}")
+		}
 	}
 
 	private fun getFilesFromIntent(intent: Intent): List<String> {
@@ -420,22 +628,26 @@ class MainActivity : FragmentActivity() {
 		return filesArray
 	}
 
-	suspend fun openMailbox(intent: Intent) {
+	private suspend fun openMailbox(intent: Intent) {
 		val userId = intent.getStringExtra(OPEN_USER_MAILBOX_USERID_KEY)
-		val address = intent.getStringExtra(OPEN_USER_MAILBOX_MAILADDRESS_KEY)
+		val address = intent.getStringExtra(OPEN_USER_MAILBOX_MAIL_ADDRESS_KEY)
 		val isSummary = intent.getBooleanExtra(IS_SUMMARY_EXTRA, false)
 		if (userId == null || address == null) {
 			return
 		}
 		val addresses = ArrayList<String>(1)
 		addresses.add(address)
-		startService(notificationDismissedIntent(this, addresses,
-				"MainActivity#openMailbox", isSummary))
+		startService(
+				notificationDismissedIntent(
+						this, addresses,
+						"MainActivity#openMailbox", isSummary
+				)
+		)
 
 		commonNativeFacade.openMailBox(userId, address, null)
 	}
 
-	suspend fun openCalendar(intent: Intent) {
+	private suspend fun openCalendar(intent: Intent) {
 		val userId = intent.getStringExtra(OPEN_USER_MAILBOX_USERID_KEY) ?: return
 		commonNativeFacade.openCalendar(userId)
 	}
@@ -470,7 +682,7 @@ class MainActivity : FragmentActivity() {
 		val hitTestResult = webView.hitTestResult
 		if (hitTestResult.type == HitTestResult.SRC_ANCHOR_TYPE) {
 			val link = hitTestResult.extra ?: return
-			if (link.startsWith(baseUrl)) {
+			if (link.startsWith(baseAssetPath)) {
 				return
 			}
 			menu.setHeaderTitle(link)
@@ -490,12 +702,15 @@ class MainActivity : FragmentActivity() {
 	}
 
 	companion object {
+		// don't remove the trailing slash because otherwise longer domains might match our asset check
+		const val BASE_WEB_VIEW_URL = "https://assets.tutanota.com/"
 		const val OPEN_USER_MAILBOX_ACTION = "de.tutao.tutanota.OPEN_USER_MAILBOX_ACTION"
 		const val OPEN_CALENDAR_ACTION = "de.tutao.tutanota.OPEN_CALENDAR_ACTION"
-		const val OPEN_USER_MAILBOX_MAILADDRESS_KEY = "mailAddress"
+		const val OPEN_USER_MAILBOX_MAIL_ADDRESS_KEY = "mailAddress"
 		const val OPEN_USER_MAILBOX_USERID_KEY = "userId"
 		const val IS_SUMMARY_EXTRA = "isSummary"
-		private const val ASKED_BATTERY_OPTIMIZTAIONS_PREF = "askedBatteryOptimizations"
+		private const val ASKED_BATTERY_OPTIMIZATIONS_PREF = "askedBatteryOptimizations"
+		private const val MIGRATED_OLD_LOCAL_STORAGE_PREF = "migratedOldLocalStorage"
 		private const val TAG = "MainActivity"
 		private var requestId = 0
 

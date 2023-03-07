@@ -1,13 +1,13 @@
 //@bundleInto:common-min
 
-import {downcast} from "@tutao/tutanota-utils"
-import type {CertificateInfo, CreditCard, EmailSenderListElement, GroupMembership} from "../entities/sys/TypeRefs.js"
-import {AccountingInfo, Customer} from "../entities/sys/TypeRefs.js";
-import type {CalendarEventAttendee, UserSettingsGroupRoot} from "../entities/tutanota/TypeRefs.js"
-import {ContactSocialId, MailFolder} from "../entities/tutanota/TypeRefs.js";
-import {isAdminClient, isApp, isDesktop, isElectronClient} from "./Env"
-import type {Country} from "./CountryList"
-import {ProgrammingError} from "./error/ProgrammingError";
+import { downcast } from "@tutao/tutanota-utils"
+import type { CertificateInfo, CreditCard, EmailSenderListElement, GroupMembership } from "../entities/sys/TypeRefs.js"
+import { AccountingInfo, Customer } from "../entities/sys/TypeRefs.js"
+import type { CalendarEventAttendee, UserSettingsGroupRoot } from "../entities/tutanota/TypeRefs.js"
+import { ContactSocialId, MailFolder } from "../entities/tutanota/TypeRefs.js"
+import { isApp, isElectronClient } from "./Env"
+import type { Country } from "./CountryList"
+import { ProgrammingError } from "./error/ProgrammingError"
 
 export const MAX_NBR_MOVE_DELETE_MAIL_SERVICE = 50
 
@@ -22,13 +22,13 @@ export const REQUEST_SIZE_LIMIT_MAP: Map<string, number> = new Map([
 
 export const getMailFolderType = (folder: MailFolder): MailFolderType => downcast(folder.folderType)
 
-type ObjectPropertyKey = string | number | symbol;
-export const reverse = <K extends ObjectPropertyKey, V extends ObjectPropertyKey>(objectMap: Record<K, V>): Record<V, K> => Object.keys(objectMap)
-																																  .reduce((r, k) => {
-																																	  // @ts-ignore
-																																	  const v = objectMap[downcast(k)]
-																																	  return Object.assign(r, {[v]: k})
-																																  }, {} as Record<V, K>)
+type ObjectPropertyKey = string | number | symbol
+export const reverse = <K extends ObjectPropertyKey, V extends ObjectPropertyKey>(objectMap: Record<K, V>): Record<V, K> =>
+	Object.keys(objectMap).reduce((r, k) => {
+		// @ts-ignore
+		const v = objectMap[downcast(k)]
+		return Object.assign(r, { [v]: k })
+	}, {} as Record<V, K>)
 
 export const enum OutOfOfficeNotificationMessageType {
 	Default = "0",
@@ -180,6 +180,7 @@ export enum PaymentMethodType {
 	AccountBalance = "4",
 }
 
+export const PaymentMethodTypeToName = reverse(PaymentMethodType)
 
 export const Const = {
 	UPGRADE_REMINDER_INTERVAL: 14 * 24 * 60 * 60 * 1000,
@@ -199,6 +200,8 @@ export const enum ConversationType {
 	NEW = "0",
 	REPLY = "1",
 	FORWARD = "2",
+	/**  a message for which no mail exists in Tutanota (unknown external mail or deleted mail) */
+	UNKNOWN = "3",
 }
 
 export const enum MailState {
@@ -346,6 +349,7 @@ export enum FeatureType {
 	KnowledgeBase = "13",
 	Newsletter = "14",
 	Blobs = "15", // enables blob attachments for mails
+	MailDetails = "16", // enable new mail model support
 }
 
 export const enum BootstrapFeatureType {
@@ -521,7 +525,7 @@ export const Keys = Object.freeze({
 	},
 	BACKSPACE: {
 		code: 8,
-		name: "BACKSPACE"
+		name: "BACKSPACE",
 	},
 	TAB: {
 		code: 9,
@@ -672,6 +676,10 @@ export const Keys = Object.freeze({
 		code: 80,
 		name: "P",
 	},
+	Q: {
+		code: 81,
+		name: "Q",
+	},
 	R: {
 		code: 82,
 		name: "R",
@@ -756,7 +764,6 @@ export enum ReportedMailFieldType {
 	LINK_DOMAIN = "6",
 }
 
-
 export const enum MailPhishingStatus {
 	UNKNOWN = "0",
 	SUSPICIOUS = "1",
@@ -817,7 +824,6 @@ export enum CalendarAttendeeStatus {
 	TENTATIVE = "4",
 }
 
-
 export function getAttendeeStatus(attendee: CalendarEventAttendee): CalendarAttendeeStatus {
 	return downcast(attendee.status)
 }
@@ -867,7 +873,6 @@ export function mailMethodToCalendarMethod(mailMethod: MailMethod): CalendarMeth
 			throw new ProgrammingError("Unhandled MailMethod: " + mailMethod)
 	}
 }
-
 
 export function getAsEnumValue<K extends keyof any, V>(enumValues: Record<K, V>, value: string): V | null {
 	for (const key of Object.getOwnPropertyNames(enumValues)) {
@@ -945,16 +950,28 @@ export const UsageTestStateToName = reverse(UsageTestState)
 
 export enum UsageTestMetricType {
 	Number = "0",
+	Enum = "1",
+	Likert = "2",
 }
 
 export const UsageTestMetricTypeToName = reverse(UsageTestMetricType)
 
-
 export const enum ArchiveDataType {
 	AuthorityRequests = "0",
 	Attachments = "1",
-	MailBody = "2",
-	MailHeaders = "3"
+	MailDetails = "2",
 }
 
 export const OFFLINE_STORAGE_DEFAULT_TIME_RANGE_DAYS = 31
+
+export enum UsageTestParticipationMode {
+	Once = "0",
+	Unlimited = "1",
+}
+
+export const UsageTestParticipationModeToName = reverse(UsageTestParticipationMode)
+
+export enum TerminationPeriodOptions {
+	EndOfCurrentPeriod = "0",
+	FutureDate = "1",
+}

@@ -1,20 +1,20 @@
-import {AccessExpiredError, BadRequestError, NotAuthenticatedError,} from "../api/common/error/RestError"
-import type {TranslationText} from "../misc/LanguageViewModel"
-import {SecondFactorHandler} from "../misc/2fa/SecondFactorHandler"
-import {getLoginErrorMessage, handleExpectedLoginError} from "../misc/LoginUtils"
-import type {LoginController} from "../api/main/LoginController"
+import { AccessExpiredError, BadRequestError, NotAuthenticatedError } from "../api/common/error/RestError"
+import type { TranslationText } from "../misc/LanguageViewModel"
+import { SecondFactorHandler } from "../misc/2fa/SecondFactorHandler"
+import { getLoginErrorMessage, handleExpectedLoginError } from "../misc/LoginUtils"
+import type { LoginController } from "../api/main/LoginController"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
-import {ProgrammingError} from "../api/common/error/ProgrammingError"
-import type {CredentialsInfo, ICredentialsProvider} from "../misc/credentials/CredentialsProvider"
-import {CredentialAuthenticationError} from "../api/common/error/CredentialAuthenticationError"
-import {first, noOp} from "@tutao/tutanota-utils"
-import {KeyPermanentlyInvalidatedError} from "../api/common/error/KeyPermanentlyInvalidatedError"
-import {assertMainOrNode} from "../api/common/Env"
-import {SessionType} from "../api/common/SessionType"
-import {DeviceStorageUnavailableError} from "../api/common/error/DeviceStorageUnavailableError"
-import {DatabaseKeyFactory} from "../misc/credentials/DatabaseKeyFactory"
-import {DeviceConfig} from "../misc/DeviceConfig"
+import { ProgrammingError } from "../api/common/error/ProgrammingError"
+import type { CredentialsInfo, CredentialsProvider } from "../misc/credentials/CredentialsProvider.js"
+import { CredentialAuthenticationError } from "../api/common/error/CredentialAuthenticationError"
+import { first, noOp } from "@tutao/tutanota-utils"
+import { KeyPermanentlyInvalidatedError } from "../api/common/error/KeyPermanentlyInvalidatedError"
+import { assertMainOrNode } from "../api/common/Env"
+import { SessionType } from "../api/common/SessionType"
+import { DeviceStorageUnavailableError } from "../api/common/error/DeviceStorageUnavailableError"
+import { DatabaseKeyFactory } from "../misc/credentials/DatabaseKeyFactory"
+import { DeviceConfig } from "../misc/DeviceConfig"
 
 assertMainOrNode()
 
@@ -127,11 +127,11 @@ export class LoginViewModel implements ILoginViewModel {
 	state: LoginState
 	helpText: TranslationText
 	readonly savePassword: Stream<boolean>
-	_savedInternalCredentials: Array<CredentialsInfo>
+	private savedInternalCredentials: ReadonlyArray<CredentialsInfo>
 
 	constructor(
 		private readonly loginController: LoginController,
-		private readonly credentialsProvider: ICredentialsProvider,
+		private readonly credentialsProvider: CredentialsProvider,
 		private readonly secondFactorHandler: SecondFactorHandler,
 		private readonly databaseKeyFactory: DatabaseKeyFactory,
 		private readonly deviceConfig: DeviceConfig,
@@ -143,7 +143,7 @@ export class LoginViewModel implements ILoginViewModel {
 		this.password = stream("")
 		this._autoLoginCredentials = null
 		this.savePassword = stream(false)
-		this._savedInternalCredentials = []
+		this.savedInternalCredentials = []
 	}
 
 	_autoLoginCredentials: CredentialsInfo | null
@@ -169,7 +169,7 @@ export class LoginViewModel implements ILoginViewModel {
 
 	canLogin(): boolean {
 		if (this.displayMode === DisplayMode.Credentials) {
-			return this._autoLoginCredentials != null || this._savedInternalCredentials.length === 1
+			return this._autoLoginCredentials != null || this.savedInternalCredentials.length === 1
 		} else if (this.displayMode === DisplayMode.Form) {
 			return Boolean(this.mailAddress() && this.password())
 		} else {
@@ -233,7 +233,7 @@ export class LoginViewModel implements ILoginViewModel {
 	}
 
 	getSavedCredentials(): ReadonlyArray<CredentialsInfo> {
-		return this._savedInternalCredentials
+		return this.savedInternalCredentials
 	}
 
 	switchDeleteState() {
@@ -257,10 +257,10 @@ export class LoginViewModel implements ILoginViewModel {
 	}
 
 	async _updateCachedCredentials() {
-		this._savedInternalCredentials = await this.credentialsProvider.getInternalCredentialsInfos()
+		this.savedInternalCredentials = await this.credentialsProvider.getInternalCredentialsInfos()
 		this._autoLoginCredentials = null
 
-		if (this._savedInternalCredentials.length > 0) {
+		if (this.savedInternalCredentials.length > 0) {
 			if (this.displayMode !== DisplayMode.DeleteCredentials) {
 				this.displayMode = DisplayMode.Credentials
 			}
@@ -338,14 +338,15 @@ export class LoginViewModel implements ILoginViewModel {
 			// we don't want to have multiple credentials that
 			// * share the same userId with different mail addresses (may happen if a user chooses a different alias to log in than the one they saved)
 			// * share the same mail address (may happen if mail aliases are moved between users)
-			const storedCredentialsToDelete = this._savedInternalCredentials.filter(c => c.login === mailAddress || c.userId === newCredentials.userId)
+			const storedCredentialsToDelete = this.savedInternalCredentials.filter((c) => c.login === mailAddress || c.userId === newCredentials.userId)
 
 			for (const credentialToDelete of storedCredentialsToDelete) {
 				const credentials = await this.credentialsProvider.getCredentialsByUserId(credentialToDelete.userId)
 
 				if (credentials) {
 					await this.loginController.deleteOldSession(credentials.credentials)
-					await this.credentialsProvider.deleteByUserId(credentials.credentials.userId)
+					// we handled the deletion of the offlineDb in createSession already
+					await this.credentialsProvider.deleteByUserId(credentials.credentials.userId, { deleteOfflineDb: false })
 				}
 			}
 
@@ -353,7 +354,7 @@ export class LoginViewModel implements ILoginViewModel {
 				try {
 					await this.credentialsProvider.store({
 						credentials: newCredentials,
-						databaseKey: newDatabaseKey
+						databaseKey: newDatabaseKey,
 					})
 				} catch (e) {
 					if (e instanceof KeyPermanentlyInvalidatedError) {

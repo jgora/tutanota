@@ -1,6 +1,6 @@
-import {AssociationType, Cardinality, Type, ValueType} from "./EntityConstants"
-import {TypeRef} from "@tutao/tutanota-utils"
-import type {Element, ListElement} from "./utils/EntityUtils.js"
+import { AssociationType, Cardinality, Type, ValueType } from "./EntityConstants"
+import { TypeRef } from "@tutao/tutanota-utils"
+import type { BlobElement, Element, ListElement } from "./utils/EntityUtils.js"
 
 export type TypeModel = {
 	id: number
@@ -41,9 +41,9 @@ export type ModelAssociation = {
 }
 
 export interface Instance extends Entity {
-	_ownerEncSessionKey: null | Uint8Array;
-	_ownerGroup: null | Id;
-	_id: Id | IdTuple;
+	_ownerEncSessionKey: null | Uint8Array
+	_ownerGroup: null | Id
+	_id: Id | IdTuple
 }
 
 export interface Entity {
@@ -52,9 +52,18 @@ export interface Entity {
 }
 
 export interface ElementEntity extends Entity, Element {
+	_ownerEncSessionKey?: null | Uint8Array
+	_ownerGroup: null | Id
 }
 
 export interface ListElementEntity extends Entity, ListElement {
+	_ownerEncSessionKey?: null | Uint8Array
+	_ownerGroup: null | Id
 }
 
-export type SomeEntity = ElementEntity | ListElementEntity
+export interface BlobElementEntity extends Entity, BlobElement {
+	_ownerEncSessionKey?: null | Uint8Array
+	_ownerGroup: null | Id
+}
+
+export type SomeEntity = ElementEntity | ListElementEntity | BlobElementEntity

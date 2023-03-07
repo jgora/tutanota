@@ -1,29 +1,27 @@
-import m, {Child, Children, ClassComponent, Component} from "mithril"
-import {lang} from "../../misc/LanguageViewModel"
-import {ContactEditor} from "../ContactEditor"
-import {TextFieldN, TextFieldType} from "../../gui/base/TextFieldN"
-import {keyManager, Shortcut} from "../../misc/KeyManager"
-import {Dialog} from "../../gui/base/Dialog"
-import {Icons} from "../../gui/base/icons/Icons"
-import {NotFoundError} from "../../api/common/error/RestError"
-import {BootIcons} from "../../gui/base/icons/BootIcons"
-import type {ContactAddressType} from "../../api/common/TutanotaConstants"
-import {ContactSocialType, getContactSocialType, Keys} from "../../api/common/TutanotaConstants"
-import type {Contact} from "../../api/entities/tutanota/TypeRefs.js"
-import type {ContactSocialId} from "../../api/entities/tutanota/TypeRefs.js"
-import {locator} from "../../api/main/MainLocator"
-import {newMailEditorFromTemplate} from "../../mail/editor/MailEditor"
-import {logins} from "../../api/main/LoginController"
-import {downcast, NBSP, noOp, ofClass} from "@tutao/tutanota-utils"
-import {ActionBar} from "../../gui/base/ActionBar"
-import {getContactAddressTypeLabel, getContactPhoneNumberTypeLabel, getContactSocialTypeLabel} from "./ContactGuiUtils"
-import {appendEmailSignature} from "../../mail/signature/Signature"
-import {formatBirthdayOfContact} from "../model/ContactUtils"
-import stream from "mithril/stream"
-import type {ContactAddress} from "../../api/entities/tutanota/TypeRefs.js"
-import {ButtonAttrs, ButtonN} from "../../gui/base/ButtonN"
-import type {ContactPhoneNumber} from "../../api/entities/tutanota/TypeRefs.js"
-import {assertMainOrNode} from "../../api/common/Env"
+import m, { Child, Children, ClassComponent, Component } from "mithril"
+import { lang } from "../../misc/LanguageViewModel"
+import { ContactEditor } from "../ContactEditor"
+import { TextField, TextFieldType } from "../../gui/base/TextField.js"
+import { keyManager, Shortcut } from "../../misc/KeyManager"
+import { Dialog } from "../../gui/base/Dialog"
+import { Icons } from "../../gui/base/icons/Icons"
+import { NotFoundError } from "../../api/common/error/RestError"
+import { BootIcons } from "../../gui/base/icons/BootIcons"
+import type { ContactAddressType } from "../../api/common/TutanotaConstants"
+import { getContactSocialType, Keys } from "../../api/common/TutanotaConstants"
+import type { Contact, ContactAddress, ContactPhoneNumber, ContactSocialId } from "../../api/entities/tutanota/TypeRefs.js"
+import { locator } from "../../api/main/MainLocator"
+import { newMailEditorFromTemplate } from "../../mail/editor/MailEditor"
+import { logins } from "../../api/main/LoginController"
+import { downcast, NBSP, noOp, ofClass } from "@tutao/tutanota-utils"
+import { ActionBar } from "../../gui/base/ActionBar"
+import { getContactAddressTypeLabel, getContactPhoneNumberTypeLabel, getContactSocialTypeLabel } from "./ContactGuiUtils"
+import { appendEmailSignature } from "../../mail/signature/Signature"
+import { formatBirthdayOfContact, getSocialUrl } from "../model/ContactUtils"
+import { ButtonAttrs, Button } from "../../gui/base/Button.js"
+import { assertMainOrNode } from "../../api/common/Env"
+import { IconButton, IconButtonAttrs } from "../../gui/base/IconButton.js"
+import { ButtonSize } from "../../gui/base/ButtonSize.js"
 
 assertMainOrNode()
 
@@ -72,7 +70,7 @@ export class ContactViewer implements ClassComponent {
 
 	view(): Children {
 		return [
-			m("#contact-viewer.fill-absolute.scroll.plr-l.pb-floating", [
+			m("#contact-viewer.fill-absolute.scroll.plr-l.pb-floating.mlr-safe-inset", [
 				m(".header.pt-ml", [
 					m(".contact-actions.flex-space-between.flex-wrap.mt-xs", [
 						m(".left.flex-grow-shrink-150", [
@@ -107,24 +105,24 @@ export class ContactViewer implements ClassComponent {
 	}
 
 	_renderAddressesAndSocialIds(): Children {
-		const addresses = this.contact.addresses.map(element => this._createAddress(element))
-		const socials = this.contact.socialIds.map(element => this._createSocialId(element))
+		const addresses = this.contact.addresses.map((element) => this._createAddress(element))
+		const socials = this.contact.socialIds.map((element) => this._createSocialId(element))
 		return addresses.length > 0 || socials.length > 0
 			? m(".wrapping-row", [
-				m(".address.mt-l", addresses.length > 0 ? [m(".h4", lang.get("address_label")), m(".aggregateEditors", addresses)] : null),
-				m(".social.mt-l", socials.length > 0 ? [m(".h4", lang.get("social_label")), m(".aggregateEditors", socials)] : null),
-			])
+					m(".address.mt-l", addresses.length > 0 ? [m(".h4", lang.get("address_label")), m(".aggregateEditors", addresses)] : null),
+					m(".social.mt-l", socials.length > 0 ? [m(".h4", lang.get("social_label")), m(".aggregateEditors", socials)] : null),
+			  ])
 			: null
 	}
 
 	_renderMailAddressesAndPhones(): Children {
-		const mailAddresses = this.contact.mailAddresses.map(element => this._createMailAddress(element))
-		const phones = this.contact.phoneNumbers.map(element => this._createPhone(element))
+		const mailAddresses = this.contact.mailAddresses.map((element) => this._createMailAddress(element))
+		const phones = this.contact.phoneNumbers.map((element) => this._createPhone(element))
 		return mailAddresses.length > 0 || phones.length > 0
 			? m(".wrapping-row", [
-				m(".mail.mt-l", mailAddresses.length > 0 ? [m(".h4", lang.get("email_label")), m(".aggregateEditors", [mailAddresses])] : null),
-				m(".phone.mt-l", phones.length > 0 ? [m(".h4", lang.get("phone_label")), m(".aggregateEditors", [phones])] : null),
-			])
+					m(".mail.mt-l", mailAddresses.length > 0 ? [m(".h4", lang.get("email_label")), m(".aggregateEditors", [mailAddresses])] : null),
+					m(".phone.mt-l", phones.length > 0 ? [m(".h4", lang.get("phone_label")), m(".aggregateEditors", [phones])] : null),
+			  ])
 			: null
 	}
 
@@ -135,16 +133,16 @@ export class ContactViewer implements ClassComponent {
 	}
 
 	_createActionbar(): Children {
-		const actionBarButtons: ButtonAttrs[] = [
+		const actionBarButtons: IconButtonAttrs[] = [
 			{
-				label: "edit_action",
+				title: "edit_action",
 				click: () => this.edit(),
-				icon: () => Icons.Edit,
+				icon: Icons.Edit,
 			},
 			{
-				label: "delete_action",
+				title: "delete_action",
 				click: () => this.delete(),
-				icon: () => Icons.Trash,
+				icon: Icons.Trash,
 			},
 		]
 		return m(ActionBar, {
@@ -153,26 +151,28 @@ export class ContactViewer implements ClassComponent {
 	}
 
 	_createSocialId(contactSocialId: ContactSocialId): Children {
-		const showButton = m(ButtonN, {
-			label: "showURL_alt",
+		const showButton = m(IconButton, {
+			title: "showURL_alt",
 			click: noOp,
-			icon: () => Icons.ArrowForward,
+			icon: Icons.ArrowForward,
+			size: ButtonSize.Compact,
 		})
-		return m(TextFieldN, {
+		return m(TextField, {
 			label: () => getContactSocialTypeLabel(getContactSocialType(contactSocialId), contactSocialId.customTypeName),
 			value: contactSocialId.socialId,
 			disabled: true,
-			injectionsRight: () => m(`a[href=${this.getSocialUrl(contactSocialId)}][target=_blank]`, showButton),
+			injectionsRight: () => m(`a[href=${getSocialUrl(contactSocialId)}][target=_blank]`, showButton),
 		})
 	}
 
 	_createMailAddress(address: ContactAddress): Child {
-		const newMailButton = m(ButtonN, {
-			label: "sendMail_alt",
+		const newMailButton = m(IconButton, {
+			title: "sendMail_alt",
 			click: () => this._writeMail(address.address),
-			icon: () => BootIcons.Mail,
+			icon: BootIcons.Mail,
+			size: ButtonSize.Compact,
 		})
-		return m(TextFieldN, {
+		return m(TextField, {
 			label: () => getContactAddressTypeLabel(address.type as any, address.customTypeName),
 			value: address.address,
 			disabled: true,
@@ -181,12 +181,13 @@ export class ContactViewer implements ClassComponent {
 	}
 
 	_createPhone(phone: ContactPhoneNumber): Children {
-		const callButton = m(ButtonN, {
-			label: "callNumber_alt",
+		const callButton = m(IconButton, {
+			title: "callNumber_alt",
 			click: () => null,
-			icon: () => Icons.Call,
+			icon: Icons.Call,
+			size: ButtonSize.Compact,
 		})
-		return m(TextFieldN, {
+		return m(TextField, {
 			label: () => getContactPhoneNumberTypeLabel(phone.type as any, phone.customTypeName),
 			value: phone.number,
 			disabled: true,
@@ -203,12 +204,13 @@ export class ContactViewer implements ClassComponent {
 			prepAddress = encodeURIComponent(address.address)
 		}
 
-		const showButton = m(ButtonN, {
-			label: "showAddress_alt",
+		const showButton = m(IconButton, {
+			title: "showAddress_alt",
 			click: () => null,
-			icon: () => Icons.Pin,
+			icon: Icons.Pin,
+			size: ButtonSize.Compact,
 		})
-		return m(TextFieldN, {
+		return m(TextField, {
 			label: () => getContactAddressTypeLabel(downcast<ContactAddressType>(address.type), address.customTypeName),
 			value: address.address,
 			disabled: true,
@@ -217,60 +219,8 @@ export class ContactViewer implements ClassComponent {
 		})
 	}
 
-	getSocialUrl(element: ContactSocialId): string {
-		let socialUrlType = ""
-		let http = "https://"
-		let worldwidew = "www."
-
-		switch (element.type) {
-			case ContactSocialType.TWITTER:
-				socialUrlType = "twitter.com/"
-
-				if (element.socialId.indexOf("http") !== -1 || element.socialId.indexOf(worldwidew) !== -1) {
-					socialUrlType = ""
-				}
-
-				break
-
-			case ContactSocialType.FACEBOOK:
-				socialUrlType = "facebook.com/"
-
-				if (element.socialId.indexOf("http") !== -1 || element.socialId.indexOf(worldwidew) !== -1) {
-					socialUrlType = ""
-				}
-
-				break
-
-			case ContactSocialType.XING:
-				socialUrlType = "xing.com/profile/"
-
-				if (element.socialId.indexOf("http") !== -1 || element.socialId.indexOf(worldwidew) !== -1) {
-					socialUrlType = ""
-				}
-
-				break
-
-			case ContactSocialType.LINKED_IN:
-				socialUrlType = "linkedin.com/in/"
-
-				if (element.socialId.indexOf("http") !== -1 || element.socialId.indexOf(worldwidew) !== -1) {
-					socialUrlType = ""
-				}
-		}
-
-		if (element.socialId.indexOf("http") !== -1) {
-			http = ""
-		}
-
-		if (element.socialId.indexOf(worldwidew) !== -1) {
-			worldwidew = ""
-		}
-
-		return `${http}${worldwidew}${socialUrlType}${element.socialId.trim()}`
-	}
-
 	_writeMail(mailAddress: string): Promise<any> {
-		return locator.mailModel.getUserMailboxDetails().then(mailboxDetails => {
+		return locator.mailModel.getUserMailboxDetails().then((mailboxDetails) => {
 			const name = `${this.contact.firstName} ${this.contact.lastName}`.trim()
 			return newMailEditorFromTemplate(
 				mailboxDetails,
@@ -284,15 +234,15 @@ export class ContactViewer implements ClassComponent {
 				},
 				"",
 				appendEmailSignature("", logins.getUserController().props),
-			).then(editor => editor.show())
+			).then((editor) => editor.show())
 		})
 	}
 
 	delete() {
-		Dialog.confirm("deleteContact_msg").then(confirmed => {
+		Dialog.confirm("deleteContact_msg").then((confirmed) => {
 			if (confirmed) {
 				locator.entityClient.erase(this.contact).catch(
-					ofClass(NotFoundError, e => {
+					ofClass(NotFoundError, (e) => {
 						// ignore because the delete key shortcut may be executed again while the contact is already deleted
 					}),
 				)

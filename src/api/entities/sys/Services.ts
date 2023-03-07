@@ -11,10 +11,12 @@ import {ChangePasswordDataTypeRef} from "./TypeRefs.js"
 import {CloseSessionServicePostTypeRef} from "./TypeRefs.js"
 import {CreateCustomerServerPropertiesDataTypeRef} from "./TypeRefs.js"
 import {CreateCustomerServerPropertiesReturnTypeRef} from "./TypeRefs.js"
-import {CustomDomainCheckDataTypeRef} from "./TypeRefs.js"
-import {CustomDomainCheckReturnTypeRef} from "./TypeRefs.js"
+import {CustomDomainCheckGetInTypeRef} from "./TypeRefs.js"
+import {CustomDomainCheckGetOutTypeRef} from "./TypeRefs.js"
 import {CustomDomainDataTypeRef} from "./TypeRefs.js"
 import {CustomDomainReturnTypeRef} from "./TypeRefs.js"
+import {CustomerAccountTerminationPostInTypeRef} from "./TypeRefs.js"
+import {CustomerAccountTerminationPostOutTypeRef} from "./TypeRefs.js"
 import {CustomerInfoReturnTypeRef} from "./TypeRefs.js"
 import {PublicKeyReturnTypeRef} from "./TypeRefs.js"
 import {CustomerDataTypeRef} from "./TypeRefs.js"
@@ -34,10 +36,10 @@ import {LocationServiceGetReturnTypeRef} from "./TypeRefs.js"
 import {MailAddressAliasServiceReturnTypeRef} from "./TypeRefs.js"
 import {MailAddressAliasServiceDataTypeRef} from "./TypeRefs.js"
 import {MailAddressAliasServiceDataDeleteTypeRef} from "./TypeRefs.js"
-import {MailAddressAvailabilityDataTypeRef} from "./TypeRefs.js"
-import {MailAddressAvailabilityReturnTypeRef} from "./TypeRefs.js"
 import {MembershipAddDataTypeRef} from "./TypeRefs.js"
 import {MembershipRemoveDataTypeRef} from "./TypeRefs.js"
+import {MultipleMailAddressAvailabilityDataTypeRef} from "./TypeRefs.js"
+import {MultipleMailAddressAvailabilityReturnTypeRef} from "./TypeRefs.js"
 import {PaymentDataServiceGetDataTypeRef} from "./TypeRefs.js"
 import {PaymentDataServiceGetReturnTypeRef} from "./TypeRefs.js"
 import {PaymentDataServicePostDataTypeRef} from "./TypeRefs.js"
@@ -72,11 +74,9 @@ import {SystemKeysReturnTypeRef} from "./TypeRefs.js"
 import {TakeOverDeletedAddressDataTypeRef} from "./TypeRefs.js"
 import {UpdateAdminshipDataTypeRef} from "./TypeRefs.js"
 import {UpdatePermissionKeyDataTypeRef} from "./TypeRefs.js"
+import {UpdateSessionKeysPostInTypeRef} from "./TypeRefs.js"
 import {UpgradePriceServiceDataTypeRef} from "./TypeRefs.js"
 import {UpgradePriceServiceReturnTypeRef} from "./TypeRefs.js"
-import {UsageTestAssignmentInTypeRef} from "./TypeRefs.js"
-import {UsageTestAssignmentOutTypeRef} from "./TypeRefs.js"
-import {UsageTestParticipationInTypeRef} from "./TypeRefs.js"
 import {UserIdDataTypeRef} from "./TypeRefs.js"
 import {UserIdReturnTypeRef} from "./TypeRefs.js"
 import {UserDataTypeRef} from "./TypeRefs.js"
@@ -151,7 +151,7 @@ export const CreateCustomerServerProperties = Object.freeze({
 export const CustomDomainCheckService = Object.freeze({
 	app: "sys",
 	name: "CustomDomainCheckService",
-	get: {data: CustomDomainCheckDataTypeRef, return: CustomDomainCheckReturnTypeRef},
+	get: {data: CustomDomainCheckGetInTypeRef, return: CustomDomainCheckGetOutTypeRef},
 	post: null,
 	put: null,
 	delete: null,
@@ -164,6 +164,15 @@ export const CustomDomainService = Object.freeze({
 	post: {data: CustomDomainDataTypeRef, return: CustomDomainReturnTypeRef},
 	put: {data: CustomDomainDataTypeRef, return: null},
 	delete: {data: CustomDomainDataTypeRef, return: null},
+} as const)
+
+export const CustomerAccountTerminationService = Object.freeze({
+	app: "sys",
+	name: "CustomerAccountTerminationService",
+	get: null,
+	post: {data: CustomerAccountTerminationPostInTypeRef, return: CustomerAccountTerminationPostOutTypeRef},
+	put: null,
+	delete: null,
 } as const)
 
 export const CustomerInfoService = Object.freeze({
@@ -256,15 +265,6 @@ export const MailAddressAliasService = Object.freeze({
 	delete: {data: MailAddressAliasServiceDataDeleteTypeRef, return: null},
 } as const)
 
-export const MailAddressAvailabilityService = Object.freeze({
-	app: "sys",
-	name: "MailAddressAvailabilityService",
-	get: {data: MailAddressAvailabilityDataTypeRef, return: MailAddressAvailabilityReturnTypeRef},
-	post: null,
-	put: null,
-	delete: null,
-} as const)
-
 export const MembershipService = Object.freeze({
 	app: "sys",
 	name: "MembershipService",
@@ -272,6 +272,15 @@ export const MembershipService = Object.freeze({
 	post: {data: MembershipAddDataTypeRef, return: null},
 	put: null,
 	delete: {data: MembershipRemoveDataTypeRef, return: null},
+} as const)
+
+export const MultipleMailAddressAvailabilityService = Object.freeze({
+	app: "sys",
+	name: "MultipleMailAddressAvailabilityService",
+	get: {data: MultipleMailAddressAvailabilityDataTypeRef, return: MultipleMailAddressAvailabilityReturnTypeRef},
+	post: null,
+	put: null,
+	delete: null,
 } as const)
 
 export const PaymentDataService = Object.freeze({
@@ -445,29 +454,20 @@ export const UpdatePermissionKeyService = Object.freeze({
 	delete: null,
 } as const)
 
+export const UpdateSessionKeysService = Object.freeze({
+	app: "sys",
+	name: "UpdateSessionKeysService",
+	get: null,
+	post: {data: UpdateSessionKeysPostInTypeRef, return: null},
+	put: null,
+	delete: null,
+} as const)
+
 export const UpgradePriceService = Object.freeze({
 	app: "sys",
 	name: "UpgradePriceService",
 	get: {data: UpgradePriceServiceDataTypeRef, return: UpgradePriceServiceReturnTypeRef},
 	post: null,
-	put: null,
-	delete: null,
-} as const)
-
-export const UsageTestAssignmentService = Object.freeze({
-	app: "sys",
-	name: "UsageTestAssignmentService",
-	get: null,
-	post: {data: UsageTestAssignmentInTypeRef, return: UsageTestAssignmentOutTypeRef},
-	put: {data: UsageTestAssignmentInTypeRef, return: UsageTestAssignmentOutTypeRef},
-	delete: null,
-} as const)
-
-export const UsageTestParticipationService = Object.freeze({
-	app: "sys",
-	name: "UsageTestParticipationService",
-	get: null,
-	post: {data: UsageTestParticipationInTypeRef, return: null},
 	put: null,
 	delete: null,
 } as const)

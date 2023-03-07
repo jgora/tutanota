@@ -1,4 +1,4 @@
-import {assertMainOrNodeBoot} from "../api/common/Env"
+import { assertMainOrNodeBoot } from "../api/common/Env"
 
 assertMainOrNodeBoot()
 export const size = {
@@ -21,7 +21,9 @@ export const size = {
 	vpad_large: 32,
 	vpad_xl: 48,
 	text_bubble_tpad: 20,
-	border_radius: 3,
+	border_radius_small: 3,
+	border_radius: 6,
+	border_radius_big: 9,
 	border_selection: 4,
 	font_size_base: 16,
 	font_size_smaller: 14,
@@ -29,6 +31,7 @@ export const size = {
 	button_height: 44,
 	button_height_accent: 40,
 	button_height_bubble: 30,
+	button_height_compact: 30,
 	button_icon_bg_size: 32,
 	button_floating_size: 56,
 
@@ -41,7 +44,6 @@ export const size = {
 	bottom_nav_bar: 50,
 	navbar_button_width: 80,
 	navbar_edge_width_mobile: 58,
-	text_field_label_top: 21,
 	header_logo_height: 38,
 	header_logo_height_mobile: 32,
 	list_row_height: 68,
@@ -56,11 +58,16 @@ export const size = {
 		return this.font_size_small + 6
 	},
 
+	get calendar_hour_height(): number {
+		return (this.calendar_line_height + 2 * this.calendar_event_border + this.calendar_day_event_padding) * 4
+	},
+
 	calendar_hour_width: 80,
 	calendar_hour_width_mobile: 60,
-	calendar_hour_height: 60,
 	calendar_event_margin: 6,
 	calendar_event_margin_mobile: 2,
+	calendar_event_border: 1,
+	calendar_day_event_padding: 2,
 	drawer_menu_width: 44,
 	first_col_min_width: 240,
 	first_col_max_width: 300,

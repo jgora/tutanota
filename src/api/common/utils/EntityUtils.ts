@@ -1,4 +1,4 @@
-import type {Hex} from "@tutao/tutanota-utils"
+import type { Hex } from "@tutao/tutanota-utils"
 import {
 	base64ExtToBase64,
 	base64ToBase64Ext,
@@ -6,15 +6,17 @@ import {
 	base64ToUint8Array,
 	base64UrlToBase64,
 	hexToBase64,
+	isSameTypeRef,
 	pad,
 	stringToUtf8Uint8Array,
 	TypeRef,
 	uint8ArrayToBase64,
 	utf8Uint8ArrayToString,
 } from "@tutao/tutanota-utils"
-import {Cardinality, Type, ValueType} from "../EntityConstants"
-import type {ModelValue, SomeEntity, TypeModel} from "../EntityTypes"
-import {ElementEntity} from "../EntityTypes"
+import { Cardinality, ValueType } from "../EntityConstants"
+import type { ModelValue, SomeEntity, TypeModel } from "../EntityTypes"
+import { ElementEntity } from "../EntityTypes"
+import { ProgrammingError } from "../error/ProgrammingError.js"
 
 /**
  * the maximum ID for elements stored on the server (number with the length of 10 bytes) => 2^80 - 1
@@ -64,7 +66,6 @@ export const POST_MULTIPLE_LIMIT = 100
  * @return True if firstId is bigger than secondId, false otherwise.
  */
 export function firstBiggerThanSecond(firstId: Id, secondId: Id, typeModel?: TypeModel): boolean {
-
 	if (typeModel?.values._id.type === ValueType.CustomId) {
 		return firstBiggerThanSecond(customIdToString(firstId), customIdToString(secondId))
 	} else {
@@ -122,7 +123,7 @@ export function isSameId(id1: (Id | IdTuple) | null, id2: (Id | IdTuple) | null)
 	} else if (id1 instanceof Array && id2 instanceof Array) {
 		return id1[0] === id2[0] && id1[1] === id2[1]
 	} else {
-		return (id1 as any) === (id2 as any)
+		return id1 === id2
 	}
 }
 
@@ -131,7 +132,7 @@ export function haveSameId(entity1: SomeEntity, entity2: SomeEntity): boolean {
 }
 
 export function containsId(ids: ReadonlyArray<Id | IdTuple>, id: Id | IdTuple): boolean {
-	return ids.find(idInArray => isSameId(idInArray, id)) != null
+	return ids.find((idInArray) => isSameId(idInArray, id)) != null
 }
 
 export interface Element {
@@ -139,6 +140,10 @@ export interface Element {
 }
 
 export interface ListElement {
+	_id: IdTuple
+}
+
+export interface BlobElement {
 	_id: IdTuple
 }
 
@@ -191,10 +196,6 @@ export function customIdToString(customId: string): string {
 export function create<T>(typeModel: TypeModel, typeRef: TypeRef<T>): T {
 	let i: Record<string, any> = {
 		_type: typeRef,
-	}
-
-	if (typeModel.type === Type.Element || typeModel.type === Type.ListElement) {
-		;(i as any)._errors = {}
 	}
 
 	for (let valueName of Object.keys(typeModel.values)) {
@@ -310,11 +311,23 @@ const base64extEncodedIdLength = 12
 const base64extAlphabet = "-0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz"
 
 export function isValidGeneratedId(id: Id | IdTuple): boolean {
-	const test = (id: string) => id.length === base64extEncodedIdLength && Array.from(id).every(char => base64extAlphabet.includes(char))
+	const test = (id: string) => id.length === base64extEncodedIdLength && Array.from(id).every((char) => base64extAlphabet.includes(char))
 
 	return typeof id === "string" ? test(id) : id.every(test)
 }
 
 export function isElementEntity(e: SomeEntity): e is ElementEntity {
 	return typeof e._id === "string"
+}
+
+export function assertIsEntity<T extends SomeEntity>(entity: SomeEntity, type: TypeRef<T>): entity is T {
+	if (isSameTypeRef(entity._type, type)) {
+		return true
+	} else {
+		throw new ProgrammingError(`Entity is not of correct type ${type}`)
+	}
+}
+
+export function assertIsEntity2<T extends SomeEntity>(type: TypeRef<T>): (entity: SomeEntity) => entity is T {
+	return (e): e is T => assertIsEntity(e, type)
 }

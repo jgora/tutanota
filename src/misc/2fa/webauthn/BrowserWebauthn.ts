@@ -1,23 +1,20 @@
-import {COSEAlgorithmIdentifier} from "./WebauthnTypes.js"
-import {ProgrammingError} from "../../../api/common/error/ProgrammingError.js"
-import {getHttpOrigin} from "../../../api/common/Env.js"
-import {
-	IWebauthn,
-	U2F_APPID, U2f_APPID_SUFFIX,
-	WEBAUTHN_RP_ID,
-	WebAuthnRegistrationChallenge,
-	WebauthnRegistrationResult,
-	WebAuthnSignChallenge,
-	WebauthnSignResult
-} from "./IWebauthn.js"
-import {stringToUtf8Uint8Array} from "@tutao/tutanota-utils"
-import {CancelledError} from "../../../api/common/error/CancelledError.js"
-import {WebauthnError} from "../../../api/common/error/WebauthnError.js"
+import { COSEAlgorithmIdentifier } from "./WebauthnTypes.js"
+import { ProgrammingError } from "../../../api/common/error/ProgrammingError.js"
+import { getApiOrigin, isApp } from "../../../api/common/Env.js"
+import { U2F_APPID, U2f_APPID_SUFFIX, WEBAUTHN_RP_ID } from "./WebAuthn.js"
+import { WebAuthnFacade } from "../../../native/common/generatedipc/WebAuthnFacade.js"
+import { stringToUtf8Uint8Array } from "@tutao/tutanota-utils"
+import { CancelledError } from "../../../api/common/error/CancelledError.js"
+import { WebauthnError } from "../../../api/common/error/WebauthnError.js"
+import { WebAuthnRegistrationChallenge } from "../../../native/common/generatedipc/WebAuthnRegistrationChallenge.js"
+import { WebAuthnRegistrationResult } from "../../../native/common/generatedipc/WebAuthnRegistrationResult.js"
+import { WebAuthnSignChallenge } from "../../../native/common/generatedipc/WebAuthnSignChallenge.js"
+import { WebAuthnSignResult } from "../../../native/common/generatedipc/WebAuthnSignResult.js"
 
 const WEBAUTHN_TIMEOUT_MS = 60000
 
 /** An actual webauthn implementation in browser. */
-export class BrowserWebauthn implements IWebauthn {
+export class BrowserWebauthn implements WebAuthnFacade {
 	/**
 	 * Relying Party Identifier
 	 * see https://www.w3.org/TR/webauthn-2/#public-key-credential-source-rpid
@@ -27,10 +24,7 @@ export class BrowserWebauthn implements IWebauthn {
 	private readonly appId: string
 	private currentOperationSignal: AbortController | null = null
 
-	constructor(
-		private readonly api: CredentialsContainer,
-		hostname: string
-	) {
+	constructor(private readonly api: CredentialsContainer, hostname: string) {
 		this.rpId = this.rpIdFromHostname(hostname)
 		this.appId = this.appidFromHostname(hostname)
 	}
@@ -43,14 +37,20 @@ export class BrowserWebauthn implements IWebauthn {
 		return this.appId === appId
 	}
 
+	/**
+	 * test whether hardware key second factors are supported for this client
+	 */
 	async isSupported(): Promise<boolean> {
-		return this.api != null &&
+		return (
+			!isApp() &&
+			this.api != null &&
 			// @ts-ignore see polyfill.js
 			// We just stub BigInt in order to import cborg without issues but we can't actually use it
 			!BigInt.polyfilled
+		)
 	}
 
-	async register({challenge, userId, name, displayName}: WebAuthnRegistrationChallenge): Promise<WebauthnRegistrationResult> {
+	async register({ challenge, userId, name, displayName }: WebAuthnRegistrationChallenge): Promise<WebAuthnRegistrationResult> {
 		const publicKeyCredentialCreationOptions: PublicKeyCredentialCreationOptions = {
 			challenge,
 			rp: {
@@ -70,29 +70,35 @@ export class BrowserWebauthn implements IWebauthn {
 			],
 			authenticatorSelection: {
 				authenticatorAttachment: "cross-platform",
-				userVerification: "discouraged"
+				userVerification: "discouraged",
 			},
 			timeout: WEBAUTHN_TIMEOUT_MS,
 			attestation: "none",
 		}
 		this.currentOperationSignal = new AbortController()
-		const credential = await this.api.create({
+		const credential = (await this.api.create({
 			publicKey: publicKeyCredentialCreationOptions,
-			signal: this.currentOperationSignal.signal
-		}) as PublicKeyCredential
+			signal: this.currentOperationSignal.signal,
+		})) as PublicKeyCredential
 
 		return {
 			rpId: this.rpId,
-			rawId: credential.rawId,
-			attestationObject: (credential.response as AuthenticatorAttestationResponse).attestationObject,
+			rawId: new Uint8Array(credential.rawId),
+			attestationObject: new Uint8Array((credential.response as AuthenticatorAttestationResponse).attestationObject),
 		}
 	}
 
-	async sign({challenge, keys}: WebAuthnSignChallenge): Promise<WebauthnSignResult> {
+	async sign({ challenge, keys }: WebAuthnSignChallenge): Promise<WebAuthnSignResult> {
+		const allowCredentials: PublicKeyCredentialDescriptor[] = keys.map((key) => {
+			return {
+				id: key.id,
+				type: "public-key",
+			}
+		})
 		const publicKeyCredentialRequestOptions: PublicKeyCredentialRequestOptions = {
 			challenge: challenge,
 			rpId: this.rpId,
-			allowCredentials: keys,
+			allowCredentials,
 			extensions: {
 				appid: this.appId,
 			},
@@ -105,7 +111,7 @@ export class BrowserWebauthn implements IWebauthn {
 		try {
 			assertion = await this.api.get({
 				publicKey: publicKeyCredentialRequestOptions,
-				signal: this.currentOperationSignal.signal
+				signal: this.currentOperationSignal.signal,
 			})
 		} catch (e) {
 			if (e.name === "AbortError") {
@@ -122,10 +128,10 @@ export class BrowserWebauthn implements IWebauthn {
 		}
 		const assertionResponse = publicKeyCredential.response as AuthenticatorAssertionResponse
 		return {
-			rawId: publicKeyCredential.rawId,
-			authenticatorData: assertionResponse.authenticatorData,
-			signature: assertionResponse.signature,
-			clientDataJSON: assertionResponse.clientDataJSON,
+			rawId: new Uint8Array(publicKeyCredential.rawId),
+			authenticatorData: new Uint8Array(assertionResponse.authenticatorData),
+			signature: new Uint8Array(assertionResponse.signature),
+			clientDataJSON: new Uint8Array(assertionResponse.clientDataJSON),
 		}
 	}
 
@@ -146,7 +152,7 @@ export class BrowserWebauthn implements IWebauthn {
 		if (hostname.endsWith(WEBAUTHN_RP_ID)) {
 			return U2F_APPID
 		} else {
-			return getHttpOrigin() + U2f_APPID_SUFFIX
+			return getApiOrigin() + U2f_APPID_SUFFIX
 		}
 	}
 }

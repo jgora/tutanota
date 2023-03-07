@@ -1,7 +1,7 @@
 import o from "ospec"
-import {stringToUtf8Uint8Array} from "@tutao/tutanota-utils"
-import {bitArrayToUint8Array} from "../lib/misc/Utils.js"
-import {TotpVerifier} from "../lib/misc/TotpVerifier.js"
+import { stringToUtf8Uint8Array } from "@tutao/tutanota-utils"
+import { bitArrayToUint8Array } from "../lib/misc/Utils.js"
+import { TotpVerifier } from "../lib/misc/TotpVerifier.js"
 import sjcl from "../lib/internal/sjcl.js"
 
 o.spec("TotpVerifier", function () {
@@ -9,7 +9,7 @@ o.spec("TotpVerifier", function () {
 	const base32 = sjcl.codec.base32
 	o("readableKey", function () {
 		let secret = new Uint8Array([99, 98, 3, 5, 7, 89, 4, 7, 9, 5, 22, 55, 1, 4, 88, 127])
-		let key = totp.readableKey(secret)
+		let key = TotpVerifier.readableKey(secret)
 		o("mnra gbih leca ocif cy3q cbcy p4").equals(key)
 		o(Array.from(secret)).deepEquals(Array.from(bitArrayToUint8Array(base32.toBits(key.replace(/ /g, "")))))
 	})

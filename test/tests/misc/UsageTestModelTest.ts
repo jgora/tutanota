@@ -1,53 +1,45 @@
 import o from "ospec"
-import {ASSIGNMENT_UPDATE_INTERVAL_MS, PersistedAssignmentData, TtlBehavior, UsageTestModel, UsageTestStorage} from "../../../src/misc/UsageTestModel.js"
+import {
+	ASSIGNMENT_UPDATE_INTERVAL_MS,
+	EphemeralUsageTestStorage,
+	PersistedAssignmentData,
+	StorageBehavior,
+	UsageTestModel,
+	UsageTestStorage,
+} from "../../../src/misc/UsageTestModel.js"
 import {
 	createUsageTestAssignment,
 	createUsageTestAssignmentIn,
 	createUsageTestAssignmentOut,
 	createUsageTestMetricData,
-	createUsageTestParticipationIn
-} from "../../../src/api/entities/sys/TypeRefs.js"
-import {matchers, object, verify, when} from "testdouble"
-import {clone} from "@tutao/tutanota-utils"
-import {Stage, UsageTest} from "@tutao/tutanota-usagetests"
-import {SuspensionBehavior} from "../../../src/api/worker/rest/RestClient.js"
-import {UsageTestAssignmentService, UsageTestParticipationService} from "../../../src/api/entities/sys/Services.js"
-import {IServiceExecutor} from "../../../src/api/common/ServiceRequest.js"
-import modelInfo from "../../../src/api/entities/sys/ModelInfo.js"
+	createUsageTestParticipationIn,
+} from "../../../src/api/entities/usage/TypeRefs.js"
+import { matchers, object, replace, verify, when } from "testdouble"
+import { clone } from "@tutao/tutanota-utils"
+import { Stage, UsageTest, UsageTestController } from "@tutao/tutanota-usagetests"
+import { SuspensionBehavior } from "../../../src/api/worker/rest/RestClient.js"
+import { UsageTestAssignmentService, UsageTestParticipationService } from "../../../src/api/entities/usage/Services.js"
+import { IServiceExecutor } from "../../../src/api/common/ServiceRequest.js"
+import modelInfo from "../../../src/api/entities/usage/ModelInfo.js"
+import { EntityClient } from "../../../src/api/common/EntityClient.js"
+import { LoginController } from "../../../src/api/main/LoginController.js"
+import { createCustomerProperties } from "../../../src/api/entities/sys/TypeRefs.js"
+import { UserController } from "../../../src/api/main/UserController.js"
+import { createUserSettingsGroupRoot } from "../../../src/api/entities/tutanota/TypeRefs.js"
+import { EventController } from "../../../src/api/main/EventController.js"
 
-const {anything} = matchers
-
-class MockStorage implements UsageTestStorage {
-	private assignments: PersistedAssignmentData | null
-	private deviceId: string | null
-
-	constructor(assignmentData?: PersistedAssignmentData, testDeviceId?: string) {
-		this.assignments = assignmentData ?? null
-		this.deviceId = testDeviceId ?? null
-	}
-
-	async getAssignments(): Promise<PersistedAssignmentData | null> {
-		return this.assignments
-	}
-
-	async getTestDeviceId(): Promise<string | null> {
-		return this.deviceId
-	}
-
-	async storeAssignments(persistedAssignmentData: PersistedAssignmentData): Promise<void> {
-		this.assignments = persistedAssignmentData
-	}
-
-	async storeTestDeviceId(testDeviceId: string): Promise<void> {
-		this.deviceId = testDeviceId
-	}
-}
-
+const { anything } = matchers
 
 o.spec("UsageTestModel", function () {
 	let usageTestModel: UsageTestModel
 	let serviceExecutor: IServiceExecutor
-	let mockStorage: MockStorage
+	let entityClient: EntityClient
+	let persistentStorage: UsageTestStorage
+	let ephemeralStorage: UsageTestStorage
+	let userControllerMock: UserController
+	let loginControllerMock: LoginController
+	let eventControllerMock: EventController
+	let usageTestController: UsageTestController
 	const testDeviceId = "123testDeviceId321"
 
 	const dateProvider = {
@@ -56,19 +48,19 @@ o.spec("UsageTestModel", function () {
 		},
 		timeZone(): string {
 			throw new Error("Not implemented by this provider")
-		}
+		},
 	}
 
 	const oldAssignment = createUsageTestAssignment({
 		name: "oldAssignment",
 		variant: "3",
 		stages: [],
-		state: "0",
+		sendPings: true,
 		testId: "testId123",
 	})
 	const assignmentData: PersistedAssignmentData = {
-		updatedAt: dateProvider.now() - (ASSIGNMENT_UPDATE_INTERVAL_MS * 2),
-		sysModelVersion: modelInfo.version,
+		updatedAt: dateProvider.now() - ASSIGNMENT_UPDATE_INTERVAL_MS * 2,
+		usageModelVersion: modelInfo.version,
 		assignments: [oldAssignment],
 	}
 
@@ -76,122 +68,156 @@ o.spec("UsageTestModel", function () {
 		name: "assignment1",
 		variant: "1",
 		stages: [],
-		state: "1",
+		sendPings: true,
 		testId: "testId123",
 	})
 
 	o.beforeEach(function () {
 		serviceExecutor = object()
-		mockStorage = new MockStorage()
-		usageTestModel = new UsageTestModel(mockStorage, dateProvider, serviceExecutor)
+		entityClient = object()
+
+		userControllerMock = object()
+		loginControllerMock = object()
+		replace(loginControllerMock, "isUserLoggedIn", () => true)
+
+		eventControllerMock = object()
+
+		usageTestController = object()
+
+		when(loginControllerMock.getUserController()).thenReturn(userControllerMock)
+
+		ephemeralStorage = new EphemeralUsageTestStorage()
+		persistentStorage = new EphemeralUsageTestStorage()
+		usageTestModel = new UsageTestModel(
+			{
+				[StorageBehavior.Persist]: persistentStorage,
+				[StorageBehavior.Ephemeral]: ephemeralStorage,
+			},
+			dateProvider,
+			serviceExecutor,
+			entityClient,
+			loginControllerMock,
+			eventControllerMock,
+			() => usageTestController,
+		)
+
+		replace(usageTestModel, "customerProperties", createCustomerProperties({ usageDataOptedOut: false }))
+		replace(userControllerMock, "userSettingsGroupRoot", createUserSettingsGroupRoot({ usageDataOptedIn: true }))
 	})
 
-	async function assertStored(result, assignment) {
+	async function assertStored(storage, result, assignment) {
 		o(result[0].testId).equals(assignment.testId)
-		const storedAssignment = await mockStorage.getAssignments()
-		o(storedAssignment?.assignments!![0].testId).equals(assignment.testId)
-		o(await mockStorage.getTestDeviceId()).equals(testDeviceId)
+		const storedAssignment = await storage.getAssignments()
+		o(storedAssignment?.assignments![0].testId).equals(assignment.testId)
+		o(await storage.getTestDeviceId()).equals(testDeviceId)
 	}
 
 	o.spec("usage tests", function () {
 		o.spec("usage test model loading assignments", function () {
-
 			o("when there's no deviceId it does POST", async function () {
-				when(serviceExecutor.post(UsageTestAssignmentService, createUsageTestAssignmentIn({}), {
-					suspensionBehavior: SuspensionBehavior.Throw,
-				})).thenResolve(
+				when(
+					serviceExecutor.post(UsageTestAssignmentService, createUsageTestAssignmentIn({}), {
+						suspensionBehavior: SuspensionBehavior.Throw,
+					}),
+				).thenResolve(
 					createUsageTestAssignmentOut({
 						assignments: [newAssignment],
 						testDeviceId: testDeviceId,
-					})
+					}),
 				)
 
-				const result = await usageTestModel.loadActiveUsageTests(TtlBehavior.PossiblyOutdated)
-				await assertStored(result, newAssignment)
+				const result = await usageTestModel.loadActiveUsageTests()
+				await assertStored(ephemeralStorage, result, newAssignment)
 			})
 
-			o("possibly outdated, loads from server because model version has changed", async function () {
-
-				await mockStorage.storeTestDeviceId(testDeviceId)
-				await mockStorage.storeAssignments({
+			o("loads from server because model version has changed", async function () {
+				await ephemeralStorage.storeTestDeviceId(testDeviceId)
+				await ephemeralStorage.storeAssignments({
 					assignments: [],
-					sysModelVersion: 1, // definitely outdated!
+					usageModelVersion: -1, // definitely outdated!
 					updatedAt: dateProvider.now() - 1,
 				})
 
-				when(serviceExecutor.put(UsageTestAssignmentService, createUsageTestAssignmentIn({testDeviceId}), {
-					suspensionBehavior: SuspensionBehavior.Throw,
-				})).thenResolve(
+				when(
+					serviceExecutor.put(UsageTestAssignmentService, createUsageTestAssignmentIn({ testDeviceId }), {
+						suspensionBehavior: SuspensionBehavior.Throw,
+					}),
+				).thenResolve(
 					createUsageTestAssignmentOut({
 						assignments: [newAssignment],
 						testDeviceId: testDeviceId,
-					})
+					}),
 				)
 
-				const result = await usageTestModel.loadActiveUsageTests(TtlBehavior.PossiblyOutdated)
-				await assertStored(result, newAssignment)
+				const result = await usageTestModel.loadActiveUsageTests()
+				await assertStored(ephemeralStorage, result, newAssignment)
 			})
 
-			o("possibly outdated, loads from server and stores if nothing is stored", async function () {
-				when(serviceExecutor.put(UsageTestAssignmentService, createUsageTestAssignmentIn({testDeviceId}), {
-					suspensionBehavior: SuspensionBehavior.Throw,
-				})).thenResolve(
+			o("loads from server and stores if nothing is stored", async function () {
+				when(
+					serviceExecutor.put(UsageTestAssignmentService, createUsageTestAssignmentIn({ testDeviceId }), {
+						suspensionBehavior: SuspensionBehavior.Throw,
+					}),
+				).thenResolve(
 					createUsageTestAssignmentOut({
 						assignments: [newAssignment],
 						testDeviceId: testDeviceId,
-					})
+					}),
 				)
 
-				await mockStorage.storeTestDeviceId(testDeviceId)
+				await ephemeralStorage.storeTestDeviceId(testDeviceId)
 
-				const result = await usageTestModel.loadActiveUsageTests(TtlBehavior.PossiblyOutdated)
+				const result = await usageTestModel.loadActiveUsageTests()
 
-				await assertStored(result, newAssignment)
+				await assertStored(ephemeralStorage, result, newAssignment)
 			})
 
-			o("possibly outdated, returns result from storage if it's there", async function () {
-				await mockStorage.storeTestDeviceId(testDeviceId)
-				await mockStorage.storeAssignments(assignmentData)
+			o("returns result from storage if it's there", async function () {
+				await ephemeralStorage.storeTestDeviceId(testDeviceId)
+				assignmentData.updatedAt = dateProvider.now()
+				await ephemeralStorage.storeAssignments(assignmentData)
 
-				const result = await usageTestModel.loadActiveUsageTests(TtlBehavior.PossiblyOutdated)
+				const result = await usageTestModel.loadActiveUsageTests()
 
-				await assertStored(result, oldAssignment)
+				await assertStored(ephemeralStorage, result, oldAssignment)
 			})
 
-			o("up to date only, data outdated, loads from the server and stores", async function () {
-				await mockStorage.storeTestDeviceId(testDeviceId)
-				await mockStorage.storeAssignments(assignmentData)
+			o("data outdated, loads from the server and stores", async function () {
+				await ephemeralStorage.storeTestDeviceId(testDeviceId)
+				await ephemeralStorage.storeAssignments(assignmentData)
 
-				when(serviceExecutor.put(UsageTestAssignmentService, createUsageTestAssignmentIn({testDeviceId}), {
-					suspensionBehavior: SuspensionBehavior.Throw,
-				})).thenResolve(
+				when(
+					serviceExecutor.put(UsageTestAssignmentService, createUsageTestAssignmentIn({ testDeviceId }), {
+						suspensionBehavior: SuspensionBehavior.Throw,
+					}),
+				).thenResolve(
 					createUsageTestAssignmentOut({
 						assignments: [newAssignment],
 						testDeviceId: testDeviceId,
-					})
+					}),
 				)
-				const result = await usageTestModel.loadActiveUsageTests(TtlBehavior.UpToDateOnly)
-				await assertStored(result, newAssignment)
+				const result = await usageTestModel.loadActiveUsageTests()
+				await assertStored(ephemeralStorage, result, newAssignment)
 			})
 
-			o("up to date only, data not outdated, returns result from storage", async function () {
-				await mockStorage.storeTestDeviceId(testDeviceId)
+			o("data not outdated, returns result from storage", async function () {
+				await ephemeralStorage.storeTestDeviceId(testDeviceId)
 				const nonOutdatedAssignmentData = clone(assignmentData)
 				nonOutdatedAssignmentData.updatedAt = dateProvider.now() - ASSIGNMENT_UPDATE_INTERVAL_MS / 2
-				await mockStorage.storeAssignments(nonOutdatedAssignmentData)
+				await ephemeralStorage.storeAssignments(nonOutdatedAssignmentData)
 
-				const result = await usageTestModel.loadActiveUsageTests(TtlBehavior.UpToDateOnly)
-				await assertStored(result, oldAssignment)
+				const result = await usageTestModel.loadActiveUsageTests()
+				await assertStored(ephemeralStorage, result, oldAssignment)
 			})
 		})
 
 		o.spec("sendPing", function () {
 			o("sends ping", async function () {
-				await mockStorage.storeTestDeviceId(testDeviceId)
+				await ephemeralStorage.storeTestDeviceId(testDeviceId)
 
 				const usageTest: UsageTest = new UsageTest("testId", "testName", 1, true)
 				usageTest.pingAdapter = usageTestModel
-				const stage = new Stage(0, usageTest)
+				const stage = new Stage(0, usageTest, 1, 1)
 				usageTest.addStage(stage)
 				const metric = {
 					name: "foo",
@@ -199,20 +225,153 @@ o.spec("UsageTestModel", function () {
 				}
 				stage.setMetric(metric)
 
-				when(serviceExecutor.post(
+				when(
+					serviceExecutor.post(
 						UsageTestParticipationService,
 						createUsageTestParticipationIn({
 							testId: usageTest.testId,
 							metrics: [createUsageTestMetricData(metric)],
 							stage: stage.number.toString(),
 							testDeviceId: testDeviceId,
-						})
-					)
+						}),
+					),
 				).thenResolve(undefined)
 
 				await usageTestModel.sendPing(usageTest, stage)
 
-				verify(serviceExecutor.post(UsageTestParticipationService, anything()), {times: 1})
+				verify(serviceExecutor.post(UsageTestParticipationService, anything()), { times: 1, ignoreExtraArgs: true })
+			})
+
+			o("sends pings in correct order", async function () {
+				await ephemeralStorage.storeTestDeviceId(testDeviceId)
+
+				const usageTest: UsageTest = new UsageTest("testId", "testName", 1, true)
+				usageTest.pingAdapter = usageTestModel
+
+				for (let i = 0; i < 3; i++) {
+					const stage = new Stage(i, usageTest, 1, 1)
+					usageTest.addStage(stage)
+				}
+
+				const pingOrder: Array<string> = []
+
+				when(
+					serviceExecutor.post(
+						UsageTestParticipationService,
+						createUsageTestParticipationIn({
+							testId: usageTest.testId,
+							stage: "0",
+							testDeviceId: testDeviceId,
+						}),
+						anything(),
+					),
+				).thenDo(async () => {
+					// Simulate network delay
+					await new Promise((resolve) => setTimeout(resolve, 15))
+					pingOrder.push("0")
+				})
+
+				when(
+					serviceExecutor.post(
+						UsageTestParticipationService,
+						createUsageTestParticipationIn({
+							testId: usageTest.testId,
+							stage: "1",
+							testDeviceId: testDeviceId,
+						}),
+						anything(),
+					),
+				).thenDo(async () => {
+					// Simulate network delay
+					await new Promise((resolve) => setTimeout(resolve, 10))
+					pingOrder.push("1")
+				})
+
+				when(
+					serviceExecutor.post(
+						UsageTestParticipationService,
+						createUsageTestParticipationIn({
+							testId: usageTest.testId,
+							stage: "2",
+							testDeviceId: testDeviceId,
+						}),
+						anything(),
+					),
+				).thenDo(async () => {
+					pingOrder.push("2")
+				})
+
+				usageTest.getStage(0).complete()
+				usageTest.getStage(1).complete()
+				await usageTest.getStage(2).complete()
+
+				o(pingOrder).deepEquals(["0", "1", "2"])
+			})
+		})
+
+		o.spec("setting the storage behavior", function () {
+			o("uses correct storage backend after the behavior has been set", async function () {
+				usageTestModel.setStorageBehavior(StorageBehavior.Persist)
+
+				when(
+					serviceExecutor.post(UsageTestAssignmentService, createUsageTestAssignmentIn({}), {
+						suspensionBehavior: SuspensionBehavior.Throw,
+					}),
+				).thenResolve(
+					createUsageTestAssignmentOut({
+						assignments: [newAssignment],
+						testDeviceId: testDeviceId,
+					}),
+				)
+
+				const result = await usageTestModel.loadActiveUsageTests()
+
+				await assertStored(persistentStorage, result, newAssignment)
+				verify(ephemeralStorage.getTestDeviceId(), { times: 0 })
+			})
+
+			o("nothing is stored if customer has opted out", async function () {
+				replace(usageTestModel, "customerProperties", createCustomerProperties({ usageDataOptedOut: true }))
+
+				usageTestModel.setStorageBehavior(StorageBehavior.Persist)
+
+				when(
+					serviceExecutor.post(UsageTestAssignmentService, createUsageTestAssignmentIn({}), {
+						suspensionBehavior: SuspensionBehavior.Throw,
+					}),
+				).thenResolve(
+					createUsageTestAssignmentOut({
+						assignments: [newAssignment],
+						testDeviceId: testDeviceId,
+					}),
+				)
+
+				await usageTestModel.loadActiveUsageTests()
+
+				o(await persistentStorage.getAssignments()).equals(null)
+				verify(ephemeralStorage.getTestDeviceId(), { times: 0 })
+			})
+
+			o("nothing is stored if user has not opted in", async function () {
+				replace(userControllerMock, "userSettingsGroupRoot", createUserSettingsGroupRoot({ usageDataOptedIn: false }))
+
+				usageTestModel.setStorageBehavior(StorageBehavior.Persist)
+
+				when(
+					serviceExecutor.post(UsageTestAssignmentService, createUsageTestAssignmentIn({}), {
+						suspensionBehavior: SuspensionBehavior.Throw,
+					}),
+				).thenResolve(
+					createUsageTestAssignmentOut({
+						assignments: [newAssignment],
+						testDeviceId: testDeviceId,
+					}),
+				)
+
+				await usageTestModel.loadActiveUsageTests()
+
+				o(await persistentStorage.getAssignments()).equals(null)
+				verify(ephemeralStorage.getTestDeviceId(), { times: 0 })
 			})
 		})
 	})

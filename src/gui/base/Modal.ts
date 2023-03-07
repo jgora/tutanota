@@ -1,12 +1,12 @@
-import m, {Children, Component} from "mithril"
-import {alpha, AlphaEnum, animations} from "./../animation/Animations"
-import {theme} from "../theme"
-import type {Shortcut} from "../../misc/KeyManager"
-import {keyManager} from "../../misc/KeyManager"
-import {windowFacade} from "../../misc/WindowFacade"
-import {insideRect, remove} from "@tutao/tutanota-utils"
-import {LayerType} from "../../RootView"
-import {assertMainOrNodeBoot} from "../../api/common/Env"
+import m, { Children, Component } from "mithril"
+import { alpha, AlphaEnum, animations } from "./../animation/Animations"
+import { theme } from "../theme"
+import type { Shortcut } from "../../misc/KeyManager"
+import { keyManager } from "../../misc/KeyManager"
+import { windowFacade } from "../../misc/WindowFacade"
+import { insideRect, remove } from "@tutao/tutanota-utils"
+import { LayerType } from "../../RootView"
+import { assertMainOrNodeBoot } from "../../api/common/Env"
 
 assertMainOrNodeBoot()
 
@@ -23,6 +23,7 @@ class Modal implements Component {
 	visible: boolean
 	currentKey: number
 	private _closingComponents: Array<ModalComponent>
+	private readonly _historyEventListener = (e: Event) => this._popState(e)
 
 	constructor() {
 		this.currentKey = 0
@@ -30,8 +31,6 @@ class Modal implements Component {
 		this.visible = false
 		this._uniqueComponent = null
 		this._closingComponents = []
-		// modal should never get removed, so not saving unsubscriber
-		windowFacade.addHistoryEventListener(e => this._popState(e))
 
 		this.view = (): Children => {
 			return m(
@@ -45,7 +44,7 @@ class Modal implements Component {
 					},
 					style: {
 						"z-index": LayerType.Modal,
-						display: this.visible ? "" : "none", // display: null not working for IE11
+						display: this.visible ? "" : "none",
 					},
 				},
 				this.components.map((wrapper, i, array) => {
@@ -53,7 +52,7 @@ class Modal implements Component {
 						".layer.fill-absolute",
 						{
 							key: wrapper.key,
-							oncreate: vnode => {
+							oncreate: (vnode) => {
 								// do not set visible=true already in display() because it leads to modal staying open in a second window in Chrome
 								// because onbeforeremove is not called in that case to set visible=false. this is probably an optimization in Chrome to reduce
 								// UI updates if the window is not visible. setting visible=true here is fine because this code is not even called then
@@ -78,7 +77,7 @@ class Modal implements Component {
 							style: {
 								zIndex: LayerType.Modal + 1 + i,
 							},
-							onbeforeremove: vnode => {
+							onbeforeremove: (vnode) => {
 								if (wrapper.needsBg) {
 									this._closingComponents.push(wrapper.component)
 
@@ -111,11 +110,14 @@ class Modal implements Component {
 	}
 
 	display(component: ModalComponent, needsBg: boolean = true) {
+		// move the handler to the top of the handler stack
+		windowFacade.removeHistoryEventListener(this._historyEventListener)
+		windowFacade.addHistoryEventListener(this._historyEventListener)
 		if (this.components.length > 0) {
 			keyManager.unregisterModalShortcuts(this.components[this.components.length - 1].component.shortcuts())
 		}
 
-		const existingIndex = this.components.findIndex(shownComponent => shownComponent.component === component)
+		const existingIndex = this.components.findIndex((shownComponent) => shownComponent.component === component)
 
 		if (existingIndex !== -1) {
 			console.warn("Attempting to display the same modal component multiple times!")
@@ -143,12 +145,12 @@ class Modal implements Component {
 		const len = this.components.length
 
 		if (len === 0) {
-			console.log("no modals")
-			return true // no modals to close
+			console.log("no modals to close")
+			return true
 		}
 
 		// get the keys because we're going to modify the component stack during iteration
-		const keys = this.components.map(c => c.key)
+		const keys = this.components.map((c) => c.key)
 
 		for (let i = len - 1; i >= 0; i--) {
 			const component = this._getComponentByKey(keys[i])
@@ -174,6 +176,7 @@ class Modal implements Component {
 	 */
 	displayUnique(component: ModalComponent, needsBg: boolean = true) {
 		if (this._uniqueComponent) {
+			console.log("tried to open unique component while another was open!")
 			return
 		}
 
@@ -182,21 +185,22 @@ class Modal implements Component {
 	}
 
 	_getComponentByKey(key: number): ModalComponent | null {
-		const entry = this.components.find(c => c.key === key)
+		const entry = this.components.find((c) => c.key === key)
 		return entry?.component ?? null
 	}
 
 	remove(component: ModalComponent): void {
-		let componentIndex = this.components.findIndex(wrapper => wrapper.component === component)
+		const componentIndex = this.components.findIndex((wrapper) => wrapper.component === component)
 
 		if (componentIndex === -1) {
 			console.log("can't remove non existing component from modal")
 			return
 		}
 
-		let componentIsLastComponent = componentIndex === this.components.length - 1
+		const componentIsTopmostComponent = componentIndex === this.components.length - 1
 
-		if (componentIsLastComponent) {
+		if (componentIsTopmostComponent) {
+			console.log("removed topmost modal component")
 			keyManager.unregisterModalShortcuts(component.shortcuts())
 		}
 
@@ -208,7 +212,7 @@ class Modal implements Component {
 
 		m.redraw()
 
-		if (this.components.length > 0 && componentIsLastComponent) {
+		if (this.components.length > 0 && componentIsTopmostComponent) {
 			// the removed component was the last component, so we can now register the shortcuts of the now last component
 			keyManager.registerModalShortcuts(this.components[this.components.length - 1].component.shortcuts())
 		}
@@ -218,8 +222,8 @@ class Modal implements Component {
 	 * adds an animation to the topmost component
 	 */
 	addAnimation(domLayer: HTMLElement, fadein: boolean): Promise<unknown> {
-		let start = 0
-		let end = 0.5
+		const start = 0
+		const end = 0.5
 		return animations.add(domLayer, alpha(AlphaEnum.BackgroundColor, theme.modal_bg, fadein ? start : end, fadein ? end : start))
 	}
 }
@@ -235,5 +239,10 @@ export interface ModalComponent extends Component {
 
 	backgroundClick(e: MouseEvent): void
 
+	/**
+	 * will be called by the main modal if no other component above this one blocked the event (previous components returned true)
+	 * return false if the event was handled and lower components shouldn't be notified, true otherwise
+	 * @param e
+	 */
 	popState(e: Event): boolean
 }

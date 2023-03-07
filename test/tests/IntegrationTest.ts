@@ -1,24 +1,27 @@
 import o from "ospec"
-import {GroupType} from "../../src/api/common/TutanotaConstants.js"
-import {ContactTypeRef, createContact} from "../../src/api/entities/tutanota/TypeRefs.js"
-import {MailTypeRef} from "../../src/api/entities/tutanota/TypeRefs.js"
-import {createContactAddress} from "../../src/api/entities/tutanota/TypeRefs.js"
-import type {MailFolder} from "../../src/api/entities/tutanota/TypeRefs.js"
-import {MailFolderTypeRef} from "../../src/api/entities/tutanota/TypeRefs.js"
-import {MailBoxTypeRef} from "../../src/api/entities/tutanota/TypeRefs.js"
-import {neverNull} from "@tutao/tutanota-utils"
-import {ContactListTypeRef} from "../../src/api/entities/tutanota/TypeRefs.js"
-import {initLocator, locator} from "../../src/api/worker/WorkerLocator.js"
-import {browserDataStub} from "./TestUtils.js"
-import {SessionType} from "../../src/api/common/SessionType.js"
+import { GroupType } from "../../src/api/common/TutanotaConstants.js"
+import type { MailFolder } from "../../src/api/entities/tutanota/TypeRefs.js"
+import {
+	ContactListTypeRef,
+	ContactTypeRef,
+	createContact,
+	createContactAddress,
+	MailBoxTypeRef,
+	MailFolderTypeRef,
+	MailTypeRef,
+} from "../../src/api/entities/tutanota/TypeRefs.js"
+import { neverNull } from "@tutao/tutanota-utils"
+import { initLocator, locator } from "../../src/api/worker/WorkerLocator.js"
+import { browserDataStub } from "./TestUtils.js"
+import { SessionType } from "../../src/api/common/SessionType.js"
 
 function loadFolders(folderListId: Id): Promise<MailFolder[]> {
 	return locator.cachingEntityClient.loadAll(MailFolderTypeRef, folderListId)
 }
 
 function loadMailboxSystemFolders(): Promise<MailFolder[]> {
-	return locator.cachingEntityClient.loadRoot(MailBoxTypeRef, locator.user.getUserGroupId()).then(mailbox => {
-		return loadFolders(neverNull(mailbox.systemFolders).folders)
+	return locator.cachingEntityClient.loadRoot(MailBoxTypeRef, locator.user.getUserGroupId()).then((mailbox) => {
+		return loadFolders(neverNull(mailbox.folders).folders)
 	})
 }
 
@@ -56,7 +59,7 @@ o.spec("integration test", function () {
 		contact.addresses = [address]
 		await locator.cachingEntityClient.setup(contactList.contacts, contact)
 		const contacts = await locator.cachingEntityClient.loadAll(ContactTypeRef, contactList.contacts)
-		const firstNames = contacts.map(contact => contact.firstName)
+		const firstNames = contacts.map((contact) => contact.firstName)
 		o(firstNames.indexOf("Max")).notEquals(-1)
 	})
 })

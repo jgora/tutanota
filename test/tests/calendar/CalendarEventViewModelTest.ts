@@ -1,14 +1,14 @@
 import o from "ospec"
 // @ts-ignore[untyped-import]
 import en from "../../../src/translations/en.js"
-import type {Guest} from "../../../src/calendar/date/CalendarEventViewModel.js"
-import {CalendarEventViewModel} from "../../../src/calendar/date/CalendarEventViewModel.js"
-import {lang} from "../../../src/misc/LanguageViewModel.js"
-import {assertThrows, unmockAttribute} from "@tutao/tutanota-test-utils"
-import {addMapEntry, clone, delay, downcast, neverNull, noOp} from "@tutao/tutanota-utils"
-import type {MailboxDetail} from "../../../src/mail/model/MailModel.js"
-import {MailModel} from "../../../src/mail/model/MailModel.js"
-import type {CalendarEvent, Mail} from "../../../src/api/entities/tutanota/TypeRefs.js"
+import type { Guest, SendMailPurpose } from "../../../src/calendar/date/CalendarEventViewModel.js"
+import { CalendarEventViewModel } from "../../../src/calendar/date/CalendarEventViewModel.js"
+import { lang } from "../../../src/misc/LanguageViewModel.js"
+import { assertThrows, unmockAttribute } from "@tutao/tutanota-test-utils"
+import { addMapEntry, clone, delay, downcast, neverNull, noOp } from "@tutao/tutanota-utils"
+import type { MailboxDetail } from "../../../src/mail/model/MailModel.js"
+import { MailModel } from "../../../src/mail/model/MailModel.js"
+import type { CalendarEvent, Mail } from "../../../src/api/entities/tutanota/TypeRefs.js"
 import {
 	Contact,
 	createCalendarEvent,
@@ -17,24 +17,25 @@ import {
 	createContactMailAddress,
 	createEncryptedMailAddress,
 	createMail,
-	EncryptedMailAddress
+	createMailboxProperties,
+	EncryptedMailAddress,
 } from "../../../src/api/entities/tutanota/TypeRefs.js"
-import {AccountType, AlarmInterval, assertEnumValue, CalendarAttendeeStatus, ShareCapability,} from "../../../src/api/common/TutanotaConstants.js"
-import type {User} from "../../../src/api/entities/sys/TypeRefs.js"
-import {createGroupMembership, createPublicKeyReturn, createRepeatRule} from "../../../src/api/entities/sys/TypeRefs.js"
-import type {CalendarUpdateDistributor} from "../../../src/calendar/date/CalendarUpdateDistributor.js"
-import type {IUserController} from "../../../src/api/main/UserController.js"
-import type {CalendarInfo} from "../../../src/calendar/model/CalendarModel.js"
-import {CalendarModel} from "../../../src/calendar/model/CalendarModel.js"
-import {getAllDayDateUTCFromZone, getTimeZone} from "../../../src/calendar/date/CalendarUtils.js"
-import {DateTime} from "luxon"
-import {SendMailModel} from "../../../src/mail/editor/SendMailModel"
-import type {LoginController} from "../../../src/api/main/LoginController"
-import {EventController} from "../../../src/api/main/EventController"
-import {EntityClient} from "../../../src/api/common/EntityClient"
-import {BusinessFeatureRequiredError} from "../../../src/api/main/BusinessFeatureRequiredError"
-import {MailFacade} from "../../../src/api/worker/facades/MailFacade"
-import {Time} from "../../../src/api/common/utils/Time"
+import { AccountType, AlarmInterval, assertEnumValue, CalendarAttendeeStatus, ShareCapability } from "../../../src/api/common/TutanotaConstants.js"
+import type { User } from "../../../src/api/entities/sys/TypeRefs.js"
+import { createGroupMembership, createPublicKeyReturn, createRepeatRule } from "../../../src/api/entities/sys/TypeRefs.js"
+import type { CalendarUpdateDistributor } from "../../../src/calendar/date/CalendarUpdateDistributor.js"
+import type { UserController } from "../../../src/api/main/UserController.js"
+import type { CalendarInfo } from "../../../src/calendar/model/CalendarModel.js"
+import { CalendarModel } from "../../../src/calendar/model/CalendarModel.js"
+import { getAllDayDateUTCFromZone, getTimeZone } from "../../../src/calendar/date/CalendarUtils.js"
+import { DateTime } from "luxon"
+import { SendMailModel } from "../../../src/mail/editor/SendMailModel"
+import type { LoginController } from "../../../src/api/main/LoginController"
+import { EventController } from "../../../src/api/main/EventController"
+import { EntityClient } from "../../../src/api/common/EntityClient"
+import { BusinessFeatureRequiredError } from "../../../src/api/main/BusinessFeatureRequiredError"
+import { MailFacade } from "../../../src/api/worker/facades/lazy/MailFacade.js"
+import { Time } from "../../../src/api/common/utils/Time"
 import {
 	accountMailAddress,
 	calendarGroupId,
@@ -45,17 +46,18 @@ import {
 	makeMailboxDetail,
 	makeUserController,
 } from "./CalendarTestUtils.js"
-import {RecipientType} from "../../../src/api/common/recipients/Recipient.js"
-import {RecipientsModel, ResolvableRecipient} from "../../../src/api/main/RecipientsModel"
-import {instance, matchers, object, when} from "testdouble"
-import {ContactModel} from "../../../src/contacts/model/ContactModel"
-import {ResolvableRecipientMock} from "../mail/ResolvableRecipientMock.js"
+import { RecipientType } from "../../../src/api/common/recipients/Recipient.js"
+import { RecipientsModel, ResolvableRecipient } from "../../../src/api/main/RecipientsModel"
+import { instance, matchers, object, when } from "testdouble"
+import { ContactModel } from "../../../src/contacts/model/ContactModel"
+import { ResolvableRecipientMock } from "../mail/ResolvableRecipientMock.js"
 import { EntityRestClientMock } from "../api/worker/rest/EntityRestClientMock.js"
+import { NoZoneDateProvider } from "../../../src/api/common/utils/NoZoneDateProvider.js"
 
 const now = new Date(2020, 4, 25, 13, 40)
 const zone = getTimeZone()
 
-const wrapEncIntoMailAddress = address =>
+const wrapEncIntoMailAddress = (address) =>
 	createEncryptedMailAddress({
 		address,
 	})
@@ -68,7 +70,6 @@ let internalAddresses: string[] = []
 let resolveRecipientMs = 100
 let mockedAttributeReferences = []
 
-
 o.spec("CalendarEventViewModel", function () {
 	let inviteModel: SendMailModel
 	let updateModel: SendMailModel
@@ -76,31 +77,29 @@ o.spec("CalendarEventViewModel", function () {
 	let responseModel: SendMailModel
 	let showProgress = noOp
 
-
 	let recipientsModel: RecipientsModel
 
 	async function init({
-							userController = makeUserController(),
-							distributor = makeDistributor(),
-							mailboxDetail = makeMailboxDetail(),
-							calendars,
-							existingEvent,
-							calendarModel = makeCalendarModel(),
-							mailModel = downcast({}),
-							mail = null,
-							existingContacts = []
-						}: {
-		userController?: IUserController
+		userController = makeUserController(),
+		distributor = makeDistributor(),
+		mailboxDetail = makeMailboxDetail(),
+		calendars,
+		existingEvent,
+		calendarModel = makeCalendarModel(),
+		mailModel = downcast({}),
+		mail = null,
+		existingContacts = [],
+	}: {
+		userController?: UserController
 		distributor?: CalendarUpdateDistributor
 		mailboxDetail?: MailboxDetail
 		calendars: Map<Id, CalendarInfo>
 		calendarModel?: CalendarModel
 		mailModel?: MailModel
 		existingEvent: CalendarEvent | null
-		mail?: Mail | null | undefined,
+		mail?: Mail | null | undefined
 		existingContacts?: Array<Contact>
 	}): Promise<CalendarEventViewModel> {
-
 		const loginController: LoginController = downcast({
 			getUserController: () => userController,
 			isInternalUserLoggedIn: () => true,
@@ -129,17 +128,21 @@ o.spec("CalendarEventViewModel", function () {
 
 		recipientsModel = instance(RecipientsModel)
 
-		when(recipientsModel.resolve(matchers.anything(), matchers.anything())).thenDo(({address, name, contact, type}, resolveMode) =>
-			new ResolvableRecipientMock(
-				address,
-				name ?? null,
-				contact ?? null,
-				type ?? null,
-				internalAddresses,
-				existingContacts,
-				resolveMode,
-				userController.user
-			))
+		when(recipientsModel.resolve(matchers.anything(), matchers.anything())).thenDo(
+			({ address, name, contact, type }, resolveMode) =>
+				new ResolvableRecipientMock(
+					address,
+					name ?? null,
+					contact ?? null,
+					type ?? null,
+					internalAddresses,
+					existingContacts,
+					resolveMode,
+					userController.user,
+				),
+		)
+
+		const mailboxProperties = createMailboxProperties()
 
 		inviteModel = new SendMailModel(
 			mailFacadeMock,
@@ -150,6 +153,8 @@ o.spec("CalendarEventViewModel", function () {
 			eventController,
 			mailboxDetail,
 			recipientsModel,
+			new NoZoneDateProvider(),
+			mailboxProperties,
 		)
 		updateModel = new SendMailModel(
 			mailFacadeMock,
@@ -160,6 +165,8 @@ o.spec("CalendarEventViewModel", function () {
 			eventController,
 			mailboxDetail,
 			recipientsModel,
+			new NoZoneDateProvider(),
+			mailboxProperties,
 		)
 		cancelModel = new SendMailModel(
 			mailFacadeMock,
@@ -170,6 +177,8 @@ o.spec("CalendarEventViewModel", function () {
 			eventController,
 			mailboxDetail,
 			recipientsModel,
+			new NoZoneDateProvider(),
+			mailboxProperties,
 		)
 		responseModel = new SendMailModel(
 			mailFacadeMock,
@@ -180,9 +189,11 @@ o.spec("CalendarEventViewModel", function () {
 			eventController,
 			mailboxDetail,
 			recipientsModel,
+			new NoZoneDateProvider(),
+			mailboxProperties,
 		)
 
-		const sendFactory = (_, purpose) => {
+		const sendFactory = (purpose: SendMailPurpose): SendMailModel => {
 			return {
 				invite: inviteModel,
 				update: updateModel,
@@ -197,6 +208,7 @@ o.spec("CalendarEventViewModel", function () {
 			calendarModel,
 			entityClient,
 			mailboxDetail,
+			mailboxProperties,
 			sendFactory,
 			now,
 			zone,
@@ -222,26 +234,30 @@ o.spec("CalendarEventViewModel", function () {
 		internalAddresses = []
 	})
 	o.afterEach(function () {
-		mockedAttributeReferences.forEach(ref => unmockAttribute(ref))
+		mockedAttributeReferences.forEach((ref) => unmockAttribute(ref))
 		mockedAttributeReferences = []
 	})
 	o("init with existing event", async function () {
 		const existingEvent = createCalendarEvent({
 			summary: "existing event",
-			startTime: DateTime.fromObject({
-				year: 2020,
-				month: 5,
-				day: 26,
-				hour: 12,
-				zone,
-			}).toJSDate(),
-			endTime: DateTime.fromObject({
-				year: 2020,
-				month: 5,
-				day: 26,
-				hour: 13,
-				zone,
-			}).toJSDate(),
+			startTime: DateTime.fromObject(
+				{
+					year: 2020,
+					month: 5,
+					day: 26,
+					hour: 12,
+				},
+				{ zone },
+			).toJSDate(),
+			endTime: DateTime.fromObject(
+				{
+					year: 2020,
+					month: 5,
+					day: 26,
+					hour: 13,
+				},
+				{ zone },
+			).toJSDate(),
 			description: "note",
 			location: "location",
 			_ownerGroup: calendarGroupId,
@@ -253,24 +269,28 @@ o.spec("CalendarEventViewModel", function () {
 		})
 		o(viewModel.summary()).equals(existingEvent.summary)
 		o(viewModel.startDate.toISOString()).equals(
-			DateTime.fromObject({
-				year: 2020,
-				month: 5,
-				day: 26,
-				zone,
-			})
-					.toJSDate()
-					.toISOString(),
+			DateTime.fromObject(
+				{
+					year: 2020,
+					month: 5,
+					day: 26,
+				},
+				{ zone },
+			)
+				.toJSDate()
+				.toISOString(),
 		)
 		o(viewModel.endDate.toISOString()).equals(
-			DateTime.fromObject({
-				year: 2020,
-				month: 5,
-				day: 26,
-				zone,
-			})
-					.toJSDate()
-					.toISOString(),
+			DateTime.fromObject(
+				{
+					year: 2020,
+					month: 5,
+					day: 26,
+				},
+				{ zone },
+			)
+				.toJSDate()
+				.toISOString(),
 		)
 		// @ts-ignore
 		o(viewModel.startTime?.toObject()).deepEquals({
@@ -295,21 +315,25 @@ o.spec("CalendarEventViewModel", function () {
 		const existingEvent = createCalendarEvent({
 			summary: "existing event",
 			startTime: getAllDayDateUTCFromZone(
-				DateTime.fromObject({
-					year: 2020,
-					month: 5,
-					day: 26,
-					zone,
-				}).toJSDate(),
+				DateTime.fromObject(
+					{
+						year: 2020,
+						month: 5,
+						day: 26,
+					},
+					{ zone },
+				).toJSDate(),
 				zone,
 			),
 			endTime: getAllDayDateUTCFromZone(
-				DateTime.fromObject({
-					year: 2020,
-					month: 5,
-					day: 27,
-					zone,
-				}).toJSDate(),
+				DateTime.fromObject(
+					{
+						year: 2020,
+						month: 5,
+						day: 27,
+					},
+					{ zone },
+				).toJSDate(),
 				zone,
 			),
 			description: "note",
@@ -322,24 +346,28 @@ o.spec("CalendarEventViewModel", function () {
 		})
 		o(viewModel.summary()).equals(existingEvent.summary)
 		o(viewModel.startDate.toISOString()).equals(
-			DateTime.fromObject({
-				year: 2020,
-				month: 5,
-				day: 26,
-				zone,
-			})
-					.toJSDate()
-					.toISOString(),
+			DateTime.fromObject(
+				{
+					year: 2020,
+					month: 5,
+					day: 26,
+				},
+				{ zone },
+			)
+				.toJSDate()
+				.toISOString(),
 		)
 		o(viewModel.endDate.toISOString()).equals(
-			DateTime.fromObject({
-				year: 2020,
-				month: 5,
-				day: 26,
-				zone,
-			})
-					.toJSDate()
-					.toISOString(),
+			DateTime.fromObject(
+				{
+					year: 2020,
+					month: 5,
+					day: 26,
+				},
+				{ zone },
+			)
+				.toJSDate()
+				.toISOString(),
 		)
 	})
 	o("invite in our own calendar", async function () {
@@ -395,25 +423,28 @@ o.spec("CalendarEventViewModel", function () {
 		o(viewModel.canModifyOrganizer()).equals(false)
 		o(viewModel.possibleOrganizers).deepEquals([neverNull(existingEvent.organizer)])
 	})
-	o("When an event is created by another user, that a calendar calendar is shared with, the owner of the calendar obtains the same rights as for events they creates in their calendar.", async function () {
-		const existingEvent = createCalendarEvent({
-			summary: "existing event",
-			startTime: new Date(2020, 4, 26, 12),
-			endTime: new Date(2020, 4, 26, 13),
-			organizer: wrapEncIntoMailAddress("another-user@provider.com"),
-			_ownerGroup: calendarGroupId,
-		})
-		const viewModel = await init({
-			calendars: makeCalendars("own"),
-			existingEvent,
-		})
-		o(viewModel.isReadOnlyEvent()).equals(false)
-		o(viewModel.canModifyGuests()).equals(true)
-		o(viewModel.canModifyOwnAttendance()).equals(true)
-		o(viewModel.canModifyOrganizer()).equals(true)
-		o(viewModel.organizer).deepEquals(neverNull(encMailAddress))("Organizer of the event is overwritten with the owner's address")
-		o(viewModel.possibleOrganizers).deepEquals([neverNull(encMailAddress)])
-	})
+	o(
+		"When an event is created by another user, that a calendar calendar is shared with, the owner of the calendar obtains the same rights as for events they creates in their calendar.",
+		async function () {
+			const existingEvent = createCalendarEvent({
+				summary: "existing event",
+				startTime: new Date(2020, 4, 26, 12),
+				endTime: new Date(2020, 4, 26, 13),
+				organizer: wrapEncIntoMailAddress("another-user@provider.com"),
+				_ownerGroup: calendarGroupId,
+			})
+			const viewModel = await init({
+				calendars: makeCalendars("own"),
+				existingEvent,
+			})
+			o(viewModel.isReadOnlyEvent()).equals(false)
+			o(viewModel.canModifyGuests()).equals(true)
+			o(viewModel.canModifyOwnAttendance()).equals(true)
+			o(viewModel.canModifyOrganizer()).equals(true)
+			o(viewModel.organizer).deepEquals(neverNull(encMailAddress))("Organizer of the event is overwritten with the owner's address")
+			o(viewModel.possibleOrganizers).deepEquals([neverNull(encMailAddress)])
+		},
+	)
 	o("in writable calendar", async function () {
 		const calendars = makeCalendars("shared")
 		const userController = makeUserController()
@@ -451,7 +482,8 @@ o.spec("CalendarEventViewModel", function () {
 					address: createEncryptedMailAddress({
 						address: "attendee@example.com",
 					}),
-				})],
+				}),
+			],
 		})
 		const viewModel = await init({
 			calendars,
@@ -750,7 +782,7 @@ o.spec("CalendarEventViewModel", function () {
 			updateModel.bccRecipients()[0].contact = createContact({
 				presharedPassword: "123",
 			})
-			updateModel.onMailChanged(true)
+			updateModel.onMailChanged(null)
 			askForUpdates = o.spy(() => Promise.resolve("yes"))
 			askInsecurePassword = o.spy(async () => true)
 			o(
@@ -766,7 +798,7 @@ o.spec("CalendarEventViewModel", function () {
 			o(distributor.sendUpdate.callCount).equals(0)
 			// @ts-ignore
 			o(distributor.sendCancellation.callCount).equals(0)
-			o(updateModel.bccRecipients().map(a => a.address)).deepEquals([guest])
+			o(updateModel.bccRecipients().map((a) => a.address)).deepEquals([guest])
 			o(askForUpdates.calls.length).equals(0)
 			// No new attendees, do not ask about password
 			o(askInsecurePassword.calls.length).equals(0)
@@ -808,7 +840,7 @@ o.spec("CalendarEventViewModel", function () {
 			updateModel.bccRecipients()[0].contact = createContact({
 				presharedPassword: "123",
 			})
-			updateModel.onMailChanged(true)
+			updateModel.onMailChanged(null)
 			askForUpdates = o.spy(() => Promise.resolve("yes"))
 			askInsecurePassword = o.spy(async () => true)
 			viewModel.isForceUpdates(true)
@@ -827,7 +859,7 @@ o.spec("CalendarEventViewModel", function () {
 			o(distributor.sendUpdate.calls[0].args[1]).equals(updateModel)
 			// @ts-ignore
 			o(distributor.sendCancellation.callCount).equals(0)
-			o(updateModel.bccRecipients().map(a => a.address)).deepEquals([guest])
+			o(updateModel.bccRecipients().map((a) => a.address)).deepEquals([guest])
 			o(askForUpdates.calls.length).equals(0) // not called because we force updates
 
 			// No new attendees, do not ask about password
@@ -870,7 +902,7 @@ o.spec("CalendarEventViewModel", function () {
 			updateModel.bccRecipients()[0].contact = createContact({
 				presharedPassword: "123",
 			})
-			updateModel.onMailChanged(true)
+			updateModel.onMailChanged(null)
 			askForUpdates = o.spy(() => Promise.resolve("yes"))
 			askInsecurePassword = o.spy(async () => true)
 			viewModel.isForceUpdates(true)
@@ -889,7 +921,7 @@ o.spec("CalendarEventViewModel", function () {
 			o(distributor.sendUpdate.calls[0].args[1]).equals(updateModel)
 			// @ts-ignore
 			o(distributor.sendCancellation.callCount).equals(0)
-			o(updateModel.bccRecipients().map(a => a.address)).deepEquals([guest])
+			o(updateModel.bccRecipients().map((a) => a.address)).deepEquals([guest])
 			o(askForUpdates.calls.length).equals(0) // not called because updates are forced
 
 			// No new attendees, do not ask about password
@@ -932,7 +964,7 @@ o.spec("CalendarEventViewModel", function () {
 			updateModel.bccRecipients()[0].contact = createContact({
 				presharedPassword: "123",
 			})
-			updateModel.onMailChanged(true)
+			updateModel.onMailChanged(null)
 			askForUpdates = o.spy(() => Promise.resolve("yes"))
 			askInsecurePassword = o.spy(async () => true)
 			o(
@@ -950,7 +982,7 @@ o.spec("CalendarEventViewModel", function () {
 			o(distributor.sendUpdate.calls[0].args[1]).equals(updateModel)
 			// @ts-ignore
 			o(distributor.sendCancellation.callCount).equals(0)
-			o(updateModel.bccRecipients().map(a => a.address)).deepEquals([guest])
+			o(updateModel.bccRecipients().map((a) => a.address)).deepEquals([guest])
 			o(askForUpdates.calls.length).equals(1)
 			// No new attendees, do not ask about password
 			o(askInsecurePassword.calls.length).equals(0)
@@ -990,9 +1022,9 @@ o.spec("CalendarEventViewModel", function () {
 			})
 			await viewModel.deleteEvent()
 			// This doesn't always pass because sometimes the start and end times are off by a fraction of a second
-			o(calendarModel.deleteEvent.calls.map(c => c.args)).deepEquals([[existingEvent]])
-			o(distributor.sendCancellation.calls.map(c => c.args[0])).deepEquals([newEvent])
-			o(cancelModel.bccRecipients().map(r => r.address)).deepEquals([attendee.address.address])
+			o(calendarModel.deleteEvent.calls.map((c) => c.args)).deepEquals([[existingEvent]])
+			o(distributor.sendCancellation.calls.map((c) => c.args[0])).deepEquals([newEvent])
+			o(cancelModel.bccRecipients().map((r) => r.address)).deepEquals([attendee.address.address])
 		})
 		o("own event with external attendees in own calendar, has password, not confidential", async function () {
 			const calendars = makeCalendars("own")
@@ -1045,10 +1077,10 @@ o.spec("CalendarEventViewModel", function () {
 			})
 			await viewModel.deleteEvent()
 			// @ts-ignore
-			o(calendarModel.deleteEvent.calls.map(c => c.args)).deepEquals([[existingEvent]])
+			o(calendarModel.deleteEvent.calls.map((c) => c.args)).deepEquals([[existingEvent]])
 			// @ts-ignore
-			o(distributor.sendCancellation.calls.map(c => c.args[0])).deepEquals([newEvent])
-			o(cancelModel.bccRecipients().map(r => r.address)).deepEquals([attendee.address.address])
+			o(distributor.sendCancellation.calls.map((c) => c.args[0])).deepEquals([newEvent])
+			o(cancelModel.bccRecipients().map((r) => r.address)).deepEquals([attendee.address.address])
 		})
 		o("own event with external attendees in own calendar, has password, confidential", async function () {
 			const calendars = makeCalendars("own")
@@ -1065,6 +1097,12 @@ o.spec("CalendarEventViewModel", function () {
 				],
 				presharedPassword: "123",
 			})
+			const startTime = DateTime.fromISO("2016-05-25T09:08:34.123", {
+				zone: "UTC",
+			}).toJSDate()
+			const endTime = DateTime.fromISO("2016-05-25T09:09:34.123", {
+				zone: "UTC",
+			}).toJSDate()
 			const existingEvent = createCalendarEvent({
 				_id: ["listid", "calendarid"],
 				_ownerGroup: calendarGroupId,
@@ -1072,6 +1110,8 @@ o.spec("CalendarEventViewModel", function () {
 				attendees: [ownAttendee, attendee],
 				sequence: "1",
 				invitedConfidentially: true,
+				startTime,
+				endTime,
 			})
 			const newEvent = createCalendarEvent({
 				_id: ["listid", "calendarid"],
@@ -1080,6 +1120,8 @@ o.spec("CalendarEventViewModel", function () {
 				attendees: [ownAttendee, attendee],
 				sequence: "2",
 				invitedConfidentially: true,
+				startTime,
+				endTime,
 			})
 			const viewModel = await init({
 				calendars,
@@ -1092,10 +1134,10 @@ o.spec("CalendarEventViewModel", function () {
 			await viewModel.deleteEvent()
 			// This doesn't always pass because sometimes the start and end times are off by a fraction of a second
 			// @ts-ignore
-			o(calendarModel.deleteEvent.calls.map(c => c.args)).deepEquals([[existingEvent]])
+			o(calendarModel.deleteEvent.calls.map((c) => c.args)).deepEquals([[existingEvent]])
 			// @ts-ignore
-			o(distributor.sendCancellation.calls.map(c => c.args[0])).deepEquals([newEvent])
-			o(cancelModel.bccRecipients().map(r => r.address)).deepEquals([attendee.address.address])
+			o(distributor.sendCancellation.calls.map((c) => c.args[0])).deepEquals([newEvent])
+			o(cancelModel.bccRecipients().map((r) => r.address)).deepEquals([attendee.address.address])
 		})
 		o("own event with external attendees in own calendar, no password, confidential", async function () {
 			// There should no cancellations sent to attendees without password as we cannot encrypt emails
@@ -1126,7 +1168,7 @@ o.spec("CalendarEventViewModel", function () {
 				sequence: "1",
 				invitedConfidentially: true,
 				startTime: existingStart,
-				endTime: existingEnd
+				endTime: existingEnd,
 			})
 			const viewModel = await init({
 				calendars,
@@ -1137,54 +1179,51 @@ o.spec("CalendarEventViewModel", function () {
 				existingContacts: [contact],
 			})
 			await viewModel.deleteEvent()
-			o(calendarModel.deleteEvent.calls.map(c => c.args)).deepEquals([[existingEvent]])
-			o(distributor.sendCancellation.calls.map(c => c.args[0])).deepEquals([])
-			o(cancelModel.bccRecipients().map(r => r.address)).deepEquals([])
+			o(calendarModel.deleteEvent.calls.map((c) => c.args)).deepEquals([[existingEvent]])
+			o(distributor.sendCancellation.calls.map((c) => c.args[0])).deepEquals([])
+			o(cancelModel.bccRecipients().map((r) => r.address)).deepEquals([])
 		})
-		o(
-			"own event with external eventually resolved attendees in own calendar, no password, confidential",
-			async function () {
-				// There should no cancellations sent to attendees without password as we cannot encrypt emails
-				const calendars = makeCalendars("own")
-				const distributor = makeDistributor()
-				const attendee = makeAttendee()
-				const ownAttendee = makeAttendee(encMailAddress.address)
-				const calendarModel = makeCalendarModel()
-				const mailModel = downcast({}) // delay resolving
+		o("own event with external eventually resolved attendees in own calendar, no password, confidential", async function () {
+			// There should no cancellations sent to attendees without password as we cannot encrypt emails
+			const calendars = makeCalendars("own")
+			const distributor = makeDistributor()
+			const attendee = makeAttendee()
+			const ownAttendee = makeAttendee(encMailAddress.address)
+			const calendarModel = makeCalendarModel()
+			const mailModel = downcast({}) // delay resolving
 
-				const contact = createContact({
-					mailAddresses: [
-						createContactMailAddress({
-							address: attendee.address.address,
-						}),
-					],
-					presharedPassword: null,
-				})
-				const existingEvent = createCalendarEvent({
-					_id: ["listid", "calendarid"],
-					_ownerGroup: calendarGroupId,
-					organizer: encMailAddress,
-					attendees: [ownAttendee, attendee],
-					sequence: "1",
-					invitedConfidentially: true,
-				})
-				const viewModel = await init({
-					calendars,
-					existingEvent,
-					calendarModel,
-					distributor,
-					mailModel,
-					existingContacts: [contact],
-				})
-				await viewModel.deleteEvent()
-				// This doesn't always pass because sometimes the start and end times are off by a fraction of a second
-				// @ts-ignore
-				o(calendarModel.deleteEvent.calls.map(c => c.args)).deepEquals([[existingEvent]])
-				// @ts-ignore
-				o(distributor.sendCancellation.calls.map(c => c.args[0])).deepEquals([])
-				o(cancelModel.bccRecipients().map(r => r.address)).deepEquals([])
-			},
-		)
+			const contact = createContact({
+				mailAddresses: [
+					createContactMailAddress({
+						address: attendee.address.address,
+					}),
+				],
+				presharedPassword: null,
+			})
+			const existingEvent = createCalendarEvent({
+				_id: ["listid", "calendarid"],
+				_ownerGroup: calendarGroupId,
+				organizer: encMailAddress,
+				attendees: [ownAttendee, attendee],
+				sequence: "1",
+				invitedConfidentially: true,
+			})
+			const viewModel = await init({
+				calendars,
+				existingEvent,
+				calendarModel,
+				distributor,
+				mailModel,
+				existingContacts: [contact],
+			})
+			await viewModel.deleteEvent()
+			// This doesn't always pass because sometimes the start and end times are off by a fraction of a second
+			// @ts-ignore
+			o(calendarModel.deleteEvent.calls.map((c) => c.args)).deepEquals([[existingEvent]])
+			// @ts-ignore
+			o(distributor.sendCancellation.calls.map((c) => c.args[0])).deepEquals([])
+			o(cancelModel.bccRecipients().map((r) => r.address)).deepEquals([])
+		})
 		o("own event without attendees in own calendar", async function () {
 			const calendars = makeCalendars("own")
 			const distributor = makeDistributor()
@@ -1203,7 +1242,7 @@ o.spec("CalendarEventViewModel", function () {
 			})
 			await viewModel.deleteEvent()
 			// @ts-ignore
-			o(calendarModel.deleteEvent.calls.map(c => c.args)).deepEquals([[existingEvent]])
+			o(calendarModel.deleteEvent.calls.map((c) => c.args)).deepEquals([[existingEvent]])
 			// @ts-ignore
 			o(distributor.sendCancellation.calls).deepEquals([])
 		})
@@ -1226,7 +1265,7 @@ o.spec("CalendarEventViewModel", function () {
 			})
 			await viewModel.deleteEvent()
 			// @ts-ignore
-			o(calendarModel.deleteEvent.calls.map(c => c.args)).deepEquals([[existingEvent]])
+			o(calendarModel.deleteEvent.calls.map((c) => c.args)).deepEquals([[existingEvent]])
 			// @ts-ignore
 			o(distributor.sendCancellation.calls).deepEquals([])
 		})
@@ -1252,7 +1291,7 @@ o.spec("CalendarEventViewModel", function () {
 			})
 			await viewModel.deleteEvent()
 			// @ts-ignore
-			o(calendarModel.deleteEvent.calls.map(c => c.args)).deepEquals([[existingEvent]])
+			o(calendarModel.deleteEvent.calls.map((c) => c.args)).deepEquals([[existingEvent]])
 			// @ts-ignore
 			o(distributor.sendCancellation.calls).deepEquals([])
 		})
@@ -1274,7 +1313,7 @@ o.spec("CalendarEventViewModel", function () {
 			})
 			await viewModel.deleteEvent()
 			// @ts-ignore
-			o(calendarModel.deleteEvent.calls.map(c => c.args)).deepEquals([[existingEvent]])
+			o(calendarModel.deleteEvent.calls.map((c) => c.args)).deepEquals([[existingEvent]])
 			// @ts-ignore
 			o(distributor.sendCancellation.calls).deepEquals([])
 		})
@@ -1299,7 +1338,7 @@ o.spec("CalendarEventViewModel", function () {
 			})
 			await viewModel.deleteEvent()
 			// @ts-ignore
-			o(calendarModel.deleteEvent.calls.map(c => c.args)).deepEquals([[existingEvent]])
+			o(calendarModel.deleteEvent.calls.map((c) => c.args)).deepEquals([[existingEvent]])
 			// @ts-ignore
 			o(distributor.sendCancellation.calls).deepEquals([])
 		})
@@ -1365,11 +1404,11 @@ o.spec("CalendarEventViewModel", function () {
 			o(distributor.sendInvite.calls[0].args[1]).deepEquals(inviteModel)
 			// @ts-ignore
 			o(distributor.sendCancellation.callCount).equals(0)
-			o(inviteModel.bccRecipients().map(r => r.address)).deepEquals([newGuest])
+			o(inviteModel.bccRecipients().map((r) => r.address)).deepEquals([newGuest])
 			// @ts-ignore
 			const createdEvent = calendarModel.createEvent.calls[0].args[0]
 			o(
-				createdEvent.attendees.map(a => ({
+				createdEvent.attendees.map((a) => ({
 					status: a.status,
 					address: a.address,
 				})),
@@ -1453,7 +1492,7 @@ o.spec("CalendarEventViewModel", function () {
 			o(distributor.sendUpdate.calls[0].args[1]).equals(updateModel)
 			// @ts-ignore
 			o(distributor.sendCancellation.callCount).equals(0)
-			o(updateModel.bccRecipients().map(a => a.address)).deepEquals([guest])
+			o(updateModel.bccRecipients().map((a) => a.address)).deepEquals([guest])
 			o(askForUpdates.calls.length).equals(1)
 			o(askInsecurePassword.callCount).equals(0)
 		})
@@ -1549,7 +1588,7 @@ o.spec("CalendarEventViewModel", function () {
 			updateModel.bccRecipients()[0].contact = createContact({
 				presharedPassword: "123",
 			})
-			updateModel.onMailChanged(true)
+			updateModel.onMailChanged(null)
 			viewModel.setStartDate(new Date(2020, 4, 3))
 			askForUpdates = o.spy(() => Promise.resolve("yes"))
 			askInsecurePassword = o.spy(async () => true)
@@ -1566,7 +1605,7 @@ o.spec("CalendarEventViewModel", function () {
 			o(distributor.sendUpdate.calls[0].args[1]).equals(updateModel)
 			// @ts-ignore
 			o(distributor.sendCancellation.callCount).equals(0)
-			o(updateModel.bccRecipients().map(a => a.address)).deepEquals([guest])
+			o(updateModel.bccRecipients().map((a) => a.address)).deepEquals([guest])
 			o(askForUpdates.calls.length).equals(1)
 			// No new attendees, do not ask about password
 			o(askInsecurePassword.calls.length).equals(0)
@@ -1619,7 +1658,7 @@ o.spec("CalendarEventViewModel", function () {
 			o(distributor.sendUpdate.calls.length).equals(0)
 			// @ts-ignore
 			o(distributor.sendCancellation.callCount).equals(0)
-			o(updateModel.bccRecipients().map(a => a.address)).deepEquals([guest])
+			o(updateModel.bccRecipients().map((a) => a.address)).deepEquals([guest])
 			o(askForUpdates.calls.length).equals(1)
 			o(askInsecurePassword.calls.length).equals(1)
 		})
@@ -1680,7 +1719,7 @@ o.spec("CalendarEventViewModel", function () {
 			// @ts-ignore
 			o(distributor.sendInvite.calls.length).equals(1)("sent invite")
 			// @ts-ignore
-			o(distributor.sendCancellation.calls.length).equals(1)("sent cancellation")
+			o(distributor.sendCancellation.calls.length).equals(1)("sent termination")
 			o(askForUpdates.calls.length).equals(1)
 			o(askInsecurePassword.callCount).equals(0)
 		})
@@ -1741,7 +1780,7 @@ o.spec("CalendarEventViewModel", function () {
 			// @ts-ignore
 			o(distributor.sendInvite.calls.length).equals(0)("did not sent invite")
 			// @ts-ignore
-			o(distributor.sendCancellation.calls.length).equals(0)("did not sent cancellation")
+			o(distributor.sendCancellation.calls.length).equals(0)("did not sent termination")
 			o(askForUpdates.calls.length).equals(1)
 			o(askInsecurePassword.callCount).equals(0)
 		})
@@ -1835,12 +1874,8 @@ o.spec("CalendarEventViewModel", function () {
 			// @ts-ignore
 			const [createdEvent] = calendarModel.createEvent.calls[0].args
 			o(createdEvent.attendees.length).equals(2)
-			o(createdEvent.attendees.find(a => a.address.address === ownAttendee.address.address).status).equals(
-				CalendarAttendeeStatus.ACCEPTED,
-			)
-			o(createdEvent.attendees.find(a => a.address.address === anotherAttendee.address.address).status).equals(
-				CalendarAttendeeStatus.DECLINED,
-			)
+			o(createdEvent.attendees.find((a) => a.address.address === ownAttendee.address.address).status).equals(CalendarAttendeeStatus.ACCEPTED)
+			o(createdEvent.attendees.find((a) => a.address.address === anotherAttendee.address.address).status).equals(CalendarAttendeeStatus.DECLINED)
 			// @ts-ignore
 			o(distributor.sendUpdate.callCount).equals(0)
 			// @ts-ignore
@@ -1848,7 +1883,7 @@ o.spec("CalendarEventViewModel", function () {
 			// @ts-ignore
 			o(distributor.sendCancellation.callCount).equals(0)
 			// @ts-ignore
-			o(distributor.sendResponse.calls.map(call => call.args)).deepEquals([
+			o(distributor.sendResponse.calls.map((call) => call.args)).deepEquals([
 				[createdEvent, responseModel, encMailAddress.address, mail, CalendarAttendeeStatus.ACCEPTED],
 			])
 			o(responseModel.toRecipients().map(getAddress)).deepEquals([organizerAddress])
@@ -1858,20 +1893,24 @@ o.spec("CalendarEventViewModel", function () {
 		o("existing event times preserved", async function () {
 			const calendars = makeCalendars("own")
 			const calendarModel = makeCalendarModel()
-			const startTime = DateTime.fromObject({
-				year: 2020,
-				month: 6,
-				day: 4,
-				hour: 12,
-				zone,
-			}).toJSDate()
-			const endTime = DateTime.fromObject({
-				year: 2020,
-				month: 6,
-				day: 4,
-				hour: 13,
-				zone,
-			}).toJSDate()
+			const startTime = DateTime.fromObject(
+				{
+					year: 2020,
+					month: 6,
+					day: 4,
+					hour: 12,
+				},
+				{ zone },
+			).toJSDate()
+			const endTime = DateTime.fromObject(
+				{
+					year: 2020,
+					month: 6,
+					day: 4,
+					hour: 13,
+				},
+				{ zone },
+			).toJSDate()
 			const existingEvent = createCalendarEvent({
 				_id: ["listId", "eventId"],
 				startTime,
@@ -2091,9 +2130,9 @@ o.spec("CalendarEventViewModel", function () {
 		o(viewModel.attendees().length).equals(2)
 		o(viewModel.organizer!).deepEquals(wrapEncIntoMailAddress(alias))
 		const attendees = viewModel.attendees()
-		o(attendees.find(guest => guest.address.address === "guest@external.de")).notEquals(undefined)
-		o(attendees.find(guest => guest.address.address === alias)).notEquals(undefined)
-		o(attendees.find(guest => guest.address.address === "address@tutanota.com")).equals(undefined)
+		o(attendees.find((guest) => guest.address.address === "guest@external.de")).notEquals(undefined)
+		o(attendees.find((guest) => guest.address.address === alias)).notEquals(undefined)
+		o(attendees.find((guest) => guest.address.address === "address@tutanota.com")).equals(undefined)
 	})
 	o("invite self to set organizer with existing attendees", async function () {
 		const calendars = makeCalendars("own")
@@ -2115,16 +2154,16 @@ o.spec("CalendarEventViewModel", function () {
 		viewModel.addGuest(accountMailAddress, null)
 		o(attendees().length).equals(2)
 		o(viewModel.organizer!).deepEquals(encMailAddress)
-		o(attendees().find(guest => guest.address.address === "guest@external.de")).notEquals(undefined)
-		o(attendees().find(guest => guest.address.address === accountMailAddress)).notEquals(undefined)
-		o(attendees().find(guest => guest.address.address === alias)).equals(undefined)
+		o(attendees().find((guest) => guest.address.address === "guest@external.de")).notEquals(undefined)
+		o(attendees().find((guest) => guest.address.address === accountMailAddress)).notEquals(undefined)
+		o(attendees().find((guest) => guest.address.address === alias)).equals(undefined)
 		viewModel.addGuest(alias, null)
 		o(attendees().length).equals(2)
 		// @ts-ignore
 		o(viewModel.organizer).deepEquals(aliasEncMailAddress)("the organizer should now be the alias")
-		o(attendees().find(guest => guest.address.address === "guest@external.de")).notEquals(undefined)
-		o(attendees().find(guest => guest.address.address === alias)).notEquals(undefined)
-		o(attendees().find(guest => guest.address.address === accountMailAddress)).equals(undefined)
+		o(attendees().find((guest) => guest.address.address === "guest@external.de")).notEquals(undefined)
+		o(attendees().find((guest) => guest.address.address === alias)).notEquals(undefined)
+		o(attendees().find((guest) => guest.address.address === accountMailAddress)).equals(undefined)
 	})
 	o("invite self as first attendee", async function () {
 		const calendars = makeCalendars("own")
@@ -2143,7 +2182,7 @@ o.spec("CalendarEventViewModel", function () {
 		o(attendees().length).equals(1)
 		// @ts-ignore
 		o(viewModel.organizer).deepEquals(encMailAddress)
-		o(attendees().find(guest => guest.address.address === accountMailAddress)).notEquals(undefined)
+		o(attendees().find((guest) => guest.address.address === accountMailAddress)).notEquals(undefined)
 	})
 	o("invite alias as first attendee", async function () {
 		const calendars = makeCalendars("own")
@@ -2162,163 +2201,190 @@ o.spec("CalendarEventViewModel", function () {
 		viewModel.addGuest(alias, null)
 		o(attendees().length).equals(1)
 		o(viewModel.organizer!).deepEquals(aliasEncMailAddress)
-		o(attendees().find(guest => guest.address.address === alias)).notEquals(undefined)
+		o(attendees().find((guest) => guest.address.address === alias)).notEquals(undefined)
 	})
 	o.spec("Events we have been invited to by another user", function () {
-		o("When we change our attendance status for a new event event (without id) to 'accept' the organizer is notified and the event is created", async function () {
-			const calendars = makeCalendars("own")
-			const distributor = makeDistributor()
-			const userController = makeUserController([], AccountType.PREMIUM)
-			const existingEvent = createCalendarEvent({
-				_ownerGroup: calendarGroupId,
-				startTime: new Date(2020, 5, 1),
-				endTime: new Date(2020, 5, 2),
-				organizer: wrapEncIntoMailAddress("someonelse@tutanota.com"),
-				attendees: [createCalendarEventAttendee({
-					status: CalendarAttendeeStatus.ADDED,
-					address: encMailAddress
-				})],
-			})
-			const calendarModel = makeCalendarModel()
-			const viewModel = await init({
-				calendars,
-				distributor,
-				userController,
-				existingEvent,
-				calendarModel
-			})
-			viewModel._guestStatuses(addMapEntry(viewModel._guestStatuses(), encMailAddress.address, CalendarAttendeeStatus.ACCEPTED))
-			await viewModel.saveAndSend({askForUpdates, askInsecurePassword, showProgress})
-			o(distributor.sendResponse.calls.length).equals(1)("organizer gets notified")
-			o(calendarModel.createEvent.calls.length).equals(1)("create event")
-		})
-		o("When we change our attendance status for a new event event (without id) to 'decline' the organizer is notified and the event is created", async function () {
-			const calendars = makeCalendars("own")
-			const distributor = makeDistributor()
-			const userController = makeUserController([], AccountType.PREMIUM)
-			const existingEvent = createCalendarEvent({
-				_ownerGroup: calendarGroupId,
-				startTime: new Date(2020, 5, 1),
-				endTime: new Date(2020, 5, 2),
-				organizer: wrapEncIntoMailAddress("someonelse@tutanota.com"),
-				attendees: [createCalendarEventAttendee({
-					status: CalendarAttendeeStatus.ACCEPTED,
-					address: encMailAddress
-				})],
-			})
-			const calendarModel = makeCalendarModel()
-			const viewModel = await init({
-				calendars,
-				distributor,
-				userController,
-				existingEvent,
-				calendarModel
-			})
-			viewModel._guestStatuses(addMapEntry(viewModel._guestStatuses(), encMailAddress.address, CalendarAttendeeStatus.DECLINED))
-			await viewModel.saveAndSend({askForUpdates, askInsecurePassword, showProgress})
-			o(distributor.sendResponse.calls.length).equals(1)("organizer gets notified")
-			o(calendarModel.createEvent.calls.length).equals(1)("create event")
-		})
+		o(
+			"When we change our attendance status for a new event event (without id) to 'accept' the organizer is notified and the event is created",
+			async function () {
+				const calendars = makeCalendars("own")
+				const distributor = makeDistributor()
+				const userController = makeUserController([], AccountType.PREMIUM)
+				const existingEvent = createCalendarEvent({
+					_ownerGroup: calendarGroupId,
+					startTime: new Date(2020, 5, 1),
+					endTime: new Date(2020, 5, 2),
+					organizer: wrapEncIntoMailAddress("someonelse@tutanota.com"),
+					attendees: [
+						createCalendarEventAttendee({
+							status: CalendarAttendeeStatus.ADDED,
+							address: encMailAddress,
+						}),
+					],
+				})
+				const calendarModel = makeCalendarModel()
+				const viewModel = await init({
+					calendars,
+					distributor,
+					userController,
+					existingEvent,
+					calendarModel,
+				})
+				viewModel._guestStatuses(addMapEntry(viewModel._guestStatuses(), encMailAddress.address, CalendarAttendeeStatus.ACCEPTED))
+				await viewModel.saveAndSend({ askForUpdates, askInsecurePassword, showProgress })
+				o(distributor.sendResponse.calls.length).equals(1)("organizer gets notified")
+				o(calendarModel.createEvent.calls.length).equals(1)("create event")
+			},
+		)
+		o(
+			"When we change our attendance status for a new event event (without id) to 'decline' the organizer is notified and the event is created",
+			async function () {
+				const calendars = makeCalendars("own")
+				const distributor = makeDistributor()
+				const userController = makeUserController([], AccountType.PREMIUM)
+				const existingEvent = createCalendarEvent({
+					_ownerGroup: calendarGroupId,
+					startTime: new Date(2020, 5, 1),
+					endTime: new Date(2020, 5, 2),
+					organizer: wrapEncIntoMailAddress("someonelse@tutanota.com"),
+					attendees: [
+						createCalendarEventAttendee({
+							status: CalendarAttendeeStatus.ACCEPTED,
+							address: encMailAddress,
+						}),
+					],
+				})
+				const calendarModel = makeCalendarModel()
+				const viewModel = await init({
+					calendars,
+					distributor,
+					userController,
+					existingEvent,
+					calendarModel,
+				})
+				viewModel._guestStatuses(addMapEntry(viewModel._guestStatuses(), encMailAddress.address, CalendarAttendeeStatus.DECLINED))
+				await viewModel.saveAndSend({ askForUpdates, askInsecurePassword, showProgress })
+				o(distributor.sendResponse.calls.length).equals(1)("organizer gets notified")
+				o(calendarModel.createEvent.calls.length).equals(1)("create event")
+			},
+		)
 
-
-		o("When we change our attendance status of an existing event to 'decline' the organizer gets notified and the event gets updated in our calendar", async function () {
-			const calendars = makeCalendars("own")
-			const distributor = makeDistributor()
-			const userController = makeUserController([], AccountType.PREMIUM)
-			const existingEvent = createCalendarEvent({
-				_id: ["listId", "calendarId"],
-				_ownerGroup: calendarGroupId,
-				startTime: new Date(2020, 5, 1),
-				endTime: new Date(2020, 5, 2),
-				organizer: wrapEncIntoMailAddress("someonelse@tutanota.com"),
-				attendees: [createCalendarEventAttendee({
-					status: CalendarAttendeeStatus.ACCEPTED,
-					address: encMailAddress
-				})],
-			})
-			const calendarModel = makeCalendarModel()
-			const viewModel = await init({
-				calendars,
-				distributor,
-				userController,
-				existingEvent,
-				calendarModel
-			})
-			viewModel._guestStatuses(addMapEntry(viewModel._guestStatuses(), encMailAddress.address, CalendarAttendeeStatus.DECLINED))
-			await viewModel.saveAndSend({askForUpdates, askInsecurePassword, showProgress})
-			o(distributor.sendResponse.calls.length).equals(1)("organizer gets notified")
-			o(calendarModel.updateEvent.calls.length).equals(1)("update event")
-		})
-		o("When we change our attendance status for an existing to 'accepted' the organizer gets notified and the event gets updated in our calendar", async function () {
-			const calendars = makeCalendars("own")
-			const distributor = makeDistributor()
-			const userController = makeUserController([], AccountType.PREMIUM)
-			const existingEvent = createCalendarEvent({
-				_id: ["listId", "calendarId"],
-				_ownerGroup: calendarGroupId,
-				startTime: new Date(2020, 5, 1),
-				endTime: new Date(2020, 5, 2),
-				organizer: wrapEncIntoMailAddress("someonelse@tutanota.com"),
-				attendees: [createCalendarEventAttendee({
-					status: CalendarAttendeeStatus.ADDED,
-					address: encMailAddress
-				})],
-			})
-			const calendarModel = makeCalendarModel()
-			const viewModel = await init({
-				calendars,
-				distributor,
-				userController,
-				existingEvent,
-				calendarModel
-			})
-			viewModel._guestStatuses(addMapEntry(viewModel._guestStatuses(), encMailAddress.address, CalendarAttendeeStatus.ACCEPTED))
-			await viewModel.saveAndSend({askForUpdates, askInsecurePassword, showProgress})
-			o(distributor.sendResponse.calls.length).equals(1)("organizer gets notified")
-			o(calendarModel.updateEvent.calls.length).equals(1)("update event")
-		})
+		o(
+			"When we change our attendance status of an existing event to 'decline' the organizer gets notified and the event gets updated in our calendar",
+			async function () {
+				const calendars = makeCalendars("own")
+				const distributor = makeDistributor()
+				const userController = makeUserController([], AccountType.PREMIUM)
+				const existingEvent = createCalendarEvent({
+					_id: ["listId", "calendarId"],
+					_ownerGroup: calendarGroupId,
+					startTime: new Date(2020, 5, 1),
+					endTime: new Date(2020, 5, 2),
+					organizer: wrapEncIntoMailAddress("someonelse@tutanota.com"),
+					attendees: [
+						createCalendarEventAttendee({
+							status: CalendarAttendeeStatus.ACCEPTED,
+							address: encMailAddress,
+						}),
+					],
+				})
+				const calendarModel = makeCalendarModel()
+				const viewModel = await init({
+					calendars,
+					distributor,
+					userController,
+					existingEvent,
+					calendarModel,
+				})
+				viewModel._guestStatuses(addMapEntry(viewModel._guestStatuses(), encMailAddress.address, CalendarAttendeeStatus.DECLINED))
+				await viewModel.saveAndSend({ askForUpdates, askInsecurePassword, showProgress })
+				o(distributor.sendResponse.calls.length).equals(1)("organizer gets notified")
+				o(calendarModel.updateEvent.calls.length).equals(1)("update event")
+			},
+		)
+		o(
+			"When we change our attendance status for an existing to 'accepted' the organizer gets notified and the event gets updated in our calendar",
+			async function () {
+				const calendars = makeCalendars("own")
+				const distributor = makeDistributor()
+				const userController = makeUserController([], AccountType.PREMIUM)
+				const existingEvent = createCalendarEvent({
+					_id: ["listId", "calendarId"],
+					_ownerGroup: calendarGroupId,
+					startTime: new Date(2020, 5, 1),
+					endTime: new Date(2020, 5, 2),
+					organizer: wrapEncIntoMailAddress("someonelse@tutanota.com"),
+					attendees: [
+						createCalendarEventAttendee({
+							status: CalendarAttendeeStatus.ADDED,
+							address: encMailAddress,
+						}),
+					],
+				})
+				const calendarModel = makeCalendarModel()
+				const viewModel = await init({
+					calendars,
+					distributor,
+					userController,
+					existingEvent,
+					calendarModel,
+				})
+				viewModel._guestStatuses(addMapEntry(viewModel._guestStatuses(), encMailAddress.address, CalendarAttendeeStatus.ACCEPTED))
+				await viewModel.saveAndSend({ askForUpdates, askInsecurePassword, showProgress })
+				o(distributor.sendResponse.calls.length).equals(1)("organizer gets notified")
+				o(calendarModel.updateEvent.calls.length).equals(1)("update event")
+			},
+		)
 	})
 	o.spec("onStartDateSelected", function () {
 		o("date adjusted forward", async function () {
 			const calendars = makeCalendars("own")
 			const existingEvent = createCalendarEvent({
-				startTime: DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 8,
-					hour: 13,
-					zone,
-				}).toJSDate(),
-				endTime: DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 9,
-					hour: 15,
-					zone,
-				}).toJSDate(),
+				startTime: DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 8,
+						hour: 13,
+					},
+					{ zone },
+				).toJSDate(),
+				endTime: DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 9,
+						hour: 15,
+					},
+					{ zone },
+				).toJSDate(),
 			})
 			const viewModel = await init({
 				calendars,
 				existingEvent,
 			})
 			viewModel.setStartDate(
-				DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 10,
-					zone,
-				}).toJSDate(),
+				DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 10,
+					},
+					{ zone },
+				).toJSDate(),
 			)
 			// No hours because it's a "date", not "time" field.
 			o(viewModel.endDate.toISOString()).equals(
-				DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 11,
-					zone,
-				})
-						.toJSDate()
-						.toISOString(),
+				DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 11,
+					},
+					{ zone },
+				)
+					.toJSDate()
+					.toISOString(),
 			)
 			// @ts-ignore
 			o(viewModel.endTime?.toObject()).deepEquals({
@@ -2329,43 +2395,51 @@ o.spec("CalendarEventViewModel", function () {
 		o("date adjusted backwards", async function () {
 			const calendars = makeCalendars("own")
 			const existingEvent = createCalendarEvent({
-				startTime: DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 8,
-					hour: 13,
-					zone,
-				}).toJSDate(),
-				endTime: DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 9,
-					hour: 15,
-					zone,
-				}).toJSDate(),
+				startTime: DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 8,
+						hour: 13,
+					},
+					{ zone },
+				).toJSDate(),
+				endTime: DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 9,
+						hour: 15,
+					},
+					{ zone },
+				).toJSDate(),
 			})
 			const viewModel = await init({
 				calendars,
 				existingEvent,
 			})
 			viewModel.setStartDate(
-				DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 6,
-					zone,
-				}).toJSDate(),
+				DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 6,
+					},
+					{ zone },
+				).toJSDate(),
 			)
 			// No hours because it's a "date", not "time" field.
 			o(viewModel.endDate.toISOString()).equals(
-				DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 7,
-					zone,
-				})
-						.toJSDate()
-						.toISOString(),
+				DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 7,
+					},
+					{ zone },
+				)
+					.toJSDate()
+					.toISOString(),
 			)
 			// @ts-ignore
 			o(viewModel.endTime?.toObject()).deepEquals({
@@ -2378,20 +2452,24 @@ o.spec("CalendarEventViewModel", function () {
 		o("time adjusted forward", async function () {
 			const calendars = makeCalendars("own")
 			const existingEvent = createCalendarEvent({
-				startTime: DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 8,
-					hour: 13,
-					zone,
-				}).toJSDate(),
-				endTime: DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 8,
-					hour: 15,
-					zone,
-				}).toJSDate(),
+				startTime: DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 8,
+						hour: 13,
+					},
+					{ zone },
+				).toJSDate(),
+				endTime: DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 8,
+						hour: 15,
+					},
+					{ zone },
+				).toJSDate(),
 			})
 			const viewModel = await init({
 				calendars,
@@ -2400,14 +2478,16 @@ o.spec("CalendarEventViewModel", function () {
 			viewModel.setStartTime(new Time(14, 0))
 			// No hours because it's a "date", not "time" field.
 			o(viewModel.endDate.toISOString()).equals(
-				DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 8,
-					zone,
-				})
-						.toJSDate()
-						.toISOString(),
+				DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 8,
+					},
+					{ zone },
+				)
+					.toJSDate()
+					.toISOString(),
 			)
 			// @ts-ignore
 			o(viewModel.endTime?.to24HourString()).deepEquals("16:00")
@@ -2415,20 +2495,24 @@ o.spec("CalendarEventViewModel", function () {
 		o("time adjusted backward", async function () {
 			const calendars = makeCalendars("own")
 			const existingEvent = createCalendarEvent({
-				startTime: DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 8,
-					hour: 13,
-					zone,
-				}).toJSDate(),
-				endTime: DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 8,
-					hour: 15,
-					zone,
-				}).toJSDate(),
+				startTime: DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 8,
+						hour: 13,
+					},
+					{ zone },
+				).toJSDate(),
+				endTime: DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 8,
+						hour: 15,
+					},
+					{ zone },
+				).toJSDate(),
 			})
 			const viewModel = await init({
 				calendars,
@@ -2437,14 +2521,16 @@ o.spec("CalendarEventViewModel", function () {
 			viewModel.setStartTime(new Time(12, 0))
 			// No hours because it's a "date", not "time" field.
 			o(viewModel.endDate.toISOString()).equals(
-				DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 8,
-					zone,
-				})
-						.toJSDate()
-						.toISOString(),
+				DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 8,
+					},
+					{ zone },
+				)
+					.toJSDate()
+					.toISOString(),
 			)
 			// @ts-ignore
 			o(viewModel.endTime?.toObject()).deepEquals({
@@ -2455,20 +2541,24 @@ o.spec("CalendarEventViewModel", function () {
 		o("time not adjust when different day", async function () {
 			const calendars = makeCalendars("own")
 			const existingEvent = createCalendarEvent({
-				startTime: DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 8,
-					hour: 13,
-					zone,
-				}).toJSDate(),
-				endTime: DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 9,
-					hour: 15,
-					zone,
-				}).toJSDate(),
+				startTime: DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 8,
+						hour: 13,
+					},
+					{ zone },
+				).toJSDate(),
+				endTime: DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 9,
+						hour: 15,
+					},
+					{ zone },
+				).toJSDate(),
 			})
 			const viewModel = await init({
 				calendars,
@@ -2477,14 +2567,16 @@ o.spec("CalendarEventViewModel", function () {
 			viewModel.setStartTime(new Time(12, 0))
 			// No hours because it's a "date", not "time" field.
 			o(viewModel.endDate.toISOString()).equals(
-				DateTime.fromObject({
-					year: 2020,
-					month: 6,
-					day: 9,
-					zone,
-				})
-						.toJSDate()
-						.toISOString(),
+				DateTime.fromObject(
+					{
+						year: 2020,
+						month: 6,
+						day: 9,
+					},
+					{ zone },
+				)
+					.toJSDate()
+					.toISOString(),
 			)
 			o(viewModel.endTime?.to24HourString()).equals("15:00")
 		})

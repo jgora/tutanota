@@ -1,52 +1,42 @@
-import m, {Children} from "mithril"
-import type {ModalComponent} from "../../gui/base/Modal"
-import {modal} from "../../gui/base/Modal"
-import {px} from "../../gui/size"
-import type {Shortcut} from "../../misc/KeyManager"
-import {isKeyPressed} from "../../misc/KeyManager"
-import type {PosRect} from "../../gui/base/Dropdown"
-import {DomRectReadOnlyPolyfilled} from "../../gui/base/Dropdown"
+import m, { Children } from "mithril"
+import type { ModalComponent } from "../../gui/base/Modal"
+import { modal } from "../../gui/base/Modal"
+import { px } from "../../gui/size"
+import type { Shortcut } from "../../misc/KeyManager"
+import { isKeyPressed } from "../../misc/KeyManager"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
-import {Keys, ShareCapability} from "../../api/common/TutanotaConstants"
-import {TemplatePopupResultRow} from "./TemplatePopupResultRow"
-import {Icons} from "../../gui/base/icons/Icons"
-import {TemplateExpander} from "./TemplateExpander"
-import type {LanguageCode} from "../../misc/LanguageViewModel"
-import {lang, languageByCode} from "../../misc/LanguageViewModel"
-import type {windowSizeListener} from "../../misc/WindowFacade"
-import {windowFacade} from "../../misc/WindowFacade"
-import type {EmailTemplate, TemplateGroupRoot} from "../../api/entities/tutanota/TypeRefs.js"
-import {TemplateGroupRootTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
-import type {ButtonAttrs} from "../../gui/base/ButtonN"
-import {ButtonColor, ButtonN, ButtonType} from "../../gui/base/ButtonN"
-import {SELECT_NEXT_TEMPLATE, SELECT_PREV_TEMPLATE, TEMPLATE_SHORTCUT_PREFIX, TemplatePopupModel} from "../model/TemplatePopupModel"
-import {attachDropdown} from "../../gui/base/DropdownN"
-import {debounce, downcast, neverNull, noOp} from "@tutao/tutanota-utils"
-import {locator} from "../../api/main/MainLocator"
-import {TemplateSearchBar} from "./TemplateSearchBar"
-import {Editor} from "../../gui/editor/Editor"
-import {logins} from "../../api/main/LoginController"
-import {getSharedGroupName, hasCapabilityOnGroup} from "../../sharing/GroupUtils"
-import {createInitialTemplateListIfAllowed} from "../TemplateGroupUtils"
-import {getConfirmation} from "../../gui/base/GuiUtils"
-import {ScrollSelectList} from "../../gui/ScrollSelectList"
-
-export const TEMPLATE_POPUP_HEIGHT = 340
-export const TEMPLATE_POPUP_TWO_COLUMN_MIN_WIDTH = 600
-export const TEMPLATE_LIST_ENTRY_HEIGHT = 47
-export const TEMPLATE_LIST_ENTRY_WIDTH = 354
+import { Keys, ShareCapability } from "../../api/common/TutanotaConstants"
+import { TemplatePopupResultRow } from "./TemplatePopupResultRow"
+import { Icons } from "../../gui/base/icons/Icons"
+import { TemplateExpander } from "./TemplateExpander"
+import type { LanguageCode } from "../../misc/LanguageViewModel"
+import { lang, languageByCode } from "../../misc/LanguageViewModel"
+import type { windowSizeListener } from "../../misc/WindowFacade"
+import { windowFacade } from "../../misc/WindowFacade"
+import type { EmailTemplate, TemplateGroupRoot } from "../../api/entities/tutanota/TypeRefs.js"
+import { TemplateGroupRootTypeRef } from "../../api/entities/tutanota/TypeRefs.js"
+import type { ButtonAttrs } from "../../gui/base/Button.js"
+import { Button, ButtonColor, ButtonType } from "../../gui/base/Button.js"
+import { SELECT_NEXT_TEMPLATE, SELECT_PREV_TEMPLATE, TEMPLATE_SHORTCUT_PREFIX, TemplatePopupModel } from "../model/TemplatePopupModel"
+import { attachDropdown, DomRectReadOnlyPolyfilled, PosRect } from "../../gui/base/Dropdown.js"
+import { debounce, downcast, neverNull } from "@tutao/tutanota-utils"
+import { locator } from "../../api/main/MainLocator"
+import { TemplateSearchBar } from "./TemplateSearchBar"
+import { Editor } from "../../gui/editor/Editor"
+import { logins } from "../../api/main/LoginController"
+import { getSharedGroupName, hasCapabilityOnGroup } from "../../sharing/GroupUtils"
+import { createInitialTemplateListIfAllowed } from "../TemplateGroupUtils"
+import { getConfirmation } from "../../gui/base/GuiUtils"
+import { ScrollSelectList } from "../../gui/ScrollSelectList"
+import { IconButton, IconButtonAttrs } from "../../gui/base/IconButton.js"
+import { TEMPLATE_LIST_ENTRY_WIDTH, TEMPLATE_POPUP_HEIGHT, TEMPLATE_POPUP_TWO_COLUMN_MIN_WIDTH } from "./TemplateConstants.js"
 
 /**
  *	Creates a Modal/Popup that allows user to paste templates directly into the MailEditor.
  *	Also allows user to change desired language when pasting.
  */
-export function showTemplatePopupInEditor(
-	templateModel: TemplatePopupModel,
-	editor: Editor,
-	template: EmailTemplate | null,
-	highlightedText: string,
-) {
+export function showTemplatePopupInEditor(templateModel: TemplatePopupModel, editor: Editor, template: EmailTemplate | null, highlightedText: string) {
 	const initialSearchString = template ? TEMPLATE_SHORTCUT_PREFIX + template.tag : highlightedText
 	const cursorRect = editor.getCursorPosition()
 	const editorRect = editor.getDOM().getBoundingClientRect()
@@ -143,7 +133,7 @@ export class TemplatePopup implements ModalComponent {
 				help: "selectNextTemplate_action",
 			},
 		]
-		this._redrawStream = templateModel.searchResults.map(results => {
+		this._redrawStream = templateModel.searchResults.map((results) => {
 			m.redraw()
 		})
 		this._selectTemplateButtonAttrs = {
@@ -205,14 +195,14 @@ export class TemplatePopup implements ModalComponent {
 					),
 					showTwoColumns
 						? m(
-							".flex.flex-column.flex-grow-shrink-half",
-							{
-								style: {
-									flex: "1 1 60%",
+								".flex.flex-column.flex-grow-shrink-half",
+								{
+									style: {
+										flex: "1 1 60%",
+									},
 								},
-							},
-							this._renderRightColumn(),
-						)
+								this._renderRightColumn(),
+						  )
 						: null,
 				]),
 			],
@@ -236,7 +226,7 @@ export class TemplatePopup implements ModalComponent {
 		return m(TemplateSearchBar, {
 			value: this._searchBarValue,
 			placeholder: "filter_label",
-			keyHandler: keyPress => {
+			keyHandler: (keyPress) => {
 				if (isKeyPressed(keyPress.keyCode, Keys.DOWN, Keys.UP)) {
 					// This duplicates the listener set in this._shortcuts
 					// because the input consumes the event
@@ -247,10 +237,10 @@ export class TemplatePopup implements ModalComponent {
 					return true
 				}
 			},
-			oninput: value => {
+			oninput: (value) => {
 				this._debounceFilter(value)
 			},
-			oncreate: vnode => {
+			oncreate: (vnode) => {
 				this._inputDom = vnode.dom.firstElementChild as HTMLElement // firstElementChild is the input field of the input wrapper
 			},
 		})
@@ -271,58 +261,52 @@ export class TemplatePopup implements ModalComponent {
 					}
 				},
 			},
-			attrs ? m(ButtonN, attrs as ButtonAttrs) : null,
+			attrs ? m(IconButton, attrs as IconButtonAttrs) : null,
 		)
 	}
 
-	_createAddButtonAttributes(): ButtonAttrs | null {
+	_createAddButtonAttributes(): IconButtonAttrs | null {
 		const templateGroupInstances = this._templateModel.getTemplateGroupInstances()
 
-		const writeableGroups = templateGroupInstances.filter(instance =>
+		const writeableGroups = templateGroupInstances.filter((instance) =>
 			hasCapabilityOnGroup(logins.getUserController().user, instance.group, ShareCapability.Write),
 		)
 
 		if (templateGroupInstances.length === 0) {
 			return {
-				label: "createTemplate_action",
+				title: "createTemplate_action",
 				click: () => {
-					createInitialTemplateListIfAllowed().then(groupRoot => {
+					createInitialTemplateListIfAllowed().then((groupRoot) => {
 						if (groupRoot) {
 							this.showTemplateEditor(null, groupRoot)
 						}
 					})
 				},
-				type: ButtonType.ActionLarge,
-				icon: () => Icons.Add,
+				icon: Icons.Add,
 				colors: ButtonColor.DrawerNav,
 			}
 		} else if (writeableGroups.length === 1) {
 			return {
-				label: "createTemplate_action",
+				title: "createTemplate_action",
 				click: () => this.showTemplateEditor(null, writeableGroups[0].groupRoot),
-				type: ButtonType.ActionLarge,
-				icon: () => Icons.Add,
+				icon: Icons.Add,
 				colors: ButtonColor.DrawerNav,
 			}
 		} else if (writeableGroups.length > 1) {
-			return attachDropdown(
-				{
-					mainButtonAttrs: {
-						label: "createTemplate_action",
-						click: noOp,
-						type: ButtonType.ActionLarge,
-						icon: () => Icons.Add,
-						colors: ButtonColor.DrawerNav,
-					}, childAttrs: () =>
-						writeableGroups.map(groupInstances => {
-							return {
-								label: () => getSharedGroupName(groupInstances.groupInfo, true),
-								click: () => this.showTemplateEditor(null, groupInstances.groupRoot),
-								type: ButtonType.Dropdown,
-							}
-						})
+			return attachDropdown({
+				mainButtonAttrs: {
+					title: "createTemplate_action",
+					icon: Icons.Add,
+					colors: ButtonColor.DrawerNav,
 				},
-			)
+				childAttrs: () =>
+					writeableGroups.map((groupInstances) => {
+						return {
+							label: () => getSharedGroupName(groupInstances.groupInfo, true),
+							click: () => this.showTemplateEditor(null, groupInstances.groupRoot),
+						}
+					}),
+			})
 		} else {
 			return null
 		}
@@ -335,55 +319,48 @@ export class TemplatePopup implements ModalComponent {
 
 		const canEdit = !!selectedGroup && hasCapabilityOnGroup(logins.getUserController().user, selectedGroup.group, ShareCapability.Write)
 		return [
+			m(".flex.flex-column.justify-center.mr-m", selectedContent ? m("", lang.get(languageByCode[selectedContent.languageCode].textId)) : ""),
 			m(
-				ButtonN,
-				attachDropdown(
-					{
-						mainButtonAttrs: {
-							label: () => (selectedContent ? selectedContent.languageCode + " ▼" : ""),
-							title: "chooseLanguage_action",
-							// Use dropdown as button type because it matches with the colors of the other buttons
-							type: ButtonType.Dropdown,
-							click: noOp,
-							noBubble: true,
-						}, childAttrs: () =>
-							selectedTemplate.contents.map(content => {
-								const langCode: LanguageCode = downcast(content.languageCode)
-								return {
-									label: () => lang.get(languageByCode[langCode].textId),
-									type: ButtonType.Dropdown,
-									click: (e: MouseEvent) => {
-										e.stopPropagation()
-										this._templateModel.setSelectedContentLanguage(langCode)
-										this._inputDom?.focus()
-									},
-								}
-							})
+				IconButton,
+				attachDropdown({
+					mainButtonAttrs: {
+						title: "chooseLanguage_action",
+						icon: Icons.Language,
 					},
-				),
+					childAttrs: () =>
+						selectedTemplate.contents.map((content) => {
+							const langCode: LanguageCode = downcast(content.languageCode)
+							return {
+								label: () => lang.get(languageByCode[langCode].textId),
+								click: (e: MouseEvent) => {
+									e.stopPropagation()
+									this._templateModel.setSelectedContentLanguage(langCode)
+									this._inputDom?.focus()
+								},
+							}
+						}),
+				}),
 			),
 			canEdit
 				? [
-					m(ButtonN, {
-						label: "editTemplate_action",
-						click: () =>
-							locator.entityClient
-								   .load(TemplateGroupRootTypeRef, neverNull(selectedTemplate._ownerGroup))
-								   .then(groupRoot => this.showTemplateEditor(selectedTemplate, groupRoot)),
-						type: ButtonType.ActionLarge,
-						icon: () => Icons.Edit,
-						colors: ButtonColor.DrawerNav,
-					}),
-					m(ButtonN, {
-						label: "remove_action",
-						click: () => {
-							getConfirmation("deleteTemplate_msg").confirmed(() => locator.entityClient.erase(selectedTemplate))
-						},
-						type: ButtonType.ActionLarge,
-						icon: () => Icons.Trash,
-						colors: ButtonColor.DrawerNav,
-					}),
-				]
+						m(IconButton, {
+							title: "editTemplate_action",
+							click: () =>
+								locator.entityClient
+									.load(TemplateGroupRootTypeRef, neverNull(selectedTemplate._ownerGroup))
+									.then((groupRoot) => this.showTemplateEditor(selectedTemplate, groupRoot)),
+							icon: Icons.Edit,
+							colors: ButtonColor.DrawerNav,
+						}),
+						m(IconButton, {
+							title: "remove_action",
+							click: () => {
+								getConfirmation("deleteTemplate_msg").confirmed(() => locator.entityClient.erase(selectedTemplate))
+							},
+							icon: Icons.Trash,
+							colors: ButtonColor.DrawerNav,
+						}),
+				  ]
 				: null,
 			m(".pr-s", m(".nav-bar-spacer")),
 			m(
@@ -398,7 +375,7 @@ export class TemplatePopup implements ModalComponent {
 						}
 					},
 				},
-				m(ButtonN, this._selectTemplateButtonAttrs),
+				m(Button, this._selectTemplateButtonAttrs),
 			),
 		]
 	}
@@ -480,7 +457,7 @@ export class TemplatePopup implements ModalComponent {
 	}
 
 	showTemplateEditor(templateToEdit: EmailTemplate | null, groupRoot: TemplateGroupRoot) {
-		import("../../settings/TemplateEditor").then(editor => {
+		import("../../settings/TemplateEditor").then((editor) => {
 			editor.showTemplateEditor(templateToEdit, groupRoot)
 		})
 	}

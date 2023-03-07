@@ -1,53 +1,27 @@
-import {app, BrowserWindow, ipcMain, WebContents} from "electron"
+import { app, BrowserWindow, WebContents } from "electron"
 import path from "path"
-import {defer} from "@tutao/tutanota-utils"
-import {ElectronWebContentsTransport} from "./ipc/ElectronWebContentsTransport.js"
-import {NativeToWebRequest, WebToNativeRequest} from "../native/main/WebauthnNativeBridge.js"
-import {MessageDispatcher} from "../api/common/MessageDispatcher.js"
-import {exposeRemote} from "../api/common/WorkerProxy.js"
-import {CancelledError} from "../api/common/error/CancelledError.js"
-import {CentralIpcHandler} from "./ipc/CentralIpcHandler.js"
-import {register} from "./electron-localshortcut/LocalShortcut.js"
-import {ProgrammingError} from "../api/common/error/ProgrammingError.js"
-
-/**
- * a browserWindow wrapper that
- * * opens a specific website
- * * installs a nativeBrigde
- * * sends a request to the webContents
- * * returns the result of the call
- */
-
-export interface IWebDialogController {
-	create<FacadeType extends object>(parentWindowId: number, urlToOpen: URL): Promise<WebDialog<FacadeType>>
-}
+import { defer } from "@tutao/tutanota-utils"
+import { ElectronWebContentsTransport } from "./ipc/ElectronWebContentsTransport.js"
+import { NativeToWebRequest, WebToNativeRequest } from "../native/main/WebauthnNativeBridge.js"
+import { MessageDispatcher } from "../api/common/MessageDispatcher.js"
+import { exposeRemote } from "../api/common/WorkerProxy.js"
+import { CancelledError } from "../api/common/error/CancelledError.js"
+import { register } from "./electron-localshortcut/LocalShortcut.js"
+import { ProgrammingError } from "../api/common/error/ProgrammingError.js"
 
 export const webauthnIpcConfig = Object.freeze({
 	renderToMainEvent: "to-main-webdialog",
-	mainToRenderEvent: "to-renderer-webdialog"
+	mainToRenderEvent: "to-renderer-webdialog",
 })
 
 export type WebDialogIpcConfig = typeof webauthnIpcConfig
-export type WebDialogIpcHandler = CentralIpcHandler<WebDialogIpcConfig>
-
-// Singleton
-export const webauthnIpcHandler: WebDialogIpcHandler = new CentralIpcHandler(ipcMain, webauthnIpcConfig)
 
 /** A dialog which was already loaded. Allows sending one request or closing it. */
 export class WebDialog<FacadeType extends object> {
-	constructor(
-		private facade: FacadeType,
-		private closedPromise: Promise<never>,
-		private browserWindow: BrowserWindow,
-	) {
-	}
+	constructor(private facade: FacadeType, private closedPromise: Promise<never>, private browserWindow: BrowserWindow) {}
 
 	makeRequest<T>(requestSender: (facade: FacadeType) => Promise<T>): Promise<T> {
-		return Promise
-			.race([
-				this.closedPromise,
-				requestSender(this.facade)
-			])
+		return Promise.race([this.closedPromise, requestSender(this.facade)])
 			.catch((e) => {
 				console.log("web dialog error!", e)
 				throw e
@@ -66,17 +40,19 @@ export class WebDialog<FacadeType extends object> {
 	}
 }
 
-export class WebDialogController implements IWebDialogController {
-	constructor(
-		private readonly ipcHandler: WebDialogIpcHandler
-	) {
-	}
-
+/**
+ * a browserWindow wrapper that
+ * * opens a specific website
+ * * installs a nativeBrigde
+ * * sends a request to the webContents
+ * * returns the result of the call
+ */
+export class WebDialogController {
 	async create<FacadeType extends object>(parentWindowId: number, urlToOpen: URL): Promise<WebDialog<FacadeType>> {
 		const bw = await this.createBrowserWindow(parentWindowId)
 		// Holding a separate reference on purpose. When BrowserWindow is destroyed and WebContents fire "destroyed" event, we can't get WebContents from
 		// BrowserWindow anymore.
-		const {webContents} = bw
+		const { webContents } = bw
 		const closeDefer = defer<never>()
 		bw.on("closed", () => {
 			console.log("web dialog window closed")
@@ -87,17 +63,13 @@ export class WebDialogController implements IWebDialogController {
 			webContents.openDevTools()
 		})
 
-		bw.once('ready-to-show', () => bw.show())
+		bw.once("ready-to-show", () => bw.show())
 		webContents.on("did-fail-load", () => closeDefer.reject(new Error(`Could not load web dialog at ${urlToOpen}`)))
 
 		// Don't wait for the facade to init here, because that only happens after we call `bw.loadUrl`
 		// But we need setup the listener beforehand in case the app in the webDialog loads too fast and we miss it
-		const facadePromise = this.initRemoteWebauthn<FacadeType>(bw.webContents)
+		const facadePromise = this.initRemoteFacade<FacadeType>(bw.webContents)
 		await bw.loadURL(urlToOpen.toString())
-
-		webContents.on("destroyed", () => {
-			this.uninitRemoteWebauthn(webContents)
-		})
 
 		// We can confidently await here because we're sure that the bridge will be finished being setup in the webDialog
 		const facade = await facadePromise
@@ -148,7 +120,7 @@ export class WebDialogController implements IWebDialogController {
 		// Intercepts all file:// requests and forbids them
 		if (!session.protocol.isProtocolIntercepted("file")) {
 			const intercepting = session.protocol.interceptFileProtocol("file", (request, cb) => {
-				cb({statusCode: 403})
+				cb({ statusCode: 403 })
 			})
 			if (!intercepting) {
 				throw new ProgrammingError("Cannot intercept file: protocol for WebDialog!")
@@ -158,21 +130,20 @@ export class WebDialogController implements IWebDialogController {
 		return window
 	}
 
-	async initRemoteWebauthn<FacadeType>(webContents: WebContents): Promise<FacadeType> {
+	/**
+	 * initialize the facade impl that's displayed in the webContents
+	 */
+	private async initRemoteFacade<FacadeType>(webContents: WebContents): Promise<FacadeType> {
 		const deferred = defer<void>()
-		const transport = new ElectronWebContentsTransport<WebDialogIpcConfig, "facade", "init">(webContents, this.ipcHandler)
+		const transport = new ElectronWebContentsTransport<WebDialogIpcConfig, "facade", "init">(webContents, webauthnIpcConfig)
 		const dispatcher = new MessageDispatcher<NativeToWebRequest, WebToNativeRequest>(transport, {
-			"init": () => {
+			init: () => {
 				deferred.resolve()
 				return Promise.resolve()
-			}
+			},
 		})
-		const facade = exposeRemote<FacadeType>(req => dispatcher.postRequest(req))
+		const facade = exposeRemote<FacadeType>((req) => dispatcher.postRequest(req))
 		await deferred.promise
 		return facade
-	}
-
-	private async uninitRemoteWebauthn(webContents: WebContents) {
-		this.ipcHandler.removeHandler(webContents.id)
 	}
 }

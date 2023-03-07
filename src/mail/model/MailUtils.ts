@@ -1,6 +1,13 @@
-import type {Contact} from "../../api/entities/tutanota/TypeRefs.js"
-import {createContact} from "../../api/entities/tutanota/TypeRefs.js"
-import {createContactMailAddress} from "../../api/entities/tutanota/TypeRefs.js"
+import type { Contact, EncryptedMailAddress, InboxRule, Mail, MailFolder, TutanotaProperties } from "../../api/entities/tutanota/TypeRefs.js"
+import {
+	createContact,
+	createContactMailAddress,
+	createEncryptedMailAddress,
+	MailBodyTypeRef,
+	MailDetailsBlobTypeRef,
+	MailDetailsDraftTypeRef,
+	MailHeadersTypeRef,
+} from "../../api/entities/tutanota/TypeRefs.js"
 import {
 	ContactAddressType,
 	ConversationType,
@@ -12,50 +19,33 @@ import {
 	ReplyType,
 	TUTANOTA_MAIL_ADDRESS_DOMAINS,
 } from "../../api/common/TutanotaConstants"
-import {assertNotNull, contains, endsWith, neverNull, noOp, ofClass} from "@tutao/tutanota-utils"
-import {assertMainOrNode, isDesktop} from "../../api/common/Env"
-import {LockedError, NotFoundError} from "../../api/common/error/RestError"
-import type {LoginController} from "../../api/main/LoginController"
-import {logins as globalLogins} from "../../api/main/LoginController"
-import type {Language, TranslationKey} from "../../misc/LanguageViewModel"
-import {lang} from "../../misc/LanguageViewModel"
-import {Icons} from "../../gui/base/icons/Icons"
-import type {MailboxDetail} from "./MailModel"
-import {getContactDisplayName} from "../../contacts/model/ContactUtils"
-import type {lazyIcon} from "../../gui/base/Icon"
-import type {MailFolder} from "../../api/entities/tutanota/TypeRefs.js"
-import type {GroupInfo} from "../../api/entities/sys/TypeRefs.js"
-import type {IUserController} from "../../api/main/UserController"
-import type {Mail} from "../../api/entities/tutanota/TypeRefs.js"
-import type {ContactModel} from "../../contacts/model/ContactModel"
-import type {User} from "../../api/entities/sys/TypeRefs.js"
-import type {EncryptedMailAddress} from "../../api/entities/tutanota/TypeRefs.js"
-import {createEncryptedMailAddress} from "../../api/entities/tutanota/TypeRefs.js"
-import type {EntityClient} from "../../api/common/EntityClient"
-import {CustomerPropertiesTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import {getEnabledMailAddressesForGroupInfo, getGroupInfoDisplayName} from "../../api/common/utils/GroupUtils"
-import type {InboxRule} from "../../api/entities/tutanota/TypeRefs.js"
-import type {TutanotaProperties} from "../../api/entities/tutanota/TypeRefs.js"
-import type {MailFacade} from "../../api/worker/facades/MailFacade"
-import {fullNameToFirstAndLastName, mailAddressToFirstAndLastName} from "../../misc/parsing/MailAddressParser"
-import type {DraftRecipient} from "../../api/entities/tutanota/TypeRefs.js"
-import {createDraftRecipient} from "../../api/entities/tutanota/TypeRefs.js"
-import type {Attachment} from "../editor/SendMailModel"
-import {PartialRecipient, RecipientType} from "../../api/common/recipients/Recipient"
+import { assertNotNull, contains, endsWith, first, neverNull, noOp, ofClass } from "@tutao/tutanota-utils"
+import { assertMainOrNode, isDesktop } from "../../api/common/Env"
+import { LockedError, NotFoundError } from "../../api/common/error/RestError"
+import type { LoginController } from "../../api/main/LoginController"
+import type { Language, TranslationKey } from "../../misc/LanguageViewModel"
+import { lang } from "../../misc/LanguageViewModel"
+import { Icons } from "../../gui/base/icons/Icons"
+import type { MailboxDetail } from "./MailModel"
+import { MailModel } from "./MailModel"
+import type { AllIcons } from "../../gui/base/Icon"
+import type { GroupInfo, User } from "../../api/entities/sys/TypeRefs.js"
+import { CustomerPropertiesTypeRef } from "../../api/entities/sys/TypeRefs.js"
+import type { UserController } from "../../api/main/UserController"
+import type { EntityClient } from "../../api/common/EntityClient"
+import { getEnabledMailAddressesForGroupInfo, getGroupInfoDisplayName } from "../../api/common/utils/GroupUtils"
+import { fullNameToFirstAndLastName, mailAddressToFirstAndLastName } from "../../misc/parsing/MailAddressParser"
+import type { Attachment } from "../editor/SendMailModel"
+import { elementIdPart, getListId, listIdPart } from "../../api/common/utils/EntityUtils"
+import { isDetailsDraft, isLegacyMail, MailWrapper } from "../../api/common/MailWrapper.js"
+import { getLegacyMailHeaders, getMailHeaders } from "../../api/common/utils/Utils.js"
+import { FolderSystem } from "../../api/common/mail/FolderSystem.js"
 
 assertMainOrNode()
 export const LINE_BREAK = "<br>"
 
 export function isTutanotaMailAddress(mailAddress: string): boolean {
-	var tutanotaDomains = TUTANOTA_MAIL_ADDRESS_DOMAINS
-
-	for (var i = 0; i < tutanotaDomains.length; i++) {
-		if (mailAddress.endsWith("@" + tutanotaDomains[i])) {
-			return true
-		}
-	}
-
-	return false
+	return TUTANOTA_MAIL_ADDRESS_DOMAINS.some((tutaDomain) => mailAddress.endsWith("@" + tutaDomain))
 }
 
 /**
@@ -70,7 +60,7 @@ export function createNewContact(user: User, mailAddress: string, name: string):
 	let firstAndLastName = name.trim() !== "" ? fullNameToFirstAndLastName(name) : mailAddressToFirstAndLastName(mailAddress)
 	let contact = createContact()
 	contact._owner = user._id
-	contact._ownerGroup = assertNotNull(user.memberships.find(m => m.groupType === GroupType.Contact)).group
+	contact._ownerGroup = assertNotNull(user.memberships.find((m) => m.groupType === GroupType.Contact)).group
 	contact.firstName = firstAndLastName.firstName
 	contact.lastName = firstAndLastName.lastName
 	let ma = createContactMailAddress()
@@ -81,7 +71,7 @@ export function createNewContact(user: User, mailAddress: string, name: string):
 	return contact
 }
 
-export function getDisplayText(name: string | null, mailAddress: string, preferNameOnly: boolean): string {
+export function getMailAddressDisplayText(name: string | null, mailAddress: string, preferNameOnly: boolean): string {
 	if (!name) {
 		return mailAddress
 	} else if (preferNameOnly) {
@@ -91,21 +81,47 @@ export function getDisplayText(name: string | null, mailAddress: string, preferN
 	}
 }
 
-export function getSenderOrRecipientHeading(mail: Mail, preferNameOnly: boolean): string {
-	if (mail.state === MailState.RECEIVED) {
-		if (isExcludedMailAddress(mail.sender.address)) {
-			return ""
-		} else {
-			return getDisplayText(mail.sender.name, mail.sender.address, preferNameOnly)
-		}
+export function getSenderHeading(mail: Mail, preferNameOnly: boolean) {
+	if (isExcludedMailAddress(mail.sender.address)) {
+		return ""
 	} else {
-		let allRecipients = mail.toRecipients.concat(mail.ccRecipients).concat(mail.bccRecipients)
+		return getMailAddressDisplayText(mail.sender.name, mail.sender.address, preferNameOnly)
+	}
+}
+
+export function getSenderAddressDisplay(mail: Mail): string {
+	if (isExcludedMailAddress(mail.sender.address)) {
+		return ""
+	} else {
+		return mail.sender.address
+	}
+}
+
+export function getRecipientHeading(mail: Mail, preferNameOnly: boolean) {
+	if (isLegacyMail(mail)) {
+		const allRecipients = mail.toRecipients.concat(mail.ccRecipients).concat(mail.bccRecipients)
 
 		if (allRecipients.length > 0) {
-			return getDisplayText(allRecipients[0].name, allRecipients[0].address, preferNameOnly) + (allRecipients.length > 1 ? ", ..." : "")
+			return getMailAddressDisplayText(allRecipients[0].name, allRecipients[0].address, preferNameOnly) + (allRecipients.length > 1 ? ", ..." : "")
 		} else {
 			return ""
 		}
+	} else {
+		let recipientCount = parseInt(mail.recipientCount)
+		if (recipientCount > 0) {
+			let recipient = neverNull(mail.firstRecipient)
+			return getMailAddressDisplayText(recipient.name, recipient.address, preferNameOnly) + (recipientCount > 1 ? ", ..." : "")
+		} else {
+			return ""
+		}
+	}
+}
+
+export function getSenderOrRecipientHeading(mail: Mail, preferNameOnly: boolean): string {
+	if (mail.state === MailState.RECEIVED) {
+		return getSenderHeading(mail, preferNameOnly)
+	} else {
+		return getRecipientHeading(mail, preferNameOnly)
 	}
 }
 
@@ -128,7 +144,7 @@ export function isExcludedMailAddress(mailAddress: string): boolean {
 /**
  * @return {string} default mail address
  */
-export function getDefaultSenderFromUser({props, userGroupInfo}: IUserController): string {
+export function getDefaultSenderFromUser({ props, userGroupInfo }: UserController): string {
 	return props.defaultSender && contains(getEnabledMailAddressesForGroupInfo(userGroupInfo), props.defaultSender)
 		? props.defaultSender
 		: neverNull(userGroupInfo.mailAddress)
@@ -164,79 +180,36 @@ export function getFolderName(folder: MailFolder): string {
 	}
 }
 
-export function getFolderIconByType(folderType: MailFolderType): lazyIcon {
+export function getFolderIconByType(folderType: MailFolderType): AllIcons {
 	switch (folderType) {
-		case "0":
-			return () => Icons.Folder
+		case MailFolderType.CUSTOM:
+			return Icons.Folder
 
-		case "1":
-			return () => Icons.Inbox
+		case MailFolderType.INBOX:
+			return Icons.Inbox
 
-		case "2":
-			return () => Icons.Send
+		case MailFolderType.SENT:
+			return Icons.Send
 
-		case "3":
-			return () => Icons.Trash
+		case MailFolderType.TRASH:
+			return Icons.TrashBin
 
-		case "4":
-			return () => Icons.Archive
+		case MailFolderType.ARCHIVE:
+			return Icons.Archive
 
-		case "5":
-			return () => Icons.Spam
+		case MailFolderType.SPAM:
+			return Icons.Spam
 
-		case "6":
-			return () => Icons.Edit
+		case MailFolderType.DRAFT:
+			return Icons.Draft
 
 		default:
-			return () => Icons.Folder
+			return Icons.Folder
 	}
 }
 
-export function getFolderIcon(folder: MailFolder): lazyIcon {
+export function getFolderIcon(folder: MailFolder): AllIcons {
 	return getFolderIconByType(getMailFolderType(folder))
-}
-
-export function getFolder(folders: MailFolder[], type: MailFolderType): MailFolder {
-	const folder = folders.find(f => f.folderType === type)
-	return neverNull(folder)
-}
-
-export function getInboxFolder(folders: MailFolder[]): MailFolder {
-	return getFolder(folders, MailFolderType.INBOX)
-}
-
-export function getArchiveFolder(folders: MailFolder[]): MailFolder {
-	return getFolder(folders, MailFolderType.ARCHIVE)
-}
-
-export function getSortedSystemFolders(folders: MailFolder[]): MailFolder[] {
-	return folders
-		.filter(f => f.folderType !== MailFolderType.CUSTOM)
-		.sort((folder1, folder2) => {
-			// insert the draft folder after inbox (use type number 1.5 which is after inbox)
-			if (folder1.folderType === MailFolderType.DRAFT) {
-				return 1.5 - Number(folder2.folderType)
-			} else if (folder2.folderType === MailFolderType.DRAFT) {
-				return Number(folder1.folderType) - 1.5
-			}
-
-			return Number(folder1.folderType) - Number(folder2.folderType)
-		})
-}
-
-export function getSortedCustomFolders(folders: MailFolder[]): MailFolder[] {
-	return folders
-		.filter(f => f.folderType === MailFolderType.CUSTOM)
-		.sort((folder1, folder2) => {
-			return folder1.name.localeCompare(folder2.name)
-		})
-}
-
-/**
- * @deprecated Avoid grabbing singleton dependencies, use {@link getEnabledMailAddressesWithUser} instead to explicitly show dependencies.
- */
-export function getEnabledMailAddresses(mailboxDetails: MailboxDetail): string[] {
-	return getEnabledMailAddressesWithUser(mailboxDetails, globalLogins.getUserController().userGroupInfo)
 }
 
 export function getEnabledMailAddressesWithUser(mailboxDetail: MailboxDetail, userGroupInfo: GroupInfo): Array<string> {
@@ -262,12 +235,7 @@ export function getDefaultSender(logins: LoginController, mailboxDetails: Mailbo
 	}
 }
 
-/** @deprecated use {@link getSenderNameForUser} instead */
-export function getSenderName(mailboxDetails: MailboxDetail): string {
-	return getSenderNameForUser(mailboxDetails, globalLogins.getUserController())
-}
-
-export function getSenderNameForUser(mailboxDetails: MailboxDetail, userController: IUserController): string {
+export function getSenderNameForUser(mailboxDetails: MailboxDetail, userController: UserController): string {
 	if (isUserMailbox(mailboxDetails)) {
 		// external users do not have access to the user group info
 		return userController.userGroupInfo.name
@@ -280,9 +248,9 @@ export function getMailboxName(logins: LoginController, mailboxDetails: MailboxD
 	if (!logins.isInternalUserLoggedIn()) {
 		return lang.get("mailbox_label")
 	} else if (isUserMailbox(mailboxDetails)) {
-		return getGroupInfoDisplayName(logins.getUserController().userGroupInfo)
+		return logins.getUserController().props.defaultSender ?? logins.getUserController().userGroupInfo.mailAddress ?? lang.get("mailbox_label")
 	} else {
-		return getGroupInfoDisplayName(neverNull(mailboxDetails.mailGroupInfo))
+		return getGroupInfoDisplayName(assertNotNull(mailboxDetails.mailGroupInfo, "mailboxDetails without mailGroupInfo?"))
 	}
 }
 
@@ -292,7 +260,7 @@ export interface ImageHandler {
 
 export function markMails(entityClient: EntityClient, mails: Mail[], unread: boolean): Promise<void> {
 	return Promise.all(
-		mails.map(mail => {
+		mails.map((mail) => {
 			if (mail.unread !== unread) {
 				mail.unread = unread
 				return entityClient.update(mail).catch(ofClass(NotFoundError, noOp)).catch(ofClass(LockedError, noOp))
@@ -303,7 +271,15 @@ export function markMails(entityClient: EntityClient, mails: Mail[], unread: boo
 	).then(noOp)
 }
 
-export function copyMailAddress({address, name}: EncryptedMailAddress): EncryptedMailAddress {
+/**
+ * Check if all mails in the selection are drafts. If there are mixed drafts and non-drafts or the array is empty, return true.
+ * @param mails
+ */
+export function emptyOrContainsDraftsAndNonDrafts(mails: ReadonlyArray<Mail>): boolean {
+	return mails.length === 0 || (mails.some((mail) => mail.state === MailState.DRAFT) && mails.some((mail) => mail.state !== MailState.DRAFT))
+}
+
+export function copyMailAddress({ address, name }: EncryptedMailAddress): EncryptedMailAddress {
 	return createEncryptedMailAddress({
 		address,
 		name,
@@ -314,9 +290,9 @@ export function getTemplateLanguages(sortedLanguages: Array<Language>, entityCli
 	return loginController
 		.getUserController()
 		.loadCustomer()
-		.then(customer => entityClient.load(CustomerPropertiesTypeRef, neverNull(customer.properties)))
-		.then(customerProperties => {
-			return sortedLanguages.filter(sL => customerProperties.notificationMailTemplates.find(nmt => nmt.language === sL.code))
+		.then((customer) => entityClient.load(CustomerPropertiesTypeRef, neverNull(customer.properties)))
+		.then((customerProperties) => {
+			return sortedLanguages.filter((sL) => customerProperties.notificationMailTemplates.find((nmt) => nmt.language === sL.code))
 		})
 		.catch(() => [])
 }
@@ -345,7 +321,7 @@ export function conversationTypeString(conversationType: ConversationType): stri
 }
 
 export function getExistingRuleForType(props: TutanotaProperties, cleanValue: string, type: string): InboxRule | null {
-	return props.inboxRules.find(rule => type === rule.type && cleanValue === rule.value) ?? null
+	return props.inboxRules.find((rule) => type === rule.type && cleanValue === rule.value) ?? null
 }
 
 export function canDoDragAndDropExport(): boolean {
@@ -365,7 +341,7 @@ export function checkAttachmentSize(files: ReadonlyArray<Attachment>, maxAttachm
 	let totalSize = 0
 	const attachableFiles: Array<Attachment> = []
 	const tooBigFiles: Array<string> = []
-	files.forEach(file => {
+	files.forEach((file) => {
 		if (totalSize + Number(file.size) > maxAttachmentSize) {
 			tooBigFiles.push(file.name)
 		} else {
@@ -391,4 +367,69 @@ export enum RecipientField {
 	TO = "to",
 	CC = "cc",
 	BCC = "bcc",
+}
+
+export type FolderInfo = { level: number; folder: MailFolder }
+
+export async function getMoveTargetFolderSystems(model: MailModel, mails: Mail[]): Promise<Array<FolderInfo>> {
+	const firstMail = first(mails)
+	if (firstMail == null) return []
+
+	const mailboxDetails = await model.getMailboxDetailsForMail(firstMail)
+	if (mailboxDetails == null) {
+		return []
+	}
+	const folderSystem = mailboxDetails.folders
+	return folderSystem.getIndentedList().filter((f) => f.folder.mails !== getListId(firstMail))
+}
+
+export const MAX_FOLDER_INDENT_LEVEL = 10
+
+export function getIndentedFolderNameForDropdown(folderInfo: FolderInfo) {
+	const indentLevel = Math.min(folderInfo.level, MAX_FOLDER_INDENT_LEVEL)
+	return ". ".repeat(indentLevel) + getFolderName(folderInfo.folder)
+}
+
+export function getPathToFolderString(folderSystem: FolderSystem, folder: MailFolder, omitLast = false) {
+	const folderPath = folderSystem.getPathToFolder(folder._id)
+	if (omitLast) {
+		folderPath.pop()
+	}
+	return folderPath.map(getFolderName).join(" · ")
+}
+
+export async function loadMailDetails(entityClient: EntityClient, mail: Mail): Promise<MailWrapper> {
+	if (isLegacyMail(mail)) {
+		return entityClient.load(MailBodyTypeRef, neverNull(mail.body)).then((b) => MailWrapper.body(mail, b))
+	} else if (isDetailsDraft(mail)) {
+		return entityClient.load(MailDetailsDraftTypeRef, neverNull(mail.mailDetailsDraft)).then((d) => MailWrapper.details(mail, d.details))
+	} else {
+		const mailDetailsId = neverNull(mail.mailDetails)
+		return entityClient
+			.loadMultiple(MailDetailsBlobTypeRef, listIdPart(mailDetailsId), [elementIdPart(mailDetailsId)])
+			.then((d) => MailWrapper.details(mail, d[0].details))
+	}
+}
+
+export async function loadMailHeaders(entityClient: EntityClient, mailWrapper: MailWrapper): Promise<string | null> {
+	if (mailWrapper.isLegacy()) {
+		const headersId = mailWrapper.getMail().headers
+		return headersId != null ? getLegacyMailHeaders(await entityClient.load(MailHeadersTypeRef, headersId)) : null
+	} else {
+		const details = mailWrapper.getDetails()
+		return details.headers != null ? getMailHeaders(details.headers) : null
+	}
+}
+
+/**
+ * Extract and normalize email subject.
+ * Remove re:/fwd: prefixes.
+ * remove newlines
+ */
+export function normalizeSubject(subject: string): string {
+	subject = subject.replace(/[\n\r]/g, "")
+	// try to remove re: and fwd: in front of the subject
+	const match = subject.match(/^(?:(?:re|fwd)(?::|\s)+)*(.*)$/i)
+	// if we can't match fall back to the regular subject
+	return match ? match[1] : subject
 }

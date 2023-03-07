@@ -1,31 +1,31 @@
-import {getDisplayText} from "../../mail/model/MailUtils"
-import {logins} from "../../api/main/LoginController"
-import {createGroupSettings} from "../../api/entities/tutanota/TypeRefs.js"
-import m, {Children} from "mithril"
-import {lang} from "../../misc/LanguageViewModel"
-import {TextFieldN} from "../../gui/base/TextFieldN"
+import { getMailAddressDisplayText } from "../../mail/model/MailUtils"
+import { logins } from "../../api/main/LoginController"
+import { createGroupSettings } from "../../api/entities/tutanota/TypeRefs.js"
+import m, { Children } from "mithril"
+import { lang } from "../../misc/LanguageViewModel"
+import { TextField } from "../../gui/base/TextField.js"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
-import {isCustomizationEnabledForCustomer} from "../../api/common/utils/Utils"
-import {downcast} from "@tutao/tutanota-utils"
-import {Dialog} from "../../gui/base/Dialog"
-import {ButtonN, ButtonType} from "../../gui/base/ButtonN"
-import type {ReceivedGroupInvitation} from "../../api/entities/sys/TypeRefs.js"
-import {isSameId} from "../../api/common/utils/EntityUtils"
-import {sendAcceptNotificationEmail, sendRejectNotificationEmail} from "../GroupSharingUtils"
-import {getCapabilityText, getDefaultGroupName, getInvitationGroupType, groupRequiresBusinessFeature} from "../GroupUtils"
-import {showBusinessFeatureRequiredDialog} from "../../misc/SubscriptionDialogs"
-import type {GroupSharingTexts} from "../GroupGuiUtils"
-import {getTextsForGroupType} from "../GroupGuiUtils"
-import {FeatureType, GroupType} from "../../api/common/TutanotaConstants"
-import {ColorPicker} from "../../gui/base/ColorPicker"
-import {locator} from "../../api/main/MainLocator"
+import { isCustomizationEnabledForCustomer } from "../../api/common/utils/Utils"
+import { downcast } from "@tutao/tutanota-utils"
+import { Dialog } from "../../gui/base/Dialog"
+import { Button, ButtonType } from "../../gui/base/Button.js"
+import type { ReceivedGroupInvitation } from "../../api/entities/sys/TypeRefs.js"
+import { isSameId } from "../../api/common/utils/EntityUtils"
+import { sendAcceptNotificationEmail, sendRejectNotificationEmail } from "../GroupSharingUtils"
+import { getCapabilityText, getDefaultGroupName, getInvitationGroupType, groupRequiresBusinessFeature } from "../GroupUtils"
+import { showBusinessFeatureRequiredDialog } from "../../misc/SubscriptionDialogs"
+import type { GroupSharingTexts } from "../GroupGuiUtils"
+import { getTextsForGroupType } from "../GroupGuiUtils"
+import { FeatureType, GroupType } from "../../api/common/TutanotaConstants"
+import { ColorPicker } from "../../gui/base/ColorPicker"
+import { locator } from "../../api/main/MainLocator"
 
 export function showGroupInvitationDialog(invitation: ReceivedGroupInvitation) {
 	const groupType = getInvitationGroupType(invitation)
 	const texts = getTextsForGroupType(groupType)
 	const userSettingsGroupRoot = logins.getUserController().userSettingsGroupRoot
-	const existingGroupSettings = userSettingsGroupRoot.groupSettings.find(gc => gc.group === invitation.sharedGroup)
+	const existingGroupSettings = userSettingsGroupRoot.groupSettings.find((gc) => gc.group === invitation.sharedGroup)
 	const color = existingGroupSettings ? existingGroupSettings.color : Math.random().toString(16).slice(-6)
 	const colorStream = stream("#" + color)
 	const isDefaultGroupName = invitation.sharedGroupName === getDefaultGroupName(downcast(invitation.groupType))
@@ -33,11 +33,11 @@ export function showGroupInvitationDialog(invitation: ReceivedGroupInvitation) {
 	const isMember = !!logins
 		.getUserController()
 		.getCalendarMemberships()
-		.find(ms => isSameId(ms.group, invitation.sharedGroup))
+		.find((ms) => isSameId(ms.group, invitation.sharedGroup))
 	let dialog: Dialog
 
 	const onAcceptClicked = () => {
-		checkCanAcceptInvitation(invitation).then(canAccept => {
+		checkCanAcceptInvitation(invitation).then((canAccept) => {
 			if (canAccept) {
 				acceptInvite(invitation, texts).then(() => {
 					dialog.close()
@@ -70,22 +70,22 @@ export function showGroupInvitationDialog(invitation: ReceivedGroupInvitation) {
 				m(".flex.col", [
 					m(".mb", [
 						m(".pt.selectable", isMember ? lang.getMaybeLazy(texts.alreadyGroupMemberMessage) : texts.receivedGroupInvitationMessage),
-						m(TextFieldN, {
+						m(TextField, {
 							value: nameStream(),
 							oninput: nameStream,
 							label: texts.groupNameLabel,
 						}),
-						m(TextFieldN, {
-							value: getDisplayText(invitation.inviterName, invitation.inviterMailAddress, false),
+						m(TextField, {
+							value: getMailAddressDisplayText(invitation.inviterName, invitation.inviterMailAddress, false),
 							label: "sender_label",
 							disabled: true,
 						}),
-						m(TextFieldN, {
+						m(TextField, {
 							value: invitation.inviteeMailAddress,
 							label: "to_label",
 							disabled: true,
 						}),
-						m(TextFieldN, {
+						m(TextField, {
 							value: getCapabilityText(downcast(invitation.capability)),
 							label: "permissions_label",
 							disabled: true,
@@ -94,11 +94,11 @@ export function showGroupInvitationDialog(invitation: ReceivedGroupInvitation) {
 					]),
 					isMember
 						? null
-						: m(ButtonN, {
-							label: "acceptInvitation_action",
-							type: ButtonType.Login,
-							click: onAcceptClicked,
-						}),
+						: m(Button, {
+								label: "acceptInvitation_action",
+								type: ButtonType.Login,
+								click: onAcceptClicked,
+						  }),
 				]),
 		},
 		okActionTextId: "decline_action",
@@ -112,8 +112,8 @@ export function showGroupInvitationDialog(invitation: ReceivedGroupInvitation) {
 
 function checkCanAcceptInvitation(invitation: ReceivedGroupInvitation): Promise<boolean> {
 	return import("../../misc/SubscriptionDialogs")
-		.then(SubscriptionDialogUtils => SubscriptionDialogUtils.checkPremiumSubscription(false))
-		.then(allowed => {
+		.then((SubscriptionDialogUtils) => SubscriptionDialogUtils.checkPremiumSubscription(false))
+		.then((allowed) => {
 			if (!allowed) {
 				return false
 			}
@@ -121,7 +121,7 @@ function checkCanAcceptInvitation(invitation: ReceivedGroupInvitation): Promise<
 			return logins
 				.getUserController()
 				.loadCustomer()
-				.then(customer => {
+				.then((customer) => {
 					if (
 						groupRequiresBusinessFeature(getInvitationGroupType(invitation)) &&
 						!isCustomizationEnabledForCustomer(customer, FeatureType.BusinessFeatureEnabled)

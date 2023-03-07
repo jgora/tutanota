@@ -1,13 +1,13 @@
-import m, {Children, Component, Vnode} from "mithril"
-import {size} from "../../gui/size"
-import {getCapabilityText} from "../GroupUtils"
-import {downcast} from "@tutao/tutanota-utils"
-import {getDisplayText} from "../../mail/model/MailUtils"
-import {ButtonN} from "../../gui/base/ButtonN"
-import {showGroupInvitationDialog} from "./ReceivedGroupInvitationDialog"
-import {Icons} from "../../gui/base/icons/Icons"
-import type {ReceivedGroupInvitation} from "../../api/entities/sys/TypeRefs.js"
-import type {AllIcons} from "../../gui/base/Icon"
+import m, { Children, Component, Vnode } from "mithril"
+import { size } from "../../gui/size"
+import { getCapabilityText } from "../GroupUtils"
+import { downcast } from "@tutao/tutanota-utils"
+import { getMailAddressDisplayText } from "../../mail/model/MailUtils"
+import { showGroupInvitationDialog } from "./ReceivedGroupInvitationDialog"
+import { Icons } from "../../gui/base/icons/Icons"
+import type { ReceivedGroupInvitation } from "../../api/entities/sys/TypeRefs.js"
+import type { AllIcons } from "../../gui/base/Icon"
+import { IconButton } from "../../gui/base/IconButton.js"
 
 export type GroupInvitationFolderRowAttrs = {
 	invitation: ReceivedGroupInvitation
@@ -16,7 +16,7 @@ export type GroupInvitationFolderRowAttrs = {
 
 export class GroupInvitationFolderRow implements Component<GroupInvitationFolderRowAttrs> {
 	view(vnode: Vnode<GroupInvitationFolderRowAttrs>): Children {
-		const {invitation, icon} = vnode.attrs
+		const { invitation, icon } = vnode.attrs
 		return [
 			m(".folder-row.flex-start.plr-l", [
 				m(
@@ -41,14 +41,14 @@ export class GroupInvitationFolderRow implements Component<GroupInvitationFolder
 							{
 								title: invitation.inviterMailAddress,
 							},
-							getDisplayText(invitation.inviterName, invitation.inviterMailAddress, true),
+							getMailAddressDisplayText(invitation.inviterName, invitation.inviterMailAddress, true),
 						),
 					],
 				),
-				m(ButtonN, {
-					label: "show_action",
+				m(IconButton, {
+					title: "show_action",
 					click: () => showGroupInvitationDialog(invitation),
-					icon: () => (icon ? icon : Icons.Eye),
+					icon: icon ?? Icons.Eye,
 				}),
 			]),
 		]

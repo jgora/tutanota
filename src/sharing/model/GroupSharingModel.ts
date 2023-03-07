@@ -1,32 +1,32 @@
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
-import type {EntityUpdateData} from "../../api/main/EventController"
-import {EventController, isUpdateForTypeRef} from "../../api/main/EventController"
-import {EntityClient} from "../../api/common/EntityClient"
-import {getElementId, getEtId, isSameId} from "../../api/common/utils/EntityUtils"
-import type {SentGroupInvitation} from "../../api/entities/sys/TypeRefs.js"
-import {SentGroupInvitationTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import {OperationType, ShareCapability} from "../../api/common/TutanotaConstants"
-import {NotFoundError} from "../../api/common/error/RestError"
-import {findAndRemove, noOp, ofClass, promiseMap} from "@tutao/tutanota-utils"
-import type {GroupMember} from "../../api/entities/sys/TypeRefs.js"
-import {GroupMemberTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import type {GroupInfo} from "../../api/entities/sys/TypeRefs.js"
-import type {Group} from "../../api/entities/sys/TypeRefs.js"
-import {GroupTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import type {GroupMemberInfo} from "../GroupUtils"
-import {getSharedGroupName, hasCapabilityOnGroup, isSharedGroupOwner, loadGroupInfoForMember, loadGroupMembers} from "../GroupUtils"
-import type {LoginController} from "../../api/main/LoginController"
-import {UserError} from "../../api/main/UserError"
-import type {MailAddress} from "../../api/entities/tutanota/TypeRefs.js"
-import {lang} from "../../misc/LanguageViewModel"
-import {RecipientsNotFoundError} from "../../api/common/error/RecipientsNotFoundError"
-import {ProgrammingError} from "../../api/common/error/ProgrammingError"
-import type {MailFacade} from "../../api/worker/facades/MailFacade"
-import type {ShareFacade} from "../../api/worker/facades/ShareFacade"
-import type {GroupManagementFacade} from "../../api/worker/facades/GroupManagementFacade"
-import {Recipient, RecipientType} from "../../api/common/recipients/Recipient"
-import {RecipientsModel, ResolveMode} from "../../api/main/RecipientsModel"
+import type { EntityEventsListener, EntityUpdateData } from "../../api/main/EventController"
+import { EventController, isUpdateForTypeRef } from "../../api/main/EventController"
+import { EntityClient } from "../../api/common/EntityClient"
+import { getElementId, getEtId, isSameId } from "../../api/common/utils/EntityUtils"
+import type { SentGroupInvitation } from "../../api/entities/sys/TypeRefs.js"
+import { SentGroupInvitationTypeRef } from "../../api/entities/sys/TypeRefs.js"
+import { OperationType, ShareCapability } from "../../api/common/TutanotaConstants"
+import { NotFoundError } from "../../api/common/error/RestError"
+import { findAndRemove, noOp, ofClass, promiseMap } from "@tutao/tutanota-utils"
+import type { GroupMember } from "../../api/entities/sys/TypeRefs.js"
+import { GroupMemberTypeRef } from "../../api/entities/sys/TypeRefs.js"
+import type { GroupInfo } from "../../api/entities/sys/TypeRefs.js"
+import type { Group } from "../../api/entities/sys/TypeRefs.js"
+import { GroupTypeRef } from "../../api/entities/sys/TypeRefs.js"
+import type { GroupMemberInfo } from "../GroupUtils"
+import { getSharedGroupName, hasCapabilityOnGroup, isSharedGroupOwner, loadGroupInfoForMember, loadGroupMembers } from "../GroupUtils"
+import type { LoginController } from "../../api/main/LoginController"
+import { UserError } from "../../api/main/UserError"
+import type { MailAddress } from "../../api/entities/tutanota/TypeRefs.js"
+import { lang } from "../../misc/LanguageViewModel"
+import { RecipientsNotFoundError } from "../../api/common/error/RecipientsNotFoundError"
+import { ProgrammingError } from "../../api/common/error/ProgrammingError"
+import type { MailFacade } from "../../api/worker/facades/lazy/MailFacade.js"
+import type { ShareFacade } from "../../api/worker/facades/lazy/ShareFacade.js"
+import type { GroupManagementFacade } from "../../api/worker/facades/lazy/GroupManagementFacade.js"
+import { Recipient, RecipientType } from "../../api/common/recipients/Recipient"
+import { RecipientsModel, ResolveMode } from "../../api/main/RecipientsModel"
 
 export class GroupSharingModel {
 	readonly info: GroupInfo
@@ -66,8 +66,10 @@ export class GroupSharingModel {
 		this._shareFacade = shareFacade
 		this._groupManagementFacade = groupManagementFacade
 		this.onEntityUpdate = stream()
-		this.eventController.addEntityListener((events, id) => this.entityEventsReceived(events, id))
+		this.eventController.addEntityListener(this.onEntityEvents)
 	}
+
+	private readonly onEntityEvents: EntityEventsListener = (events, id) => this.entityEventsReceived(events, id)
 
 	static newAsync(
 		info: GroupInfo,
@@ -77,11 +79,11 @@ export class GroupSharingModel {
 		mailFacade: MailFacade,
 		shareFacade: ShareFacade,
 		groupManagementFacade: GroupManagementFacade,
-		recipientsModel: RecipientsModel
+		recipientsModel: RecipientsModel,
 	): Promise<GroupSharingModel> {
 		return entityClient
 			.load(GroupTypeRef, info.group)
-			.then(group =>
+			.then((group) =>
 				Promise.all([entityClient.loadAll(SentGroupInvitationTypeRef, group.invitations), loadGroupMembers(group, entityClient)]).then(
 					([sentGroupInvitations, memberInfos]) =>
 						new GroupSharingModel(
@@ -102,7 +104,7 @@ export class GroupSharingModel {
 	}
 
 	dispose() {
-		this.eventController.removeEntityListener((events, id) => this.entityEventsReceived(events, id))
+		this.eventController.removeEntityListener(this.onEntityEvents)
 	}
 
 	/**
@@ -148,7 +150,6 @@ export class GroupSharingModel {
 			if (resolved.type !== RecipientType.INTERNAL) {
 				externalRecipients.push(resolved.address)
 			}
-
 		}
 		if (externalRecipients.length) {
 			throw new UserError(() => lang.get("featureTutanotaOnly_msg") + " " + lang.get("invalidRecipients_msg") + "\n" + externalRecipients.join("\n"))
@@ -159,7 +160,7 @@ export class GroupSharingModel {
 			groupInvitationReturn = await this._shareFacade.sendGroupInvitation(
 				sharedGroupInfo,
 				getSharedGroupName(sharedGroupInfo, false),
-				recipients.map(r => r.address),
+				recipients.map((r) => r.address),
 				capability,
 			)
 		} catch (e) {
@@ -170,10 +171,9 @@ export class GroupSharingModel {
 			}
 		}
 
-
 		if (groupInvitationReturn.existingMailAddresses.length > 0 || groupInvitationReturn.invalidMailAddresses.length > 0) {
-			const existingMailAddresses = groupInvitationReturn.existingMailAddresses.map(ma => ma.address).join("\n")
-			const invalidMailAddresses = groupInvitationReturn.invalidMailAddresses.map(ma => ma.address).join("\n")
+			const existingMailAddresses = groupInvitationReturn.existingMailAddresses.map((ma) => ma.address).join("\n")
+			const invalidMailAddresses = groupInvitationReturn.invalidMailAddresses.map((ma) => ma.address).join("\n")
 			throw new UserError(() => {
 				let msg = ""
 				msg += existingMailAddresses.length === 0 ? "" : lang.get("existingMailAddress_msg") + "\n" + existingMailAddresses
@@ -187,7 +187,7 @@ export class GroupSharingModel {
 	}
 
 	entityEventsReceived(updates: ReadonlyArray<EntityUpdateData>, eventOwnerGroupId: Id): Promise<void> {
-		return promiseMap(updates, update => {
+		return promiseMap(updates, (update) => {
 			if (!isSameId(eventOwnerGroupId, getEtId(this.group))) {
 				// ignore events of different group here
 				return
@@ -196,18 +196,18 @@ export class GroupSharingModel {
 			if (isUpdateForTypeRef(SentGroupInvitationTypeRef, update)) {
 				if (update.operation === OperationType.CREATE && isSameId(update.instanceListId, this.group.invitations)) {
 					return this.entityClient
-							   .load(SentGroupInvitationTypeRef, [update.instanceListId, update.instanceId])
-							   .then(instance => {
-								   if (instance) {
-									   this.sentGroupInvitations.push(instance)
-									   this.onEntityUpdate()
-								   }
-							   })
-							   .catch(ofClass(NotFoundError, e => console.log("sent invitation not found", update)))
+						.load(SentGroupInvitationTypeRef, [update.instanceListId, update.instanceId])
+						.then((instance) => {
+							if (instance) {
+								this.sentGroupInvitations.push(instance)
+								this.onEntityUpdate()
+							}
+						})
+						.catch(ofClass(NotFoundError, (e) => console.log("sent invitation not found", update)))
 				}
 
 				if (update.operation === OperationType.DELETE) {
-					findAndRemove(this.sentGroupInvitations, sentGroupInvitation => isSameId(getElementId(sentGroupInvitation), update.instanceId))
+					findAndRemove(this.sentGroupInvitations, (sentGroupInvitation) => isSameId(getElementId(sentGroupInvitation), update.instanceId))
 					this.onEntityUpdate()
 				}
 			} else if (isUpdateForTypeRef(GroupMemberTypeRef, update)) {
@@ -215,21 +215,21 @@ export class GroupSharingModel {
 
 				if (update.operation === OperationType.CREATE && isSameId(update.instanceListId, this.group.members)) {
 					return this.entityClient
-							   .load(GroupMemberTypeRef, [update.instanceListId, update.instanceId])
-							   .then(instance => {
-								   if (instance) {
-									   return loadGroupInfoForMember(instance, this.entityClient).then(groupMemberInfo => {
-										   console.log("new member", groupMemberInfo)
-										   this.memberInfos.push(groupMemberInfo)
-										   this.onEntityUpdate()
-									   })
-								   }
-							   })
-							   .catch(ofClass(NotFoundError, e => console.log("group member not found", update)))
+						.load(GroupMemberTypeRef, [update.instanceListId, update.instanceId])
+						.then((instance) => {
+							if (instance) {
+								return loadGroupInfoForMember(instance, this.entityClient).then((groupMemberInfo) => {
+									console.log("new member", groupMemberInfo)
+									this.memberInfos.push(groupMemberInfo)
+									this.onEntityUpdate()
+								})
+							}
+						})
+						.catch(ofClass(NotFoundError, (e) => console.log("group member not found", update)))
 				}
 
 				if (update.operation === OperationType.DELETE) {
-					findAndRemove(this.memberInfos, memberInfo => isSameId(getElementId(memberInfo.member), update.instanceId))
+					findAndRemove(this.memberInfos, (memberInfo) => isSameId(getElementId(memberInfo.member), update.instanceId))
 					this.onEntityUpdate()
 				}
 			}

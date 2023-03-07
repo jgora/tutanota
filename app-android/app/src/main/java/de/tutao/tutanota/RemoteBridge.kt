@@ -14,7 +14,6 @@ import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
-import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.PrintWriter
@@ -68,14 +67,6 @@ class RemoteBridge internal constructor(
 	}
 
 	/**
-	 * remove when all methods are ported to generated facades
-	 */
-	private fun makeCursedJsonArray(args: List<String>): JSONArray {
-		val cursedJsonArray = args.joinToString(prefix = "[", postfix = "]")
-		return JSONArray(cursedJsonArray)
-	}
-
-	/**
 	 * Invokes method with args.
 	 *
 	 * @param msg A request (see WorkerProtocol)
@@ -102,6 +93,10 @@ class RemoteBridge internal constructor(
 					Log.e(TAG, "failed invocation", e)
 					sendErrorResponse(id, e)
 				}
+			}
+			"requestError" -> {
+				val continuation = requests.remove(id)
+				continuation?.resumeWith(Result.failure(RemoteExecutionException(rest)))
 			}
 			else -> error("unknown message type")
 		}
@@ -187,3 +182,5 @@ class RemoteBridge internal constructor(
 		}
 	}
 }
+
+internal class RemoteExecutionException(message: String) : Exception(message)

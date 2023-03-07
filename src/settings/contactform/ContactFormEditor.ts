@@ -1,50 +1,45 @@
 import m from "mithril"
-import {Dialog} from "../../gui/base/Dialog"
-import {Button} from "../../gui/base/Button"
-import {lang, languages} from "../../misc/LanguageViewModel"
-import {BookingItemFeatureType, GroupType, Keys} from "../../api/common/TutanotaConstants"
-import {getWhitelabelDomain} from "../../api/common/utils/Utils"
-import {neverNull} from "@tutao/tutanota-utils"
-import {assertMainOrNode} from "../../api/common/Env"
-import {logins} from "../../api/main/LoginController"
-import {CustomerTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import type {GroupInfo} from "../../api/entities/sys/TypeRefs.js"
-import {GroupInfoTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import {DropDownSelector} from "../../gui/base/DropDownSelector"
-import {GroupTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import type {TableAttrs, TableLineAttrs} from "../../gui/base/TableN"
-import {ColumnWidth, TableN} from "../../gui/base/TableN"
-import type {ContactForm} from "../../api/entities/tutanota/TypeRefs.js"
-import {ContactFormTypeRef, createContactForm} from "../../api/entities/tutanota/TypeRefs.js"
-import {mapAndFilterNull, remove} from "@tutao/tutanota-utils"
-import {getContactFormUrl} from "./ContactFormViewer"
-import {HtmlEditor} from "../../gui/editor/HtmlEditor"
-import {Icons} from "../../gui/base/icons/Icons"
-import {CustomerContactFormGroupRootTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
-import {NotFoundError} from "../../api/common/error/RestError"
-import {MailboxGroupRootTypeRef} from "../../api/entities/tutanota/TypeRefs.js"
-import {UserTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import {showProgressDialog} from "../../gui/dialogs/ProgressDialog"
+import { Dialog } from "../../gui/base/Dialog"
+import { lang, languages } from "../../misc/LanguageViewModel"
+import { BookingItemFeatureType, GroupType, Keys } from "../../api/common/TutanotaConstants"
+import { getWhitelabelDomain } from "../../api/common/utils/Utils"
+import { clear, mapAndFilterNull, neverNull, ofClass, remove } from "@tutao/tutanota-utils"
+import { assertMainOrNode } from "../../api/common/Env"
+import { logins } from "../../api/main/LoginController"
+import type { GroupInfo } from "../../api/entities/sys/TypeRefs.js"
+import { CustomerInfoTypeRef, CustomerTypeRef, GroupInfoTypeRef, GroupTypeRef, UserTypeRef } from "../../api/entities/sys/TypeRefs.js"
+import type { TableAttrs, TableLineAttrs } from "../../gui/base/Table.js"
+import { ColumnWidth, Table } from "../../gui/base/Table.js"
+import type { ContactForm, ContactFormLanguage } from "../../api/entities/tutanota/TypeRefs.js"
+import {
+	ContactFormTypeRef,
+	createContactForm,
+	createContactFormLanguage,
+	CustomerContactFormGroupRootTypeRef,
+	MailboxGroupRootTypeRef,
+} from "../../api/entities/tutanota/TypeRefs.js"
+import { HtmlEditor } from "../../gui/editor/HtmlEditor"
+import { Icons } from "../../gui/base/icons/Icons"
+import { NotFoundError } from "../../api/common/error/RestError"
+import { showProgressDialog } from "../../gui/dialogs/ProgressDialog"
 import stream from "mithril/stream"
-import type {ContactFormLanguage} from "../../api/entities/tutanota/TypeRefs.js"
-import {createContactFormLanguage} from "../../api/entities/tutanota/TypeRefs.js"
-import {DefaultAnimationTime} from "../../gui/animation/Animations"
-import {getDefaultContactFormLanguage} from "./ContactFormUtils"
-import {BootIcons} from "../../gui/base/icons/BootIcons"
-import {CustomerInfoTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import type {DialogHeaderBarAttrs} from "../../gui/base/DialogHeaderBar"
-import {windowFacade} from "../../misc/WindowFacade"
-import {ButtonType} from "../../gui/base/ButtonN"
-import {compareGroupInfos, getGroupInfoDisplayName} from "../../api/common/utils/GroupUtils"
-import {isSameId, stringToCustomId} from "../../api/common/utils/EntityUtils"
-import {createDropDownButton} from "../../gui/base/Dropdown"
-import type {LanguageCode} from "../../misc/LanguageViewModel"
-import {showBuyDialog} from "../../subscription/BuyDialog"
-import type {TextFieldAttrs} from "../../gui/base/TextFieldN"
-import {TextFieldN} from "../../gui/base/TextFieldN"
-import {ofClass} from "@tutao/tutanota-utils"
-import {locator} from "../../api/main/MainLocator"
-import Stream from "mithril/stream";
+import Stream from "mithril/stream"
+import { DefaultAnimationTime } from "../../gui/animation/Animations"
+import { getContactFormUrl, getDefaultContactFormLanguage } from "./ContactFormUtils"
+import { BootIcons } from "../../gui/base/icons/BootIcons"
+import type { DialogHeaderBarAttrs } from "../../gui/base/DialogHeaderBar"
+import { windowFacade } from "../../misc/WindowFacade"
+import { ButtonType } from "../../gui/base/Button.js"
+import { compareGroupInfos, getGroupInfoDisplayName } from "../../api/common/utils/GroupUtils"
+import { isSameId, stringToCustomId } from "../../api/common/utils/EntityUtils"
+import { showBuyDialog } from "../../subscription/BuyDialog"
+import type { TextFieldAttrs } from "../../gui/base/TextField.js"
+import { TextField } from "../../gui/base/TextField.js"
+import { locator } from "../../api/main/MainLocator"
+import { attachDropdown, DropdownChildAttrs } from "../../gui/base/Dropdown.js"
+import { DropDownSelector } from "../../gui/base/DropDownSelector.js"
+import { IconButton, IconButtonAttrs } from "../../gui/base/IconButton.js"
+import { ButtonSize } from "../../gui/base/ButtonSize.js"
 
 assertMainOrNode()
 // keep in sync with ContactFormAccessor.java
@@ -94,9 +89,9 @@ export class ContactFormEditor {
 			let localAdminGroupIds = logins
 				.getUserController()
 				.getLocalAdminGroupMemberships()
-				.map(gm => gm.group)
-			this._allSharedMailboxGroupInfos = allSharedMailboxGroupInfos.filter(gi => localAdminGroupIds.indexOf(neverNull(gi.localAdmin)) !== -1)
-			this._allUserGroupInfos = allUserGroupInfos.filter(gi => localAdminGroupIds.indexOf(neverNull(gi.localAdmin)) !== -1)
+				.map((gm) => gm.group)
+			this._allSharedMailboxGroupInfos = allSharedMailboxGroupInfos.filter((gi) => localAdminGroupIds.indexOf(neverNull(gi.localAdmin)) !== -1)
+			this._allUserGroupInfos = allUserGroupInfos.filter((gi) => localAdminGroupIds.indexOf(neverNull(gi.localAdmin)) !== -1)
 		}
 
 		this._allSharedMailboxGroupInfos.sort(compareGroupInfos)
@@ -107,14 +102,14 @@ export class ContactFormEditor {
 			this._allSharedMailboxGroupInfos.length > 0
 				? this._allSharedMailboxGroupInfos[0]
 				: this._allUserGroupInfos.length > 0
-					? this._allUserGroupInfos[0]
-					: null
+				? this._allUserGroupInfos[0]
+				: null
 
 		if (this._contactForm.targetGroupInfo) {
-			let groupInfo = this._allSharedMailboxGroupInfos.find(groupInfo => isSameId(neverNull(this._contactForm.targetGroupInfo), groupInfo._id))
+			let groupInfo = this._allSharedMailboxGroupInfos.find((groupInfo) => isSameId(neverNull(this._contactForm.targetGroupInfo), groupInfo._id))
 
 			if (!groupInfo) {
-				groupInfo = this._allUserGroupInfos.find(groupInfo => isSameId(neverNull(this._contactForm.targetGroupInfo), groupInfo._id))
+				groupInfo = this._allUserGroupInfos.find((groupInfo) => isSameId(neverNull(this._contactForm.targetGroupInfo), groupInfo._id))
 			}
 
 			if (groupInfo) {
@@ -126,7 +121,7 @@ export class ContactFormEditor {
 		this._receivingMailboxDisplayValue = ""
 		this._receivingMailbox = stream(selectedTargetGroupInfo)
 
-		this._receivingMailbox.map(groupInfo => {
+		this._receivingMailbox.map((groupInfo) => {
 			if (groupInfo) {
 				let prefix = (groupInfo.groupType === GroupType.User ? lang.get("account_label") : lang.get("sharedMailbox_label")) + ": "
 				this._receivingMailboxDisplayValue = prefix + getGroupInfoDisplayName(groupInfo)
@@ -134,10 +129,10 @@ export class ContactFormEditor {
 		})
 
 		// remove all groups that do not exist any more
-		this._participantGroupInfoList = mapAndFilterNull(this._contactForm.participantGroupInfos, groupInfoId =>
-			this._allUserGroupInfos.find(g => isSameId(g._id, groupInfoId)),
+		this._participantGroupInfoList = mapAndFilterNull(this._contactForm.participantGroupInfos, (groupInfoId) =>
+			this._allUserGroupInfos.find((g) => isSameId(g._id, groupInfoId)),
 		)
-		this._languages = this._contactForm.languages.map(l => Object.assign({}, l))
+		this._languages = this._contactForm.languages.map((l) => Object.assign({}, l))
 
 		if (this._languages.length === 0) {
 			let l = createContactFormLanguage()
@@ -150,24 +145,12 @@ export class ContactFormEditor {
 		let language = getDefaultContactFormLanguage(this._languages)
 		this._language = stream(language)
 		this._languageDisplayValue = getLanguageName(this._language().code)
-		this._headerField = new HtmlEditor(undefined, {
-			enabled: true,
-		})
-			.setModeSwitcher("header_label")
-			.setMinHeight(200)
-			.showBorders()
-		this._footerField = new HtmlEditor(undefined, {
-			enabled: true,
-		})
-			.setModeSwitcher("footer_label")
-			.setMinHeight(200)
-			.showBorders()
-		this._helpField = new HtmlEditor(undefined, {
-			enabled: true,
-		})
-			.setModeSwitcher("helpPage_label")
-			.setMinHeight(200)
-			.showBorders()
+		this._headerField = new HtmlEditor().setModeSwitcher("header_label").setMinHeight(200).showBorders().enableToolbar()
+
+		this._footerField = new HtmlEditor().setModeSwitcher("footer_label").setMinHeight(200).showBorders().enableToolbar()
+
+		this._helpField = new HtmlEditor().setModeSwitcher("helpPage_label").setMinHeight(200).showBorders().enableToolbar()
+
 		this._pageTitle = ""
 
 		this._language.map((l: ContactFormLanguage) => {
@@ -211,20 +194,19 @@ export class ContactFormEditor {
 			return m(
 				"#contact-editor.pb",
 				{
-					oncreate: vnode => (windowCloseUnsubscribe = windowFacade.addWindowCloseListener(() => {
-					})),
-					onremove: vnode => windowCloseUnsubscribe(),
+					oncreate: (vnode) => (windowCloseUnsubscribe = windowFacade.addWindowCloseListener(() => {})),
+					onremove: (vnode) => windowCloseUnsubscribe(),
 				},
 				[
 					m(".h4.mt-l", lang.get("emailProcessing_label")),
-					m(TextFieldN, this._createReceivingMailboxFieldAttrs()),
+					this.renderReceiverField(),
 					this._receivingMailbox() && neverNull(this._receivingMailbox()).groupType === GroupType.User
 						? null
-						: m(".mt-l", [m(TableN, this._createParticipantGroupInfosTableAttrs()), m(".small", lang.get("responsiblePersonsInfo_msg"))]),
+						: m(".mt-l", [m(Table, this._createParticipantGroupInfosTableAttrs()), m(".small", lang.get("responsiblePersonsInfo_msg"))]),
 					m(".h4.mt-l", lang.get("display_action")),
-					m(TextFieldN, this._createPathFieldAttrs()),
-					m(TextFieldN, this._createLanguageFieldAttrs()),
-					m(TextFieldN, this._createPageTitleAttrs()),
+					m(TextField, this._createPathFieldAttrs()),
+					m(TextField, this._createLanguageFieldAttrs()),
+					m(TextField, this._createPageTitleAttrs()),
 					m(this._headerField),
 					m(this._footerField),
 					m(this._helpField),
@@ -233,12 +215,22 @@ export class ContactFormEditor {
 		}
 
 		this.dialog = Dialog.largeDialog(headerBarAttrs, this)
-							.addShortcut({
-								key: Keys.ESC,
-								exec: cancelAction,
-								help: "close_alt",
-							})
-							.setCloseHandler(cancelAction)
+			.addShortcut({
+				key: Keys.ESC,
+				exec: cancelAction,
+				help: "close_alt",
+			})
+			.setCloseHandler(cancelAction)
+	}
+
+	private renderReceiverField() {
+		return m(TextField, {
+			label: "receivingMailbox_label",
+			value: this._receivingMailboxDisplayValue,
+			disabled: true,
+			injectionsRight: () =>
+				m(".ml-between-s", [this.renderAssignUserButton(), this._allSharedMailboxGroupInfos.length > 0 ? this.renderAssignGroupButton() : null]),
+		})
 	}
 
 	updateLanguageFromFields(language: ContactFormLanguage) {
@@ -265,8 +257,8 @@ export class ContactFormEditor {
 			// check that the path is unique
 			showProgressDialog(
 				"pleaseWait_msg",
-				locator.entityClient.load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)).then(customer => {
-					return locator.entityClient.load(CustomerContactFormGroupRootTypeRef, customer.customerGroup).then(root => {
+				locator.entityClient.load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)).then((customer) => {
+					return locator.entityClient.load(CustomerContactFormGroupRootTypeRef, customer.customerGroup).then((root) => {
 						const receivingMailbox = this._receivingMailbox()
 
 						if (!receivingMailbox) {
@@ -281,72 +273,72 @@ export class ContactFormEditor {
 						// only compare the path if this is a new contact form or it is a different existing contact form
 						if (!this._contactForm._id || !isSameId(this._contactForm._id, contactFormIdFromPath)) {
 							samePathFormCheck = locator.entityClient
-													   .load(ContactFormTypeRef, contactFormIdFromPath)
-													   .then(cf => true)
-													   .catch(ofClass(NotFoundError, e => false))
+								.load(ContactFormTypeRef, contactFormIdFromPath)
+								.then((cf) => true)
+								.catch(ofClass(NotFoundError, (e) => false))
 						}
 
-						return samePathFormCheck.then(samePathForm => {
+						return samePathFormCheck.then((samePathForm) => {
 							if (samePathForm) {
 								return Dialog.message("pathAlreadyExists_msg")
 							} else {
 								// check if the target mail group is already referenced by a different contact form
 								return locator.entityClient
-											  .load(GroupTypeRef, receivingMailbox.group)
-											  .then(group => {
-												  if (group.user) {
-													  return locator.entityClient.load(UserTypeRef, group.user).then(user => {
-														  return neverNull(user.memberships.find(m => m.groupType === GroupType.Mail)).group
-													  })
-												  } else {
-													  return group._id
-												  }
-											  })
-											  .then(mailGroupId => {
-												  return locator.entityClient.load(MailboxGroupRootTypeRef, mailGroupId).then(mailboxGroupRoot => {
-													  let contactFormIdToCheck = this._createNew ? contactFormIdFromPath : this._contactForm._id
+									.load(GroupTypeRef, receivingMailbox.group)
+									.then((group) => {
+										if (group.user) {
+											return locator.entityClient.load(UserTypeRef, group.user).then((user) => {
+												return neverNull(user.memberships.find((m) => m.groupType === GroupType.Mail)).group
+											})
+										} else {
+											return group._id
+										}
+									})
+									.then((mailGroupId) => {
+										return locator.entityClient.load(MailboxGroupRootTypeRef, mailGroupId).then((mailboxGroupRoot) => {
+											let contactFormIdToCheck = this._createNew ? contactFormIdFromPath : this._contactForm._id
 
-													  if (
-														  mailboxGroupRoot.targetMailGroupContactForm &&
-														  !isSameId(mailboxGroupRoot.targetMailGroupContactForm, contactFormIdToCheck)
-													  ) {
-														  return Dialog.message("receivingMailboxAlreadyUsed_msg")
-													  } else {
-														  this._contactForm._ownerGroup = neverNull(
-															  logins.getUserController().user.memberships.find(m => m.groupType === GroupType.Customer),
-														  ).group
-														  this._contactForm.targetGroup = receivingMailbox.group
-														  this._contactForm.targetGroupInfo = receivingMailbox._id
-														  this._contactForm.participantGroupInfos = this._participantGroupInfoList.map(groupInfo => groupInfo._id)
-														  this._contactForm.path = this._path
-														  this.updateLanguageFromFields(this._language())
-														  this._contactForm.languages = this._languages
-														  let p
+											if (
+												mailboxGroupRoot.targetMailGroupContactForm &&
+												!isSameId(mailboxGroupRoot.targetMailGroupContactForm, contactFormIdToCheck)
+											) {
+												return Dialog.message("receivingMailboxAlreadyUsed_msg")
+											} else {
+												this._contactForm._ownerGroup = neverNull(
+													logins.getUserController().user.memberships.find((m) => m.groupType === GroupType.Customer),
+												).group
+												this._contactForm.targetGroup = receivingMailbox.group
+												this._contactForm.targetGroupInfo = receivingMailbox._id
+												this._contactForm.participantGroupInfos = this._participantGroupInfoList.map((groupInfo) => groupInfo._id)
+												this._contactForm.path = this._path
+												this.updateLanguageFromFields(this._language())
+												this._contactForm.languages = this._languages
+												let p
 
-														  if (this._createNew) {
-															  this._contactForm._id = contactFormIdFromPath
-															  p = showBuyDialog({
-																  featureType: BookingItemFeatureType.ContactForm,
-																  count: 1,
-																  freeAmount: 0,
-																  reactivate: false
-															  }).then(accepted => {
-																  if (accepted) {
-																	  return locator.entityClient.setup(contactFormsListId, this._contactForm).then(() => {
-																		  this._newContactFormIdReceiver(customElementIdFromPath)
-																	  })
-																  }
-															  })
-														  } else {
-															  p = locator.entityClient.update(this._contactForm).then(() => {
-																  this._newContactFormIdReceiver(customElementIdFromPath)
-															  })
-														  }
+												if (this._createNew) {
+													this._contactForm._id = contactFormIdFromPath
+													p = showBuyDialog({
+														featureType: BookingItemFeatureType.ContactForm,
+														count: 1,
+														freeAmount: 0,
+														reactivate: false,
+													}).then((accepted) => {
+														if (accepted) {
+															return locator.entityClient.setup(contactFormsListId, this._contactForm).then(() => {
+																this._newContactFormIdReceiver(customElementIdFromPath)
+															})
+														}
+													})
+												} else {
+													p = locator.entityClient.update(this._contactForm).then(() => {
+														this._newContactFormIdReceiver(customElementIdFromPath)
+													})
+												}
 
-														  return p.then(() => this._close())
-													  }
-												  })
-											  })
+												return p.then(() => this._close())
+											}
+										})
+									})
 							}
 						})
 					})
@@ -356,81 +348,95 @@ export class ContactFormEditor {
 	}
 
 	_createLanguageFieldAttrs(): TextFieldAttrs {
-		const selectLanguageButton = createDropDownButton(
-			"more_label",
-			() => Icons.More,
-			() => {
-				const buttons: Array<Button> = this._languages
-												   .map(l => {
-													   return new Button(
-														   () => getLanguageName(l.code),
-														   e => this._language(l),
-													   ).setType(ButtonType.Dropdown)
-												   })
-												   .sort((a: Button, b: Button) => a.getLabel().localeCompare(b.getLabel()))
+		const selectLanguageButtonAttrs = attachDropdown({
+			mainButtonAttrs: {
+				title: "more_label",
+				icon: Icons.More,
+				size: ButtonSize.Compact,
+			},
+			childAttrs: () => {
+				const childAttrs: Array<DropdownChildAttrs> = this._languages
+					.map((lang) => ({
+						label: () => getLanguageName(lang.code),
+						click: () => this._language(lang),
+					}))
+					.sort((a, b) => a.label().localeCompare(b.label()))
 
-				buttons.push(
-					new Button("addLanguage_action", e => {
+				childAttrs.push({
+					label: "addLanguage_action",
+					click: () => {
 						const additionalLanguages = languages
-							.filter(t => {
+							.filter((t) => {
 								if (t.code.endsWith("_sie")) {
 									return false
-								} else if (this._languages.find(l => l.code === t.code) == null) {
+								} else if (this._languages.find((l) => l.code === t.code) == null) {
 									return true
 								}
 
 								return false
 							})
-							.map(l => {
+							.map((l) => {
 								return {
 									name: lang.get(l.textId),
 									value: l.code,
 								}
 							})
 							.sort((a, b) => a.name.localeCompare(b.name))
-						const newLanguageCode: Stream<LanguageCode> = stream(additionalLanguages[0].value)
-						const tagName = new DropDownSelector("addLanguage_action", null, additionalLanguages, newLanguageCode, 250)
+
+						let newLanguageCode = additionalLanguages[0].value
 						setTimeout(() => {
-							let addLanguageOkAction = (dialog: Dialog) => {
+							const addLanguageOkAction = (dialog: Dialog) => {
 								const newLang = createContactFormLanguage()
-								newLang.code = newLanguageCode()
-
+								newLang.code = newLanguageCode
 								this._languages.push(newLang)
-
 								this._language(newLang)
-
 								dialog.close()
 							}
 
 							Dialog.showActionDialog({
 								title: lang.get("addLanguage_action"),
 								child: {
-									view: () => m(tagName),
+									view: () =>
+										m(DropDownSelector, {
+											label: "addLanguage_action",
+											items: additionalLanguages,
+											selectedValue: newLanguageCode,
+											selectionChangedHandler: (value: string) => (newLanguageCode = value),
+											dropdownWidth: 250,
+										}),
 								},
 								allowOkWithReturn: true,
 								okAction: addLanguageOkAction,
 							})
 						}, DefaultAnimationTime) // wait till the dropdown is hidden
-					}).setType(ButtonType.Dropdown),
-				)
-				return buttons
-			},
-			250,
-		)
-		const deleteLanguageButton = new Button(
-			"delete_action",
-			() => {
-				remove(this._languages, this._language())
+					},
+				})
 
-				this._language(this._languages[0])
+				return childAttrs
 			},
-			() => Icons.Cancel,
-		)
+			width: 250,
+		})
+
 		return {
 			label: "language_label",
 			value: this._languageDisplayValue,
 			disabled: true,
-			injectionsRight: () => [m(selectLanguageButton), this._languages.length > 1 ? m(deleteLanguageButton) : null],
+			injectionsRight: () =>
+				m(".flex.ml-between-s", [
+					m(IconButton, selectLanguageButtonAttrs),
+					this._languages.length > 1
+						? m(IconButton, {
+								title: "delete_action",
+								click: () => {
+									remove(this._languages, this._language())
+
+									this._language(this._languages[0])
+								},
+								icon: Icons.Cancel,
+								size: ButtonSize.Compact,
+						  })
+						: null,
+				]),
 		}
 	}
 
@@ -438,7 +444,7 @@ export class ContactFormEditor {
 		return {
 			label: "urlPath_label",
 			value: this._path,
-			oninput: value => (this._path = value),
+			oninput: (value) => (this._path = value),
 			helpLabel: () => getContactFormUrl(this._brandingDomain, this._path),
 		}
 	}
@@ -447,108 +453,106 @@ export class ContactFormEditor {
 		return {
 			label: "pageTitle_label",
 			value: this._pageTitle,
-			oninput: value => (this._pageTitle = value),
+			oninput: (value) => (this._pageTitle = value),
 		}
 	}
 
-	_createReceivingMailboxFieldAttrs(): TextFieldAttrs {
-		let userDropdown = createDropDownButton(
-			"account_label",
-			() => BootIcons.Contacts,
-			() => {
-				return this._allUserGroupInfos.map(gi =>
-					new Button(
-						() => getGroupInfoDisplayName(gi),
-						() => {
-							this._participantGroupInfoList.length = 0
+	private renderAssignGroupButton() {
+		return m(
+			IconButton,
+			attachDropdown({
+				mainButtonAttrs: {
+					title: "groups_label",
+					icon: Icons.People,
+					size: ButtonSize.Compact,
+				},
+				childAttrs: () =>
+					this._allSharedMailboxGroupInfos.map((gi) => ({
+						label: () => getGroupInfoDisplayName(gi),
+						click: () => this._receivingMailbox(gi),
+						isSelected: () => this._receivingMailbox() === gi,
+					})),
+
+				width: 250,
+			}),
+		)
+	}
+
+	private renderAssignUserButton() {
+		return m(
+			IconButton,
+			attachDropdown({
+				mainButtonAttrs: {
+					title: "account_label",
+					icon: BootIcons.Contacts,
+					size: ButtonSize.Compact,
+				},
+				childAttrs: () =>
+					this._allUserGroupInfos.map((gi) => ({
+						label: () => getGroupInfoDisplayName(gi),
+						click: () => {
+							clear(this._participantGroupInfoList)
 
 							this._receivingMailbox(gi)
 						},
-					)
-						.setType(ButtonType.Dropdown)
-						.setSelected(() => this._receivingMailbox() === gi),
-				)
-			},
-			250,
+						isSelected: () => this._receivingMailbox() === gi,
+					})),
+				width: 250,
+			}),
 		)
-		let groupsDropdown: Button | null = null
-
-		if (this._allSharedMailboxGroupInfos.length > 0) {
-			groupsDropdown = createDropDownButton(
-				"groups_label",
-				() => Icons.People,
-				() => {
-					return this._allSharedMailboxGroupInfos.map(gi =>
-						new Button(
-							() => getGroupInfoDisplayName(gi),
-							() => this._receivingMailbox(gi),
-						)
-							.setType(ButtonType.Dropdown)
-							.setSelected(() => this._receivingMailbox() === gi),
-					)
-				},
-				250,
-			)
-		}
-
-		return {
-			label: "receivingMailbox_label",
-			value: this._receivingMailboxDisplayValue,
-			disabled: true,
-			injectionsRight: () => (groupsDropdown ? [m(userDropdown), m(groupsDropdown)] : [m(userDropdown)]),
-		}
 	}
 
 	_createParticipantGroupInfosTableAttrs(): TableAttrs {
-		const addParticipantMailGroupButtonAttrs = {
-			label: "addResponsiblePerson_label",
+		const addParticipantMailGroupButtonAttrs: IconButtonAttrs = {
+			title: "addResponsiblePerson_label",
+			icon: Icons.Add,
+			size: ButtonSize.Compact,
 			click: () => {
 				let availableGroupInfos = this._allUserGroupInfos.filter(
-					g => this._participantGroupInfoList.find(alreadyAdded => isSameId(alreadyAdded._id, g._id)) == null,
+					(g) => this._participantGroupInfoList.find((alreadyAdded) => isSameId(alreadyAdded._id, g._id)) == null,
 				)
 
 				if (availableGroupInfos.length > 0) {
-					let dropdown = new DropDownSelector(
-						"group_label",
-						null,
-						availableGroupInfos.map(g => {
-							return {
-								name: getGroupInfoDisplayName(g),
-								value: g,
-							}
-						}),
-						stream(availableGroupInfos[0]),
-						250,
-					)
+					let selectedGroupInfo = availableGroupInfos[0]
 
-					let addResponsiblePersonOkAction = (dialog: Dialog) => {
-						this._participantGroupInfoList.push(dropdown.selectedValue())
-
-						dialog.close()
-					}
+					const dropdownItems = availableGroupInfos.map((g) => {
+						return {
+							name: getGroupInfoDisplayName(g),
+							value: g,
+						}
+					})
 
 					Dialog.showActionDialog({
 						title: lang.get("responsiblePersons_label"),
 						child: {
-							view: () => m(dropdown),
+							view: () =>
+								m(DropDownSelector, {
+									label: "group_label",
+									items: dropdownItems,
+									selectedValue: selectedGroupInfo,
+									selectionChangedHandler: (value: GroupInfo) => (selectedGroupInfo = value),
+									dropdownWidth: 250,
+								}),
 						},
 						allowOkWithReturn: true,
-						okAction: addResponsiblePersonOkAction,
+						okAction: (dialog: Dialog) => {
+							this._participantGroupInfoList.push(selectedGroupInfo)
+							dialog.close()
+						},
 					})
 				}
 			},
-			icon: () => Icons.Add,
 		} as const
 
-		const lines: TableLineAttrs[] = this._participantGroupInfoList.map(groupInfo => {
-			const removeButtonAttrs = {
-				label: "removeGroup_action",
-				click: () => remove(this._participantGroupInfoList, groupInfo),
-				icon: () => Icons.Cancel,
-			} as const
+		const lines: TableLineAttrs[] = this._participantGroupInfoList.map((groupInfo) => {
 			return {
 				cells: [getGroupInfoDisplayName(groupInfo)],
-				actionButtonAttrs: removeButtonAttrs,
+				actionButtonAttrs: {
+					title: "removeGroup_action",
+					click: () => remove(this._participantGroupInfoList, groupInfo),
+					icon: Icons.Cancel,
+					size: ButtonSize.Compact,
+				},
 			}
 		})
 
@@ -574,11 +578,11 @@ export async function show(c: ContactForm | null, createNew: boolean, newContact
 	if (whitelabelDomain) {
 		showProgressDialog(
 			"loading_msg",
-			locator.entityClient.loadAll(GroupInfoTypeRef, customer.userGroups).then(async allUserGroups => {
-				const userGroupInfos = allUserGroups.filter(g => !g.deleted)
+			locator.entityClient.loadAll(GroupInfoTypeRef, customer.userGroups).then(async (allUserGroups) => {
+				const userGroupInfos = allUserGroups.filter((g) => !g.deleted)
 				// get and separate all enabled shared mail groups and shared team groups
 				const groupInfos = await locator.entityClient.loadAll(GroupInfoTypeRef, customer.teamGroups)
-				const sharedMailGroupInfos = groupInfos.filter(g => !g.deleted && g.groupType === GroupType.Mail)
+				const sharedMailGroupInfos = groupInfos.filter((g) => !g.deleted && g.groupType === GroupType.Mail)
 				let editor = new ContactFormEditor(c, createNew, newContactFormIdReceiver, userGroupInfos, sharedMailGroupInfos, whitelabelDomain.domain)
 				editor.dialog.show()
 			}),
@@ -589,5 +593,5 @@ export async function show(c: ContactForm | null, createNew: boolean, newContact
 }
 
 function getLanguageName(code: string): string {
-	return lang.get(neverNull(languages.find(t => t.code === code)).textId)
+	return lang.get(neverNull(languages.find((t) => t.code === code)).textId)
 }

@@ -5,12 +5,12 @@ import fs from "fs"
 const packageJson = JSON.parse(fs.readFileSync("./package.json", "utf8"))
 
 ;[
-	'electron',
+	"electron",
 	"electron-builder",
 	"electron-localshortcut",
 	"electron-packager",
 	"electron-updater",
-	"electron-notarize",
+	"@electron/notarize",
 	"electron-rebuild",
 	"express",
 	"request",
@@ -22,10 +22,7 @@ const packageJson = JSON.parse(fs.readFileSync("./package.json", "utf8"))
 ].forEach((dep) => {
 	delete packageJson.devDependencies[dep]
 })
-
-;[
-	"keytar"
-].forEach((dep) => {
+;["keytar"].forEach((dep) => {
 	delete packageJson.dependencies[dep]
 })
 

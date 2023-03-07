@@ -1,13 +1,14 @@
 import m from "mithril"
-import {Dialog} from "../gui/base/Dialog"
-import {lang, TranslationKey} from "../misc/LanguageViewModel"
-import {isMailAddress} from "../misc/FormatValidator"
-import {showWorkerProgressDialog} from "../gui/dialogs/ProgressDialog"
-import {BookingItemFeatureType} from "../api/common/TutanotaConstants"
-import {contains, delay, ofClass, promiseMap} from "@tutao/tutanota-utils"
-import {PreconditionFailedError} from "../api/common/error/RestError"
-import {showBuyDialog} from "../subscription/BuyDialog"
-import {locator} from "../api/main/MainLocator"
+import { Dialog } from "../gui/base/Dialog"
+import { lang, TranslationKey } from "../misc/LanguageViewModel"
+import { isMailAddress } from "../misc/FormatValidator"
+import { BookingItemFeatureType } from "../api/common/TutanotaConstants"
+import { contains, delay, ofClass, promiseMap } from "@tutao/tutanota-utils"
+import { PreconditionFailedError } from "../api/common/error/RestError"
+import { showBuyDialog } from "../subscription/BuyDialog"
+import { locator } from "../api/main/MainLocator"
+import { showProgressDialog } from "../gui/dialogs/ProgressDialog.js"
+import { OperationId } from "../api/main/OperationProgressTracker.js"
 
 const delayTime = 900
 type UserImportDetails = {
@@ -50,9 +51,9 @@ function csvToUserDetails(csvString: string): UserImportDetails[] | null {
 	let lines = csvString
 		.replace("\r", "")
 		.split("\n")
-		.filter(l => "" !== l.trim())
+		.filter((l) => "" !== l.trim())
 	let error = false
-	let userData = lines.map(a => {
+	let userData = lines.map((a) => {
 		let parts = a.trim().split(";")
 
 		if (parts.length !== 3) {
@@ -99,14 +100,14 @@ function checkAndGetErrorMessage(userData: UserImportDetails[], availableDomains
 				errorMessageArray.push("enterMissingPassword_msg")
 			}
 
-			if (userData.find(otherUser => otherUser.mailAddress === mailAddress && otherUser !== u)) {
+			if (userData.find((otherUser) => otherUser.mailAddress === mailAddress && otherUser !== u)) {
 				errorMessageArray.push("duplicatedMailAddressInUserList_msg")
 			}
 
 			// create error msg from all errors for this user
 			if (errorMessageArray.length > 0) {
 				errorMessage =
-					errorMessageArray.map(e => lang.get(e)).join("\n") +
+					errorMessageArray.map((e) => lang.get(e)).join("\n") +
 					"\n" +
 					lang.get("errorAtLine_msg", {
 						"{index}": index + 1,
@@ -119,64 +120,62 @@ function checkAndGetErrorMessage(userData: UserImportDetails[], availableDomains
 	}
 }
 
-function showBookingDialog(userDetailsArray: UserImportDetails[]): void {
+async function showBookingDialog(userDetailsArray: UserImportDetails[]) {
+	// We send index to worker and then worker calculates the progress based on the index of the user
+	const accepted = await showBuyDialog({ featureType: BookingItemFeatureType.Users, count: userDetailsArray.length, freeAmount: 0, reactivate: false })
+	if (!accepted) {
+		return
+	}
 	let nbrOfCreatedUsers = 0
 	let notAvailableUsers: UserImportDetails[] = []
-	// There's a hacky progress solution where we send index to worker and then worker just simulates calculating progress based on the
-	// index
-	showBuyDialog({featureType: BookingItemFeatureType.Users, count: userDetailsArray.length, freeAmount: 0, reactivate: false}).then(accepted => {
-		if (accepted) {
-			return showWorkerProgressDialog(
-				locator.worker,
-				() =>
-					lang.get("createActionStatus_msg", {
-						"{index}": nbrOfCreatedUsers,
-						"{count}": userDetailsArray.length,
-					}),
-				promiseMap(userDetailsArray, (user, userIndex) => {
-					return createUserIfMailAddressAvailable(user, userIndex, userDetailsArray.length).then(created => {
-						if (created) {
-							nbrOfCreatedUsers++
-							m.redraw()
-						} else {
-							notAvailableUsers.push(user)
-						}
-					})
-				}),
-			)
-				.catch(ofClass(PreconditionFailedError, () => Dialog.message("createUserFailed_msg")))
-				.then(() => {
-					let p = Promise.resolve()
+	const operation = locator.operationProgressTracker.startNewOperation()
+	await showProgressDialog(
+		() =>
+			lang.get("createActionStatus_msg", {
+				"{index}": nbrOfCreatedUsers,
+				"{count}": userDetailsArray.length,
+			}),
+		promiseMap(userDetailsArray, (user, userIndex) => {
+			return createUserIfMailAddressAvailable(user, userIndex, userDetailsArray.length, operation.id).then((created) => {
+				if (created) {
+					nbrOfCreatedUsers++
+					m.redraw()
+				} else {
+					notAvailableUsers.push(user)
+				}
+			})
+		}),
+		operation.progress,
+	)
+		.catch(ofClass(PreconditionFailedError, () => Dialog.message("createUserFailed_msg")))
+		.finally(() => operation.done)
 
-					if (notAvailableUsers.length > 0) {
-						p = Dialog.message(() => lang.get("addressesAlreadyInUse_msg") + " " + notAvailableUsers.map(u => u.mailAddress).join(", "))
-					}
+	if (notAvailableUsers.length > 0) {
+		await Dialog.message(() => lang.get("addressesAlreadyInUse_msg") + " " + notAvailableUsers.map((u) => u.mailAddress).join(", "))
+	}
 
-					p.then(() => {
-						Dialog.message(() =>
-							lang.get("createdUsersCount_msg", {
-								"{1}": nbrOfCreatedUsers,
-							}),
-						)
-					})
-				})
-		}
-	})
+	await Dialog.message(() =>
+		lang.get("createdUsersCount_msg", {
+			"{1}": nbrOfCreatedUsers,
+		}),
+	)
 }
 
 /**
  * @returns True if the user was created, false if the email address is not available.
  */
-function createUserIfMailAddressAvailable(user: UserImportDetails, index: number, overallNumberOfUsers: number): Promise<boolean> {
+function createUserIfMailAddressAvailable(user: UserImportDetails, index: number, overallNumberOfUsers: number, operationId: OperationId): Promise<boolean> {
 	let cleanMailAddress = user.mailAddress.trim().toLowerCase()
-	return locator.mailAddressFacade.isMailAddressAvailable(cleanMailAddress).then(available => {
+	return locator.mailAddressFacade.isMailAddressAvailable(cleanMailAddress).then((available) => {
 		if (available) {
+			// we don't use it currently
+
 			return locator.userManagementFacade
-						  .createUser(user.username ? user.username : "", cleanMailAddress, user.password, index, overallNumberOfUsers)
-						  .then(() => {
-							  // delay is needed so that there are not too many requests from isMailAddressAvailable service if users ar not available (are not created)
-							  return delay(delayTime).then(() => true)
-						  })
+				.createUser(user.username ? user.username : "", cleanMailAddress, user.password, index, overallNumberOfUsers, operationId)
+				.then(() => {
+					// delay is needed so that there are not too many requests from isMailAddressAvailable service if users ar not available (are not created)
+					return delay(delayTime).then(() => true)
+				})
 		} else {
 			return delay(delayTime).then(() => false)
 		}

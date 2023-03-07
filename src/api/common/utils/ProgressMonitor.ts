@@ -1,5 +1,5 @@
-import type {ProgressTracker} from "../../main/ProgressTracker"
-import {assertNotNull} from "@tutao/tutanota-utils"
+import type { ProgressTracker } from "../../main/ProgressTracker"
+import { assertNotNull } from "@tutao/tutanota-utils"
 
 export type ProgressMonitorId = number
 export type ProgressListener = (percentageCompleted: number) => unknown
@@ -19,13 +19,9 @@ export interface IProgressMonitor {
  * when you are done.
  */
 export class ProgressMonitor implements IProgressMonitor {
-	totalWork: number
 	workCompleted: number
-	updater: ProgressListener
 
-	constructor(totalWork: number, updater: ProgressListener) {
-		this.updater = updater
-		this.totalWork = totalWork
+	constructor(readonly totalWork: number, private readonly updater: ProgressListener) {
 		this.workCompleted = 0
 	}
 
@@ -46,79 +42,13 @@ export class ProgressMonitor implements IProgressMonitor {
 }
 
 export class NoopProgressMonitor implements IProgressMonitor {
-	workDone(amount: number) {
-	}
+	workDone(amount: number) {}
 
-	completed() {
-	}
-}
-
-export type WorkDoneCallback = (percentageCompleted: number) => unknown
-export type ProgressStage = {
-	part: number
-	monitor: ProgressMonitor
-}
-
-export class AggregateProgressMonitor {
-	stages: Array<ProgressStage>
-	updater: WorkDoneCallback
-
-	constructor(updater: WorkDoneCallback) {
-		this.stages = []
-		this.updater = updater
-	}
-
-	addStage(part: number, totalWork: number) {
-		this.stages.push({
-			part,
-			monitor: new ProgressMonitor(totalWork, () => this._onUpdate()),
-		})
-	}
-
-	workDone(stageNumber: number, amount: number) {
-		const stage = this.stages[stageNumber]
-
-		if (stage == null) {
-			throw new Error("No stage at index" + stageNumber)
-		}
-
-		stage.monitor.workDone(amount)
-	}
-
-	completedStage(stage: number) {
-		this.stages[stage].monitor.completed()
-	}
-
-	completedAll() {
-		this.stages.forEach(s => (s.monitor.workCompleted = s.monitor.totalWork))
-
-		this._onUpdate()
-	}
-
-	setStageTotalWork(stageNumber: number, totalWork: number) {
-		const stage = this.stages[stageNumber]
-
-		if (stage == null) {
-			throw new Error("No stage at index" + stageNumber)
-		}
-
-		stage.monitor.totalWork = totalWork
-	}
-
-	_onUpdate() {
-		const total = this.stages.reduce((acc, stage) => acc + stage.monitor.percentage() * stage.part, 0)
-		console.log(
-			"monitor percentage: ",
-			this.stages.map(s => s.monitor.percentage()),
-			" total: ",
-			total,
-		)
-		this.updater(total)
-	}
+	completed() {}
 }
 
 export function makeTrackedProgressMonitor(tracker: ProgressTracker, totalWork: number): IProgressMonitor {
 	if (totalWork < 1) return new NoopProgressMonitor()
-	const handle = tracker.registerMonitor(totalWork)
+	const handle = tracker.registerMonitorSync(totalWork)
 	return assertNotNull(tracker.getMonitor(handle))
 }

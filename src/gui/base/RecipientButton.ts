@@ -1,6 +1,6 @@
-import m, {Children, Component, Vnode} from "mithril"
-import {px, size} from "../size"
-import type {clickHandler} from "./GuiUtils"
+import m, { Children, Component, Vnode } from "mithril"
+import { px, size } from "../size"
+import type { clickHandler } from "./GuiUtils"
 
 export type Attrs = {
 	label: string
@@ -9,16 +9,14 @@ export type Attrs = {
 }
 
 export class RecipientButton implements Component<Attrs> {
-	view({attrs}: Vnode<Attrs>): Children {
+	view({ attrs }: Vnode<Attrs>): Children {
 		return m(
-			"button.mr-button.secondary.print",
+			"button.mr-button.secondary.print.small",
 			{
 				style: Object.assign(
 					{
 						"white-space": "normal",
 						"word-break": "break-all",
-						"margin-top": px(size.vpad_small),
-						"margin-bottom": px(size.vpad_small),
 					},
 					attrs.style,
 				),

@@ -1,29 +1,28 @@
-import type {Mail, MailboxProperties} from "../../api/entities/tutanota/TypeRefs.js"
-import type {CheckboxAttrs} from "../../gui/base/CheckboxN"
-import {CheckboxN} from "../../gui/base/CheckboxN"
-import {lang} from "../../misc/LanguageViewModel"
+import type { Mail, MailboxProperties } from "../../api/entities/tutanota/TypeRefs.js"
+import { Checkbox } from "../../gui/base/Checkbox.js"
+import { lang } from "../../misc/LanguageViewModel"
 import m from "mithril"
-import {MailReportType, ReportMovedMailsType} from "../../api/common/TutanotaConstants"
-import {loadMailboxProperties, saveReportMovedMails} from "../../misc/MailboxPropertiesUtils"
-import {ButtonAttrs, ButtonType} from "../../gui/base/ButtonN"
-import {Dialog} from "../../gui/base/Dialog"
-import type {MailModel} from "../model/MailModel"
-import {showSnackBar} from "../../gui/base/SnackBar"
+import { MailReportType, ReportMovedMailsType } from "../../api/common/TutanotaConstants"
+import { ButtonAttrs, ButtonType } from "../../gui/base/Button.js"
+import { Dialog } from "../../gui/base/Dialog"
+import type { MailboxDetail, MailModel } from "../model/MailModel"
+import { showSnackBar } from "../../gui/base/SnackBar"
 
-function confirmMailReportDialog(mailboxProperties: MailboxProperties | null): Promise<boolean> {
-	return new Promise(resolve => {
+function confirmMailReportDialog(mailModel: MailModel, mailboxDetails: MailboxDetail): Promise<boolean> {
+	return new Promise((resolve) => {
 		let shallRememberDecision = false
-		const child = () => m(CheckboxN, {
-			label: () => lang.get("rememberDecision_msg"),
-			checked: shallRememberDecision,
-			onChecked: (v) => shallRememberDecision = v,
-			helpLabel: () => lang.get("changeMailSettings_msg"),
-		})
+		const child = () =>
+			m(Checkbox, {
+				label: () => lang.get("rememberDecision_msg"),
+				checked: shallRememberDecision,
+				onChecked: (v) => (shallRememberDecision = v),
+				helpLabel: () => lang.get("changeMailSettings_msg"),
+			})
 
-		function updateSpamReportSetting(areMailsReported: boolean) {
+		async function updateSpamReportSetting(areMailsReported: boolean) {
 			if (shallRememberDecision) {
 				const reportMovedMails = areMailsReported ? ReportMovedMailsType.AUTOMATICALLY_ONLY_SPAM : ReportMovedMailsType.NEVER
-				saveReportMovedMails(mailboxProperties, reportMovedMails)
+				await mailModel.saveReportMovedMails(mailboxDetails.mailboxGroupRoot, reportMovedMails)
 			}
 
 			resolve(areMailsReported)
@@ -59,18 +58,23 @@ function confirmMailReportDialog(mailboxProperties: MailboxProperties | null): P
  * Check if the user wants to report mails as spam when they are moved to the spam folder and report them.
  * May open a dialog for confirmation and otherwise shows a Snackbar before reporting to the server.
  */
-export async function reportMailsAutomatically(mailReportType: MailReportType, mailModel: MailModel, mails: ReadonlyArray<Mail>): Promise<void> {
+export async function reportMailsAutomatically(
+	mailReportType: MailReportType,
+	mailModel: MailModel,
+	mailboxDetails: MailboxDetail,
+	mails: ReadonlyArray<Mail>,
+): Promise<void> {
 	if (mailReportType !== MailReportType.SPAM) {
 		return
 	}
 
-	const mailboxProperties = await loadMailboxProperties()
+	const mailboxProperties = await mailModel.getMailboxProperties(mailboxDetails.mailboxGroupRoot)
 	let allowUndoing = true // decides if a snackbar is shown to prevent the server request
 
 	let isReportable = false
 
 	if (!mailboxProperties || mailboxProperties.reportMovedMails === ReportMovedMailsType.ALWAYS_ASK) {
-		isReportable = await confirmMailReportDialog(mailboxProperties)
+		isReportable = await confirmMailReportDialog(mailModel, mailboxDetails)
 		allowUndoing = false
 	} else if (mailboxProperties.reportMovedMails === ReportMovedMailsType.AUTOMATICALLY_ONLY_SPAM) {
 		isReportable = true
@@ -92,7 +96,7 @@ export async function reportMailsAutomatically(mailReportType: MailReportType, m
 					if (!undoClicked) {
 						mailModel.reportMails(mailReportType, mails)
 					}
-				}
+				},
 			})
 		} else {
 			mailModel.reportMails(mailReportType, mails)

@@ -1,12 +1,15 @@
 import m from "mithril"
-import {logins} from "../../api/main/LoginController"
-import {locator} from "../../api/main/MainLocator"
-import {getInboxFolder} from "../../mail/model/MailUtils"
+import { logins } from "../../api/main/LoginController"
+import { locator } from "../../api/main/MainLocator"
+import { MailFolderType } from "../../api/common/TutanotaConstants.js"
+import { assertSystemFolderOfType } from "../../api/common/mail/CommonMailUtils.js"
 
-export function openMailbox(userId: Id, mailAddress: string, requestedPath: string | null): void {
+export async function openMailbox(userId: Id, mailAddress: string, requestedPath: string | null) {
 	if (logins.isUserLoggedIn() && logins.getUserController().user._id === userId) {
 		if (!requestedPath) {
-			locator.mailModel.getMailboxDetails().then(mailboxDetails => m.route.set("/mail/" + getInboxFolder(mailboxDetails[0].folders).mails))
+			const [mailboxDetail] = await locator.mailModel.getMailboxDetails()
+			const inbox = assertSystemFolderOfType(mailboxDetail.folders, MailFolderType.INBOX)
+			m.route.set("/mail/" + inbox.mails)
 		} else {
 			m.route.set("/mail" + requestedPath)
 		}

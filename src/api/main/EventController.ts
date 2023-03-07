@@ -1,12 +1,12 @@
-import {remove} from "@tutao/tutanota-utils"
-import type {LoginController} from "./LoginController"
-import type {OperationType} from "../common/TutanotaConstants"
+import { downcast, identity, isSameTypeRefByAttr, noOp, remove, TypeRef } from "@tutao/tutanota-utils"
+import type { LoginController } from "./LoginController"
+import type { OperationType } from "../common/TutanotaConstants"
 import stream from "mithril/stream"
-import {downcast, identity, noOp} from "@tutao/tutanota-utils"
-import {isSameTypeRefByAttr, TypeRef} from "@tutao/tutanota-utils"
-import {assertMainOrNode} from "../common/Env"
-import Stream from "mithril/stream";
-import {EntityUpdate, WebsocketCounterData} from "../entities/sys/TypeRefs"
+import Stream from "mithril/stream"
+import { assertMainOrNode } from "../common/Env"
+import { EntityUpdate, WebsocketCounterData } from "../entities/sys/TypeRefs"
+import { SomeEntity } from "../common/EntityTypes.js"
+import { isSameId } from "../common/utils/EntityUtils.js"
 
 assertMainOrNode()
 export type EntityUpdateData = {
@@ -18,43 +18,56 @@ export type EntityUpdateData = {
 }
 export type EntityEventsListener = (updates: ReadonlyArray<EntityUpdateData>, eventOwnerGroupId: Id) => Promise<any>
 export const isUpdateForTypeRef = <T>(typeRef: TypeRef<T>, update: EntityUpdateData): boolean => isSameTypeRefByAttr(typeRef, update.application, update.type)
+export function isUpdateFor<T extends SomeEntity>(entity: T, update: EntityUpdateData): boolean {
+	const typeRef = entity._type as TypeRef<T>
+	return (
+		isUpdateForTypeRef(typeRef, update) &&
+		(update.instanceListId === "" ? isSameId(update.instanceId, entity._id) : isSameId([update.instanceListId, update.instanceId], entity._id))
+	)
+}
+
+export type ExposedEventController = Pick<EventController, "onEntityUpdateReceived" | "onCountersUpdateReceived">
+
+const TAG = "[EventController]"
 
 export class EventController {
-	_countersStream: Stream<WebsocketCounterData>
-	_entityListeners: Array<EntityEventsListener>
-	_logins: LoginController
+	private countersStream: Stream<WebsocketCounterData> = stream()
+	private entityListeners: Set<EntityEventsListener> = new Set()
 
-	constructor(logins: LoginController) {
-		this._logins = logins
-		this._countersStream = stream()
-		this._entityListeners = []
-	}
+	constructor(private readonly logins: LoginController) {}
 
 	addEntityListener(listener: EntityEventsListener) {
-		this._entityListeners.push(listener)
+		if (this.entityListeners.has(listener)) {
+			console.warn(TAG, "Adding the same listener twice!")
+		} else {
+			this.entityListeners.add(listener)
+		}
 	}
 
 	removeEntityListener(listener: EntityEventsListener) {
-		remove(this._entityListeners, listener)
+		const wasRemoved = this.entityListeners.delete(listener)
+		if (!wasRemoved) {
+			console.warn(TAG, "Could not remove listener, possible leak?", listener)
+		}
 	}
 
-	countersStream(): Stream<WebsocketCounterData> {
+	getCountersStream(): Stream<WebsocketCounterData> {
 		// Create copy so it's never ended
-		return this._countersStream.map(identity)
+		return this.countersStream.map(identity)
 	}
 
-	notificationReceived(entityUpdates: ReadonlyArray<EntityUpdate>, eventOwnerGroupId: Id): Promise<void> {
+	async onEntityUpdateReceived(entityUpdates: ReadonlyArray<EntityUpdate>, eventOwnerGroupId: Id): Promise<void> {
 		let loginsUpdates = Promise.resolve()
 
-		if (this._logins.isUserLoggedIn()) {
+		if (this.logins.isUserLoggedIn()) {
 			// the UserController must be notified first as other event receivers depend on it to be up-to-date
-			loginsUpdates = this._logins.getUserController().entityEventsReceived(entityUpdates as ReadonlyArray<EntityUpdateData>, eventOwnerGroupId)
+			loginsUpdates = this.logins.getUserController().entityEventsReceived(entityUpdates as ReadonlyArray<EntityUpdateData>, eventOwnerGroupId)
 		}
 
 		return loginsUpdates
 			.then(async () => {
 				// sequentially to prevent parallel loading of instances
-				for (const listener of this._entityListeners) {
+				for (const listener of this.entityListeners) {
 					let entityUpdatesData: Array<EntityUpdateData> = downcast(entityUpdates)
 					await listener(entityUpdatesData, eventOwnerGroupId)
 				}
@@ -62,7 +75,7 @@ export class EventController {
 			.then(noOp)
 	}
 
-	counterUpdateReceived(update: WebsocketCounterData) {
-		this._countersStream(update)
+	async onCountersUpdateReceived(update: WebsocketCounterData): Promise<void> {
+		this.countersStream(update)
 	}
 }

@@ -1,17 +1,20 @@
 import Foundation
 import DictionaryCoding
 import CryptoTokenKit
+import Atomics
 
 /// Gateway for communicating with Javascript code in WebView. Can send messages and handle requests.
 class RemoteBridge : NSObject, NativeInterface {
   private let webView: WKWebView
   private let viewController: ViewController
   private let commonSystemFacade: IosCommonSystemFacade
-  private var commonNativeFacade: CommonNativeFacade!
+  var commonNativeFacade: CommonNativeFacade!
   private var mobileFacade: MobileFacade!
   private var globalDispatcher: IosGlobalDispatcher!
+  private var sqlCipherFacade: IosSqlCipherFacade!
 
-  private var requestId = 0
+  private let requestId = ManagedAtomic<Int64>(0)
+  private let requestsLock = NSLock()
   private var requests = [String : CheckedContinuation<String, Error>]()
 
   init(
@@ -25,7 +28,9 @@ class RemoteBridge : NSObject, NativeInterface {
     appDelegate: AppDelegate,
     alarmManager: AlarmManager,
     userPreferences: UserPreferenceFacade,
-    keychainManager: KeychainManager
+    keychainManager: KeychainManager,
+    webAuthnFacade: WebAuthnFacade,
+    sqlCipherFacade: IosSqlCipherFacade
   ) {
     self.webView = webView
     self.viewController = viewController
@@ -33,8 +38,9 @@ class RemoteBridge : NSObject, NativeInterface {
     self.mobileFacade = nil
     self.commonNativeFacade = nil
     self.globalDispatcher = nil
-    
-    
+    self.sqlCipherFacade = sqlCipherFacade
+
+
     super.init()
     self.commonNativeFacade = CommonNativeFacadeSendDispatcher(transport: self)
     let nativePushFacade = IosNativePushFacade(
@@ -51,7 +57,9 @@ class RemoteBridge : NSObject, NativeInterface {
       nativeCredentialsFacade: nativeCredentialsFacade,
       nativeCryptoFacade: nativeCryptoFacade,
       nativePushFacade: nativePushFacade,
-      themeFacade: themeFacade
+      sqlCipherFacade: sqlCipherFacade,
+      themeFacade: themeFacade,
+      webAuthnFacade: webAuthnFacade
     )
     self.mobileFacade = MobileFacadeSendDispatcher(transport: self)
     self.webView.configuration.userContentController.add(self, name: "nativeApp")
@@ -59,12 +67,13 @@ class RemoteBridge : NSObject, NativeInterface {
 
   /** Part of the NativeInterface. Sends request to the web part. Should not be used directly but through the send dispatchers. */
   func sendRequest(requestType: String, args: [String]) async throws -> String {
-    self.requestId = self.requestId + 1
-    let requestId = "app\(self.requestId)"
+    let newRequestId = self.requestId.wrappingIncrementThenLoad(ordering: .sequentiallyConsistent)
+    let requestId = "app\(newRequestId)"
     await self.commonSystemFacade.awaitForInit()
-    
     return try await withCheckedThrowingContinuation { continuation in
-      self.requests[requestId] = continuation
+      self.requestsLock.withLock {
+        self.requests[requestId] = continuation
+      }
       let parts: [String] = ["request", requestId, requestType] + args
       self.postMessage(encodedMessage: parts.joined(separator: "\n"))
     }
@@ -111,9 +120,10 @@ class RemoteBridge : NSObject, NativeInterface {
   }
 
   private func handleResponse(id: String, value: String) {
-    if let request = self.requests[id] {
-      self.requests.removeValue(forKey: id)
+    if let request: CheckedContinuation = getAndRemoveRequest(id: id) {
       request.resume(returning: value)
+    } else {
+      TUTSLog("got a response for nonexistent request.")
     }
   }
 
@@ -130,12 +140,41 @@ class RemoteBridge : NSObject, NativeInterface {
 
   private func handleRequest(method: String, args encodedArgs: String) async throws -> String {
     assert(method == "ipc", "invalid remote request method \(method)")
-      let ipcArgs = encodedArgs.split(separator: "\n").map { String($0) }
-      let facade = try! JSONDecoder().decode(String.self, from: ipcArgs[0].data(using: .utf8)!)
-      let method = try! JSONDecoder().decode(String.self, from: ipcArgs[1].data(using: .utf8)!)
-      return try await self.globalDispatcher.dispatch(facadeName: facade, methodName: method, args: Array(ipcArgs[2..<ipcArgs.endIndex]))
+    let ipcArgs = encodedArgs.split(separator: "\n").map { String($0) }
+    let facade = try! JSONDecoder().decode(String.self, from: ipcArgs[0].data(using: .utf8)!)
+    let method = try! JSONDecoder().decode(String.self, from: ipcArgs[1].data(using: .utf8)!)
+    return try await self.globalDispatcher.dispatch(facadeName: facade, methodName: method, args: Array(ipcArgs[2..<ipcArgs.endIndex]))
+  }
+
+  private func handleRequestError(id: String, error: String) -> Void {
+    TUTSLog("got error for req \(id): \(error)")
+
+    if let request: CheckedContinuation = getAndRemoveRequest(id: id) {
+      request.resume(throwing: TUTErrorFactory.createError(error))
+    }
+  }
+
+  private func handleErrorResponse(id: String, type: String, value: String) -> Void {
+    TUTSLog("Request failed: \(type) \(id)")
+    if let request: CheckedContinuation = getAndRemoveRequest(id: id) {
+      request.resume(throwing: TUTErrorFactory.createError(value))
+    } else {
+      TUTSLog("got an error response for nonexistent request.")
+    }
+  }
+
+  private func getAndRemoveRequest(id: String) -> CheckedContinuation<String, any Error>? {
+    return self.requestsLock.withLock {
+      if let request = self.requests[id] {
+        self.requests.removeValue(forKey: id)
+        return request
+      } else {
+        return nil
+      }
+    }
   }
 }
+
 
 extension RemoteBridge : WKScriptMessageHandler {
   func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -152,11 +191,10 @@ extension RemoteBridge : WKScriptMessageHandler {
       let value = parts[2]
       self.handleResponse(id: requestId, value: String(value))
     case "errorResponse":
-      TUTSLog("Request failed: \(type) \(requestId)")
-      // We don't "reject" requests right now
-      self.requests.removeValue(forKey: requestId)
+      self.handleErrorResponse(id: requestId, type: String(type), value: String(parts[2]))
     case "requestError":
-      fatalError(body)
+      let errorJSON = String(parts[2])
+      self.handleRequestError(id: requestId, error: errorJSON)
     case "request":
       // requestType
       // arguments

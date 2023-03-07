@@ -1,58 +1,57 @@
 import m from "mithril"
 import stream from "mithril/stream"
-import {Dialog} from "../gui/base/Dialog"
-import {lang} from "../misc/LanguageViewModel"
-import {getByAbbreviation} from "../api/common/CountryList"
-import {DropDownSelector} from "../gui/base/DropDownSelector"
-import {PaymentMethodInput} from "./PaymentMethodInput"
-import {updatePaymentData} from "./InvoiceAndPaymentDataPage"
-import {px} from "../gui/size"
-import {formatNameAndAddress} from "../misc/Formatter"
-import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
-import {getClientType, PaymentMethodType} from "../api/common/TutanotaConstants"
-import {downcast, LazyLoaded, neverNull} from "@tutao/tutanota-utils"
-import type {AccountingInfo, Customer} from "../api/entities/sys/TypeRefs.js"
-import {createPaymentDataServiceGetData} from "../api/entities/sys/TypeRefs.js"
-import {locator} from "../api/main/MainLocator"
-import {PaymentDataService} from "../api/entities/sys/Services"
+import { Dialog } from "../gui/base/Dialog"
+import { lang } from "../misc/LanguageViewModel"
+import { getByAbbreviation } from "../api/common/CountryList"
+import { PaymentMethodInput } from "./PaymentMethodInput"
+import { updatePaymentData } from "./InvoiceAndPaymentDataPage"
+import { px } from "../gui/size"
+import { formatNameAndAddress } from "../misc/Formatter"
+import { showProgressDialog } from "../gui/dialogs/ProgressDialog"
+import { PaymentMethodType } from "../api/common/TutanotaConstants"
+import { assertNotNull, neverNull } from "@tutao/tutanota-utils"
+import type { AccountingInfo, Customer } from "../api/entities/sys/TypeRefs.js"
+import { DropDownSelector } from "../gui/base/DropDownSelector.js"
+import { asPaymentInterval } from "./PriceUtils.js"
+import { getLazyLoadedPayPalUrl } from "./SubscriptionUtils.js"
+import { locator } from "../api/main/MainLocator.js"
 
 /**
  * @returns {boolean} true if the payment data update was successful
  */
 export function show(customer: Customer, accountingInfo: AccountingInfo, price: number): Promise<boolean> {
-	let payPalRequestUrl = getLazyLoadedPayPalUrl()
-	let invoiceData = {
+	const payPalRequestUrl = getLazyLoadedPayPalUrl()
+	const invoiceData = {
 		invoiceAddress: formatNameAndAddress(accountingInfo.invoiceName, accountingInfo.invoiceAddress),
 		country: accountingInfo.invoiceCountry ? getByAbbreviation(accountingInfo.invoiceCountry) : null,
 		vatNumber: accountingInfo.invoiceVatIdNo,
 	}
 	const subscriptionOptions = {
-		businessUse: stream(neverNull(customer.businessUse)),
-		paymentInterval: stream(Number(accountingInfo.paymentInterval)),
+		businessUse: stream(assertNotNull(customer.businessUse)),
+		paymentInterval: stream(asPaymentInterval(accountingInfo.paymentInterval)),
 	}
-	const paymentMethodInput = new PaymentMethodInput(subscriptionOptions, stream(invoiceData.country), neverNull(accountingInfo), payPalRequestUrl)
+	const paymentMethodInput = new PaymentMethodInput(
+		subscriptionOptions,
+		stream(invoiceData.country),
+		neverNull(accountingInfo),
+		payPalRequestUrl,
+		locator.usageTestController.getObsoleteTest(),
+	)
 	const availablePaymentMethods = paymentMethodInput.getVisiblePaymentMethods()
-	const paymentMethod = downcast<PaymentMethodType>(accountingInfo.paymentMethod)
-	const selectedPaymentMethod = stream(paymentMethod)
-	paymentMethodInput.updatePaymentMethod(paymentMethod)
-	const paymentMethodSelector = new DropDownSelector("paymentMethod_label", null, availablePaymentMethods, selectedPaymentMethod, 250)
-	paymentMethodSelector.setSelectionChangedHandler(value => {
-		if (value === PaymentMethodType.Paypal && !payPalRequestUrl.isLoaded()) {
-			showProgressDialog(
-				"pleaseWait_msg",
-				payPalRequestUrl.getAsync().then(() => {
-					selectedPaymentMethod(value)
-					paymentMethodInput.updatePaymentMethod(value)
-				}),
-			)
-		} else {
-			selectedPaymentMethod(value)
-			paymentMethodInput.updatePaymentMethod(value)
-		}
-	})
-	return new Promise(resolve => {
-		const didLinkPaypal = () => selectedPaymentMethod() === PaymentMethodType.Paypal && paymentMethodInput.isPaypalAssigned()
 
+	let selectedPaymentMethod = accountingInfo.paymentMethod as PaymentMethodType
+	paymentMethodInput.updatePaymentMethod(selectedPaymentMethod)
+	const selectedPaymentMethodChangedHandler = async (value: PaymentMethodType) => {
+		if (value === PaymentMethodType.Paypal && !payPalRequestUrl.isLoaded()) {
+			await showProgressDialog("pleaseWait_msg", payPalRequestUrl.getAsync())
+		}
+		selectedPaymentMethod = value
+		paymentMethodInput.updatePaymentMethod(value)
+	}
+
+	const didLinkPaypal = () => selectedPaymentMethod === PaymentMethodType.Paypal && paymentMethodInput.isPaypalAssigned()
+
+	return new Promise((resolve) => {
 		const confirmAction = () => {
 			let error = paymentMethodInput.validatePaymentData()
 
@@ -97,7 +96,16 @@ export function show(customer: Customer, accountingInfo: AccountingInfo, price: 
 								minHeight: px(310),
 							},
 						},
-						[m(paymentMethodSelector), m(paymentMethodInput)],
+						[
+							m(DropDownSelector, {
+								label: "paymentMethod_label",
+								items: availablePaymentMethods,
+								selectedValue: selectedPaymentMethod,
+								selectionChangedHandler: selectedPaymentMethodChangedHandler,
+								dropdownWidth: 250,
+							}),
+							m(paymentMethodInput),
+						],
 					),
 			},
 			okAction: confirmAction,
@@ -105,17 +113,6 @@ export function show(customer: Customer, accountingInfo: AccountingInfo, price: 
 			allowCancel: () => !didLinkPaypal(),
 			okActionTextId: () => (didLinkPaypal() ? "close_alt" : "save_action"),
 			cancelAction: () => resolve(false),
-		})
-	})
-}
-
-export function getLazyLoadedPayPalUrl(): LazyLoaded<string> {
-	return new LazyLoaded(() => {
-		const clientType = getClientType()
-		return locator.serviceExecutor.get(PaymentDataService, createPaymentDataServiceGetData({
-			clientType,
-		})).then(result => {
-			return result.loginUrl
 		})
 	})
 }

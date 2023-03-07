@@ -1,77 +1,88 @@
-import m, {Children, Component} from "mithril"
-import {Cat, log} from "../../misc/Log"
-import {px, size} from "../size"
-import {client} from "../../misc/ClientDetector"
-import {Keys, OperationType, TabIndex} from "../../api/common/TutanotaConstants"
-import type {DeferredObject, MaybeLazy} from "@tutao/tutanota-utils"
-import {addAll, arrayEquals, assertNotNull, debounceStart, defer, last, lastThrow, mapLazily, neverNull, remove} from "@tutao/tutanota-utils"
+import m, { Children, Component } from "mithril"
+import { Cat, log } from "../../misc/Log"
+import { px, size } from "../size"
+import { client } from "../../misc/ClientDetector"
+import { Keys, OperationType, TabIndex } from "../../api/common/TutanotaConstants"
+import type { DeferredObject, MaybeLazy } from "@tutao/tutanota-utils"
+import {
+	addAll,
+	arrayEquals,
+	assertNotNull,
+	clear as clearArr,
+	debounceStart,
+	defer,
+	last,
+	lastThrow,
+	mapLazily,
+	neverNull,
+	remove,
+} from "@tutao/tutanota-utils"
 import ColumnEmptyMessageBox from "./ColumnEmptyMessageBox"
-import {progressIcon} from "./Icon"
-import {animations, DefaultAnimationTime, opacity, transform, TransformEnum} from "../animation/Animations"
-import {ease} from "../animation/Easing"
-import {windowFacade} from "../../misc/WindowFacade"
-import {BadRequestError} from "../../api/common/error/RestError"
-import {SwipeHandler} from "./SwipeHandler"
-import {applySafeAreaInsetMarginLR} from "../HtmlUtils"
-import {theme} from "../theme"
-import type {Shortcut} from "../../misc/KeyManager"
-import {isKeyPressed, keyManager} from "../../misc/KeyManager"
-import type {ListElement} from "../../api/common/utils/EntityUtils"
-import {firstBiggerThanSecond, GENERATED_MAX_ID, getElementId, getLetId} from "../../api/common/utils/EntityUtils"
-import {assertMainOrNode} from "../../api/common/Env"
-import {ButtonN, ButtonType} from "./ButtonN"
-import {LoadingState, LoadingStateTracker} from "../../offline/LoadingState"
-import {lang} from "../../misc/LanguageViewModel"
-import {PosRect} from "./Dropdown"
-import {isOfflineError} from "../../api/common/utils/ErrorCheckUtils.js"
+import { progressIcon } from "./Icon"
+import { animations, DefaultAnimationTime, opacity, transform, TransformEnum } from "../animation/Animations"
+import { ease } from "../animation/Easing"
+import { windowFacade } from "../../misc/WindowFacade"
+import { BadRequestError } from "../../api/common/error/RestError"
+import { SwipeHandler } from "./SwipeHandler"
+import { applySafeAreaInsetMarginLR } from "../HtmlUtils"
+import { theme } from "../theme"
+import type { Shortcut } from "../../misc/KeyManager"
+import { isKeyPressed, keyManager } from "../../misc/KeyManager"
+import type { ListElement } from "../../api/common/utils/EntityUtils"
+import { firstBiggerThanSecond, GENERATED_MAX_ID, getElementId, getLetId } from "../../api/common/utils/EntityUtils"
+import { assertMainOrNode } from "../../api/common/Env"
+import { Button, ButtonType } from "./Button.js"
+import { LoadingState, LoadingStateTracker } from "../../offline/LoadingState"
+import { isOfflineError } from "../../api/common/utils/ErrorCheckUtils.js"
+import { PosRect } from "./Dropdown.js"
 
 assertMainOrNode()
 export const ScrollBuffer = 15 // virtual elements that are used as scroll buffer in both directions
 
 export const PageSize = 100
-export type SwipeConfiguration<T> = {
+export type SwipeConfiguration<ElementType> = {
 	renderLeftSpacer(): Children
 	renderRightSpacer(): Children
 	// result value indicates whether to commit to the result of the swipe
 	// true indicates committing, false means to not commit and to cancel
-	swipeLeft(listElement: T): Promise<boolean>
-	swipeRight(listElement: T): Promise<boolean>
+	swipeLeft(listElement: ElementType): Promise<boolean>
+	swipeRight(listElement: ElementType): Promise<boolean>
 	enabled: boolean
 }
 
 /**
  * 1:1 mapping to DOM elements. Displays a single list entry.
  */
-export interface VirtualRow<T> {
+export interface VirtualRow<ElementType> {
 	render(): Children
 
-	update(listEntry: T, selected: boolean): void
+	update(listEntry: ElementType, selected: boolean): void
 
-	entity: T | null
+	entity: ElementType | null
 	top: number
 	domElement: HTMLElement | null
 }
 
-export interface ListFetchResult<T> {
-	items: Array<T>
+export interface ListFetchResult<ElementType> {
+	items: Array<ElementType>
 	/** Complete means that we loaded the whole list and additional requests will not yield any results. */
 	complete: boolean
 }
 
-export interface ListConfig<T, R extends VirtualRow<T>> {
+export interface ListConfig<ElementType, RowType extends VirtualRow<ElementType>> {
 	rowHeight: number
 
 	/**
 	 * Get the given number of entities starting after the given id. May return more elements than requested, e.g. if all elements are available on first fetch.
 	 */
-	fetch(startId: Id, count: number): Promise<ListFetchResult<T>>
+	fetch(startId: Id, count: number): Promise<ListFetchResult<ElementType>>
 
 	/**
 	 * Returns null if the given element could not be loaded
 	 */
-	loadSingle(elementId: Id): Promise<T | null>
+	loadSingle(elementId: Id): Promise<ElementType | null>
 
-	sortCompare(entity1: T, entity2: T): number
+	sortCompare(entity1: ElementType, entity2: ElementType): number
 
 	/**
 	 * Called whenever the user clicks on any element in the list or if the selection changes by any other means.
@@ -92,7 +103,7 @@ export interface ListConfig<T, R extends VirtualRow<T>> {
 	 * @param selectionChanged: True if the selection changed, false if it did not change. There may be no change, e.g. when the user clicks an element that is already selected.
 	 * @param multiSelectOperation: True if the user executes a multi select (shift or ctrl key pressed) or if an element is removed from the selection because it was removed from the list.
 	 */
-	elementSelected(entities: Array<T>, elementClicked: boolean, selectionChanged: boolean, multiSelectOperation: boolean): void
+	elementSelected(entities: Array<ElementType>, elementClicked: boolean, selectionChanged: boolean, multiSelectOperation: boolean): void
 
 	/**
 	 * add custom drag behaviour to the list.
@@ -100,16 +111,17 @@ export interface ListConfig<T, R extends VirtualRow<T>> {
 	 * @param vR: the row the event was started on
 	 * @param selectedElements the currently selected elements
 	 */
-	dragStart?: (ev: DragEvent, vR: VirtualRow<T>, selectedElements: ReadonlyArray<T>) => void
+	dragStart?: (ev: DragEvent, vR: VirtualRow<ElementType>, selectedElements: ReadonlyArray<ElementType>) => void
 
-	createVirtualRow(): R
+	createVirtualRow(): RowType
 
 	className: string
-	swipe: SwipeConfiguration<T>
+	swipe: SwipeConfiguration<ElementType>
 
 	/**
 	 * True if the user may select multiple or 0 elements.
-	 * Keep in mind that even if multiSelectionAllowed == false, elementSelected() will be called with multiSelectOperation = true if an element is deleted and removed from the selection.
+	 * Keep in mind that even if multiSelectionAllowed == false, elementSelected() will be
+	 * called with multiSelectOperation = true if an element is deleted and removed from the selection.
 	 */
 	multiSelectionAllowed: boolean
 	emptyMessage: string
@@ -117,34 +129,36 @@ export interface ListConfig<T, R extends VirtualRow<T>> {
 
 /**
  * A list that renders only a few dom elements (virtual list) to represent the items of even very large lists.
- *
- * Generics:
- * * T is the type of the entity
- * * R is the type of the Row
  */
-export class List<T extends ListElement, R extends VirtualRow<T>> implements Component {
+export class List<ElementType extends ListElement, RowType extends VirtualRow<ElementType>> implements Component {
 	/** Whether we have rendered DOM elements for the list and updated them at least once. */
 	private ready: boolean = false
 
 	loading: Promise<void> = Promise.resolve()
 	currentPosition: number = 0
 	private lastPosition: number = 0
-	private lastUpdateTime!: number
+	private lastScrollUpdateTime!: number
 	width = 0
 	/**
 	 * Set when scrolling list so fast that it doesn't make sense to try to updateDomElements elements.
 	 * If set, paint operations are executed later, when the scroll speed becomes slower.
 	 */
-	updateLater: boolean = false
+	scrollUpdateLater: boolean = false
 	/**
 	 * The id of the timeout to updateDomElements if updateLater == true.
 	 */
 	private repositionTimeout: TimeoutID | null
 	/** sorted with _config.sortCompare */
-	readonly loadedEntities: T[] = []
+	private readonly loadedEntities: ElementType[] = []
+	/**
+	 * this will be set to a new object every time the list changes.
+	 * if you want to know if the list changed between two points in time,
+	 * get a reference to this and later compare to the current value.
+	 * */
+	private lastElementChangeMarker: {} = {} as const
 
 	/** Displays a part of the page, VirtualRows map 1:1 to DOM-Elements */
-	virtualList: R[] = []
+	virtualList: RowType[] = []
 
 	private domListContainer!: HTMLElement
 	private domList!: HTMLElement
@@ -154,14 +168,14 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 
 	private visibleElementsHeight: number = 0
 	private bufferHeight: number
-	private swipeHandler: ListSwipeHandler<T, R> | null = null
+	private swipeHandler: ListSwipeHandler<ElementType, RowType> | null = null
 	domSwipeSpacerLeft!: HTMLElement
 	domSwipeSpacerRight!: HTMLElement
 
 	/** The selected entities must be sorted the same way the loaded entities are sorted */
-	private selectedEntities: T[] = []
+	private selectedEntities: ElementType[] = []
 	/** We remember the last selected entities and only invoke callback from config if there was an actual difference. */
-	private lastSelectedEntitiesForCallback: T[] = []
+	private lastSelectedEntitiesForCallback: ElementType[] = []
 	/** true if the last key multi selection action was selecting the previous entity, false if it was selecting the next entity */
 	private lastMultiSelectWasKeyUp = false
 	/**
@@ -176,9 +190,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	private loadingIndicatorDom = defer<HTMLElement>()
 	private loadingIndicatorChildDom = defer<HTMLElement>()
 
-	constructor(
-		readonly config: ListConfig<T, R>
-	) {
+	constructor(readonly config: ListConfig<ElementType, RowType>) {
 		this.bufferHeight = this.config.rowHeight * ScrollBuffer
 		this.oncreate = this.oncreate.bind(this)
 		this.onremove = this.onremove.bind(this)
@@ -188,7 +200,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	}
 
 	oncreate() {
-		this.loadingState.setStateChangedListener(state => this.handleLoadingStateChanged(state))
+		this.loadingState.setStateChangedListener((state) => this.handleLoadingStateChanged(state))
 		keyManager.registerShortcuts(listSelectionKeyboardShortcuts(this))
 		windowFacade.addResizeListener(this.windowResizeListener)
 	}
@@ -196,6 +208,8 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	onremove() {
 		this.loadingState.clearStateChangedListener()
 		keyManager.unregisterShortcuts(listSelectionKeyboardShortcuts(this))
+		// List is created by us manually because we want to keep it around for entities and the loading state but if the views are rearranged
+		// (e.g. if we switch the app layout between 2 and 3 columns) then we need to reset anything DOM-related as we will create it again
 		this.reset()
 	}
 
@@ -210,16 +224,15 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	view(): Children {
 		return m(".list-container.fill-absolute.scroll.list-bg.nofocus.overflow-x-hidden", {
 			tabindex: TabIndex.Programmatic,
-			oncreate: vnode => {
+			oncreate: (vnode) => {
 				this.domListContainer = vnode.dom as HTMLElement
 				this.width = this.domListContainer.clientWidth
 
 				this._createVirtualRows()
 
 				// On mobile, we want to wait for the side menu animation to end before doing any heavy things to keep the animation smooth
-				const execute = (callback: () => void) => client.isMobileDevice()
-					? window.setTimeout(callback, DefaultAnimationTime)
-					: window.requestAnimationFrame(callback)
+				const execute = (callback: () => void) =>
+					client.isMobileDevice() ? window.setTimeout(callback, DefaultAnimationTime) : window.requestAnimationFrame(callback)
 
 				execute(() => {
 					// We synchronously render into the dom element so that we have full control over when it is done.
@@ -233,8 +246,10 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 
 	private renderList(): Children {
 		return [
-			m(".swipe-spacer.flex.items-center.justify-end.pr-l.blue", {
-					oncreate: vnode => (this.domSwipeSpacerLeft = vnode.dom as HTMLElement),
+			m(
+				".swipe-spacer.flex.items-center.justify-end.pr-l.blue",
+				{
+					oncreate: (vnode) => (this.domSwipeSpacerLeft = vnode.dom as HTMLElement),
 					tabindex: TabIndex.Programmatic,
 					"aria-hidden": "true",
 					style: {
@@ -247,8 +262,10 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				},
 				this.config.swipe.renderLeftSpacer(),
 			),
-			m(".swipe-spacer.flex.items-center.pl-l.red", {
-					oncreate: vnode => (this.domSwipeSpacerRight = vnode.dom as HTMLElement),
+			m(
+				".swipe-spacer.flex.items-center.pl-l.red",
+				{
+					oncreate: (vnode) => (this.domSwipeSpacerRight = vnode.dom as HTMLElement),
 					tabindex: TabIndex.Programmatic,
 					"aria-hidden": "true",
 					style: {
@@ -261,22 +278,21 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				},
 				this.config.swipe.renderRightSpacer(),
 			),
-			m("ul.list.list-alternate-background.fill-absolute.click", {
-					oncreate: vnode => this._setDomList(vnode.dom as HTMLElement),
+			m(
+				"ul.list.list-alternate-background.fill-absolute.click",
+				{
+					oncreate: (vnode) => this._setDomList(vnode.dom as HTMLElement),
 					style: {
 						height: this.calculateListHeight(),
 					},
 					className: this.config.className,
 				},
-				[
-					this.virtualList.map(virtualRow => this.renderVirtualRow(virtualRow)),
-					this.renderStatusRow()
-				],
+				[this.virtualList.map((virtualRow) => this.renderVirtualRow(virtualRow)), this.renderStatusRow()],
 			), // We cannot render it conditionally because it's rendered once, we must manipulate DOM afterwards
 			m(ColumnEmptyMessageBox, {
 				message: () => this.config.emptyMessage,
 				color: theme.list_message_bg,
-				oncreate: vnode => {
+				oncreate: (vnode) => {
 					this.messageBoxDom = vnode.dom as HTMLElement
 
 					this.updateMessageBoxVisibility()
@@ -285,11 +301,13 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		]
 	}
 
-	private renderVirtualRow(virtualRow: R): Children {
-		return m("li.list-row.pl.pr-l", {
+	private renderVirtualRow(virtualRow: RowType): Children {
+		return m(
+			"li.list-row.pl.pr-l",
+			{
 				draggable: this.config.dragStart ? "true" : undefined,
 				tabindex: TabIndex.Default,
-				oncreate: vnode => this.initRow(virtualRow, vnode.dom as HTMLElement),
+				oncreate: (vnode) => this.initRow(virtualRow, vnode.dom as HTMLElement),
 				style: {
 					transform: `translateY(-${this.config.rowHeight}px)`,
 					paddingTop: px(15),
@@ -307,27 +325,31 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 
 	private renderStatusRow(): Children {
 		// odd-row is toggled manually on the dom element when the number of elements changes
-		return m("li.list-row.odd-row", {
+		return m(
+			"li.list-row.odd-row",
+			{
 				oncreate: (vnode) => {
 					this.loadingIndicatorDom.resolve(vnode.dom as HTMLElement)
 				},
 				style: {
 					bottom: 0,
 					height: px(size.list_row_height),
-					display: this.loadingState.isIdle() ? "none" : ""
-				}
-			}, m("",
+					display: this.loadingState.isIdle() ? "none" : "",
+				},
+			},
+			m(
+				"",
 				{
-					oncreate: vnode => {
+					oncreate: (vnode) => {
 						this.loadingIndicatorChildDom.resolve(vnode.dom as HTMLElement)
-					}
+					},
 				},
 				this.loadingState.isLoading()
 					? this.renderLoadingIndicator()
 					: this.loadingState.isConnectionLost()
-						? this.renderConnectionLostIndicator()
-						: null
-			)
+					? this.renderConnectionLostIndicator()
+					: null,
+			),
 		)
 	}
 
@@ -336,7 +358,11 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 			this.domListContainer.removeEventListener("scroll", this.scrollListener)
 		}
 
+		// it's important to reset all the DOM things because we might be re-rendering soon with the new containers
 		this.domDeferred = defer()
+		this.loadingIndicatorDom = defer()
+		this.loadingIndicatorChildDom = defer()
+
 		this.ready = false
 		this.virtualList = []
 		windowFacade.removeResizeListener(this.windowResizeListener)
@@ -372,7 +398,8 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	}
 
 	clear() {
-		this.loadedEntities.length = 0
+		clearArr(this.loadedEntities)
+		this.lastElementChangeMarker = {}
 		this.loadedCompletely = false
 
 		if (this.domList) {
@@ -411,38 +438,34 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				style: {
 					height: px(size.list_row_height),
 					width: "100%",
-					position: "absolute"
-				}
+					position: "absolute",
+				},
 			},
 			progressIcon(),
 		)
 	}
 
 	private renderConnectionLostIndicator(): Children {
-		return m(".plr-l.flex-space-around.items-center",
+		return m(
+			".plr-l.flex-center.items-center",
 			{
 				style: {
 					height: px(size.list_row_height),
-					width: "100%",
-					position: "absolute"
-				}
+				},
 			},
-			[
-				m("", lang.get("connectionLost_msg")),
-				m(ButtonN, {
-					label: "retry_action",
-					type: ButtonType.Primary,
-					click: () => this.retryLoading()
-				})
-			]
+			m(Button, {
+				label: "loadMore_action",
+				type: ButtonType.Primary,
+				click: () => this.retryLoading(),
+			}),
 		)
 	}
 
-	private initRow(virtualRow: R, domElement: HTMLElement) {
+	private initRow(virtualRow: RowType, domElement: HTMLElement) {
 		let touchStartTime: number | null = null
 		virtualRow.domElement = domElement
 
-		domElement.onclick = e => {
+		domElement.onclick = (e) => {
 			if (!touchStartTime || Date.now() - touchStartTime < 400) {
 				virtualRow.entity && this.elementClicked(virtualRow.entity, e)
 			}
@@ -455,7 +478,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 
 		let timeoutId: TimeoutID | null
-		let touchStartCoords: | {x: number, y: number} | null = null
+		let touchStartCoords: { x: number; y: number } | null = null
 		domElement.addEventListener("touchstart", (e: TouchEvent) => {
 			touchStartTime = Date.now()
 
@@ -466,7 +489,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 
 					// check that virtualRow.entity exists because we had error feedbacks about it
 					if (virtualRow.entity && !this.isEntitySelected(virtualRow.entity._id[1])) {
-						this.selectedEntities.length = 0
+						clearArr(this.selectedEntities)
 
 						this.elementClicked(virtualRow.entity, e)
 					} else {
@@ -502,8 +525,8 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		applySafeAreaInsetMarginLR(domElement)
 	}
 
-	getEntity(id: Id): T | null {
-		return this.loadedEntities.find(entity => getLetId(entity)[1] === id) ?? null
+	getEntity(id: Id): ElementType | null {
+		return this.loadedEntities.find((entity) => getLetId(entity)[1] === id) ?? null
 	}
 
 	/**
@@ -512,7 +535,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	 * If shift is pressed, all items beginning from the nearest selected item to the clicked item are additionally selected.
 	 * If neither ctrl nor shift are pressed only the clicked item is selected.
 	 */
-	private elementClicked(clickedEntity: T, event: TouchEvent | MouseEvent | KeyboardEvent) {
+	private elementClicked(clickedEntity: ElementType, event: TouchEvent | MouseEvent | KeyboardEvent) {
 		let selectionChanged = false
 		let multiSelect = false
 
@@ -552,7 +575,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 					}
 				}
 
-				let itemsToAddToSelection: T[] = []
+				let itemsToAddToSelection: ElementType[] = []
 
 				if (neverNull(nearestSelectedIndex) < clickedItemIndex) {
 					for (let i = neverNull(nearestSelectedIndex) + 1; i <= clickedItemIndex; i++) {
@@ -600,7 +623,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 	}
 
-	private entitySelected(entity: T, addToSelection: boolean) {
+	private entitySelected(entity: ElementType, addToSelection: boolean) {
 		if (addToSelection) {
 			if (this.selectedEntities.indexOf(entity) === -1) {
 				this.selectedEntities.push(entity)
@@ -629,23 +652,21 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 	}
 
-	private elementSelected = debounceStart(200,
-		(entities: T[], elementClicked: boolean, multiSelectOperation: boolean) => {
-			const selectionChanged =
-				this.lastSelectedEntitiesForCallback.length !== entities.length || this.lastSelectedEntitiesForCallback.some((el, i) => entities[i] !== el)
+	private elementSelected = debounceStart(200, (entities: ElementType[], elementClicked: boolean, multiSelectOperation: boolean) => {
+		const selectionChanged =
+			this.lastSelectedEntitiesForCallback.length !== entities.length || this.lastSelectedEntitiesForCallback.some((el, i) => entities[i] !== el)
 
-			this.config.elementSelected(entities, elementClicked, selectionChanged, multiSelectOperation)
+		this.config.elementSelected(entities, elementClicked, selectionChanged, multiSelectOperation)
 
-			this.lastSelectedEntitiesForCallback = entities
-		},
-	)
+		this.lastSelectedEntitiesForCallback = entities
+	})
 
 	selectNext(shiftPressed: boolean) {
 		if (!this.config.multiSelectionAllowed) {
 			shiftPressed = false
 		}
 
-		if (shiftPressed && this.lastMultiSelectWasKeyUp === true && this.selectedEntities.length > 1) {
+		if (shiftPressed && this.lastMultiSelectWasKeyUp && this.selectedEntities.length > 1) {
 			// we have to remove the selection from the top
 			this.selectedEntities.splice(0, 1)
 
@@ -679,7 +700,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 			shiftPressed = false
 		}
 
-		if (shiftPressed && this.lastMultiSelectWasKeyUp === false && this.selectedEntities.length > 1) {
+		if (shiftPressed && !this.lastMultiSelectWasKeyUp && this.selectedEntities.length > 1) {
 			// we have to remove the selection from the bottom
 			this.selectedEntities.splice(-1, 1)
 
@@ -722,10 +743,10 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	}
 
 	isEntitySelected(id: Id): boolean {
-		return this.selectedEntities.find(entity => getLetId(entity)[1] === id) != null
+		return this.selectedEntities.find((entity) => getLetId(entity)[1] === id) != null
 	}
 
-	getSelectedEntities(): T[] {
+	getSelectedEntities(): ElementType[] {
 		// return a copy to avoid outside modifications
 		return this.selectedEntities.slice()
 	}
@@ -734,13 +755,13 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		const selected = this.getSelectedEntities()
 
 		const rowBounds = this.virtualList
-							  .filter(row => row.domElement != null && row.entity != null && selected.includes(row.entity))
-							  .map(row => row.domElement!.getBoundingClientRect())
+			.filter((row) => row.domElement != null && row.entity != null && selected.includes(row.entity))
+			.map((row) => row.domElement!.getBoundingClientRect())
 
-		const left = Math.min(...rowBounds.map(row => row.left))
-		const right = Math.max(...rowBounds.map(row => row.right))
-		const top = Math.min(...rowBounds.map(row => row.top))
-		const bottom = Math.max(...rowBounds.map(row => row.bottom))
+		const left = Math.min(...rowBounds.map((row) => row.left))
+		const right = Math.max(...rowBounds.map((row) => row.right))
+		const top = Math.min(...rowBounds.map((row) => row.top))
+		const bottom = Math.max(...rowBounds.map((row) => row.bottom))
 
 		return {
 			left,
@@ -748,7 +769,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 			top,
 			bottom,
 			height: bottom - top,
-			width: right - left
+			width: right - left,
 		}
 	}
 
@@ -786,26 +807,23 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	}
 
 	private async loadAndAppendAnotherChunk(): Promise<void> {
-		let startId
-		if (this.loadedEntities.length === 0) {
-			startId = GENERATED_MAX_ID
-		} else {
-			startId = getLetId(this.loadedEntities[this.loadedEntities.length - 1])[1]
-		}
+		const lastElement = last(this.loadedEntities)
+		const startId = lastElement != null ? getElementId(lastElement) : GENERATED_MAX_ID
 
 		this.loading = this.config
-						   .fetch(startId, PageSize)
-						   .then(({items, complete}) => {
-							   this.loadedEntities.push(...items)
-							   this.loadedEntities.sort(this.config.sortCompare)
-							   if (complete) {
-								   // ensure that all elements are added to the loaded entities before calling setLoadedCompletely
-								   this.setLoadedCompletely()
-							   }
-						   })
-						   .finally(() => {
-							   this.updateDomElements()
-						   })
+			.fetch(startId, PageSize)
+			.then(({ items, complete }) => {
+				this.loadedEntities.push(...items)
+				this.lastElementChangeMarker = {}
+				this.loadedEntities.sort(this.config.sortCompare)
+				if (complete) {
+					// ensure that all elements are added to the loaded entities before calling setLoadedCompletely
+					this.setLoadedCompletely()
+				}
+			})
+			.finally(() => {
+				this.updateDomElements()
+			})
 		return this.loading
 	}
 
@@ -824,11 +842,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 
 	// Visible for testing
 	_init() {
-		this.domListContainer.addEventListener(
-			"scroll",
-			this.scrollListener,
-			{passive: true},
-		)
+		this.domListContainer.addEventListener("scroll", this.scrollListener, { passive: true })
 
 		window.requestAnimationFrame(() => {
 			this.ready = true
@@ -865,8 +879,8 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		let up = this.currentPosition < this.lastPosition
 		let scrollDiff = up ? this.lastPosition - this.currentPosition : this.currentPosition - this.lastPosition
 		let now = window.performance.now()
-		let timeDiff = Math.round(now - this.lastUpdateTime)
-		this.lastUpdateTime = now
+		let timeDiff = Math.round(now - this.lastScrollUpdateTime)
+		this.lastScrollUpdateTime = now
 		let rowHeight = this.config.rowHeight
 		let topElement = this.virtualList[0]
 		let bottomElement = this.virtualList[this.virtualList.length - 1]
@@ -883,13 +897,9 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 		this.lastPosition = this.currentPosition
 
-		if (this.updateLater) {
+		if (this.scrollUpdateLater) {
 			// Only happens for non-desktop devices (see condition below)
-			if (
-				scrollDiff < 50 ||
-				this.currentPosition === 0 ||
-				this.currentPosition + this.visibleElementsHeight === this.loadedEntities.length * rowHeight
-			) {
+			if (scrollDiff < 50 || this.currentPosition === 0 || this.currentPosition + this.visibleElementsHeight === this.loadedEntities.length * rowHeight) {
 				// completely reposition the elements as scrolling becomes slower or the top / bottom of the list has been reached
 				this.repositionTimeout && clearTimeout(this.repositionTimeout)
 
@@ -904,14 +914,14 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 			} else {
 				log(Cat.debug, "list > update later (scrolling too fast)")
 				// scrolling is too fast, the buffer will be eaten up: stop painting until scrolling becomes slower
-				this.updateLater = true
+				this.scrollUpdateLater = true
 				this.repositionTimeout = setTimeout(() => this.repositionAfterScrollStop(), 110)
 			}
 		} else if (!up) {
 			while (
 				topElement.top + rowHeight < this.currentPosition - this.bufferHeight &&
 				this.virtualList[this.virtualList.length - 1].top < rowHeight * this.loadedEntities.length - rowHeight
-				) {
+			) {
 				let nextPosition = this.virtualList[this.virtualList.length - 1].top + rowHeight
 
 				if (nextPosition < this.currentPosition) {
@@ -969,11 +979,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 
 		const lastBunchVisible = this.currentPosition > this.loadedEntities.length * this.config.rowHeight - this.visibleElementsHeight * 2
 
-		if (lastBunchVisible &&
-			!this.loadingState.isLoading() &&
-			!this.loadedCompletely &&
-			!this.loadingState.isConnectionLost()
-		) {
+		if (lastBunchVisible && !this.loadingState.isLoading() && !this.loadedCompletely && !this.loadingState.isConnectionLost()) {
 			await this.loadMore()
 			this.updateListHeight()
 		}
@@ -988,7 +994,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	}
 
 	private repositionAfterScrollStop() {
-		if (window.performance.now() - this.lastUpdateTime > 100) {
+		if (window.performance.now() - this.lastScrollUpdateTime > 100) {
 			window.requestAnimationFrame(() => this.updateDomElements())
 		} else {
 			this.repositionTimeout = setTimeout(() => this.repositionAfterScrollStop(), 110)
@@ -1045,7 +1051,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 			this.updateVirtualRow(row, entity, (pos % 2) as any)
 		}
 
-		this.loadingIndicatorDom.promise.then(dom => {
+		this.loadingIndicatorDom.promise.then((dom) => {
 			if (this.loadedEntities.length % 2 === 0) {
 				dom.classList.add("odd-row")
 			} else {
@@ -1054,7 +1060,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		})
 
 		log(Cat.debug, "repositioned list")
-		this.updateLater = false
+		this.scrollUpdateLater = false
 	}
 
 	private updateListHeight() {
@@ -1069,7 +1075,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		this.updateDomElements()
 	}
 
-	private updateVirtualRow(row: VirtualRow<T>, entity: T | null, odd: boolean) {
+	private updateVirtualRow(row: VirtualRow<ElementType>, entity: ElementType | null, odd: boolean) {
 		row.entity = entity
 
 		if (row.domElement) {
@@ -1106,7 +1112,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	 * Selects the element with the given id and scrolls to it so it becomes visible. Loads the list until the given element is reached.
 	 * @return The entity or null if the entity is not in this list.
 	 */
-	async scrollToIdAndSelect(listElementId: Id): Promise<T | null> {
+	async scrollToIdAndSelect(listElementId: Id): Promise<ElementType | null> {
 		const entity = this.getEntity(listElementId)
 
 		if (entity) {
@@ -1129,7 +1135,6 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				}
 
 				return scrollTarget
-
 			} catch (e) {
 				if (e instanceof BadRequestError) {
 					console.log("invalid element id", listElementId, e)
@@ -1141,7 +1146,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 	}
 
-	private scrollToLoadedEntityAndSelect(scrollTarget: T, addToSelection: boolean) {
+	private scrollToLoadedEntityAndSelect(scrollTarget: ElementType, addToSelection: boolean) {
 		// check if the element is visible already. only scroll if it is not visible
 		for (let i = 0; i < this.virtualList.length; i++) {
 			if (this.virtualList[i].entity === scrollTarget) {
@@ -1166,8 +1171,8 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		})
 	}
 
-	private async loadUntil(targetElementId: Id): Promise<T | null> {
-		const scrollTarget = this.loadedEntities.find(e => getElementId(e) === targetElementId)
+	private async loadUntil(targetElementId: Id): Promise<ElementType | null> {
+		const scrollTarget = this.loadedEntities.find((e) => getElementId(e) === targetElementId)
 
 		// also stop loading if the list element id is bigger than the loaded ones
 		if (
@@ -1178,9 +1183,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 			return scrollTarget ?? null
 		} else {
 			try {
-				return await this.loadingState.trackPromise(
-					this.loadAndAppendAnotherChunk().then(() => this.loadUntil(targetElementId))
-				)
+				return await this.loadingState.trackPromise(this.loadAndAppendAnotherChunk().then(() => this.loadUntil(targetElementId)))
 			} catch (e) {
 				if (isOfflineError(e)) {
 					return null
@@ -1220,7 +1223,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 	}
 
-	private addToLoadedEntities(entity: T) {
+	private addToLoadedEntities(entity: ElementType) {
 		for (let i = 0; i < this.loadedEntities.length; i++) {
 			if (getElementId(entity) === getElementId(this.loadedEntities[i])) {
 				return
@@ -1228,6 +1231,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 
 		this.loadedEntities.push(entity)
+		this.lastElementChangeMarker = {}
 
 		this.loadedEntities.sort(this.config.sortCompare)
 
@@ -1241,10 +1245,11 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		}
 	}
 
-	private updateLoadedEntity(entity: T) {
+	private updateLoadedEntity(entity: ElementType) {
 		for (let positionToUpdate = 0; positionToUpdate < this.loadedEntities.length; positionToUpdate++) {
 			if (getElementId(entity) === getElementId(this.loadedEntities[positionToUpdate])) {
 				this.loadedEntities.splice(positionToUpdate, 1, entity)
+				this.lastElementChangeMarker = {}
 
 				this.loadedEntities.sort(this.config.sortCompare)
 
@@ -1265,7 +1270,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 	deleteLoadedEntity(elementId: Id): Promise<void> {
 		// wait for any pending loading
 		return settledThen(this.loading, () => {
-			const entity = this.loadedEntities.find(e => getElementId(e) === elementId)
+			const entity = this.loadedEntities.find((e) => getElementId(e) === elementId)
 
 			if (entity) {
 				let nextElementSelected = false
@@ -1282,6 +1287,7 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 				}
 
 				remove(this.loadedEntities, entity)
+				this.lastElementChangeMarker = {}
 				const selectionChanged = remove(this.selectedEntities, entity)
 
 				this.updateListHeight()
@@ -1301,8 +1307,17 @@ export class List<T extends ListElement, R extends VirtualRow<T>> implements Com
 		return this.mobileMultiSelectionActive
 	}
 
-	getLoadedEntities(): T[] {
+	getLoadedEntities(): ReadonlyArray<ElementType> {
 		return this.loadedEntities
+	}
+
+	/**
+	 * when called at time A, returns a function that, when called at a later time B, will return whether
+	 * the set of elements in the list changed between time A and time B
+	 */
+	markCurrentState(): () => boolean {
+		const lastMarker = this.lastElementChangeMarker
+		return () => lastMarker !== this.lastElementChangeMarker
 	}
 }
 
@@ -1314,9 +1329,9 @@ function settledThen<T, R>(promise: Promise<T>, handler: () => R): Promise<R> {
 }
 
 /** Detects swipe gestures for list elements. On mobile some lists have actions on swiping, e.g. deleting an email. */
-class ListSwipeHandler<T extends ListElement, R extends VirtualRow<T>> extends SwipeHandler {
-	private virtualElement: VirtualRow<T> | null = null
-	private list: List<T, R>
+class ListSwipeHandler<ElementType extends ListElement, RowType extends VirtualRow<ElementType>> extends SwipeHandler {
+	private virtualElement: VirtualRow<ElementType> | null = null
+	private list: List<ElementType, RowType>
 	private xoffset!: number
 
 	constructor(touchArea: HTMLElement, list: List<any, any>) {
@@ -1342,7 +1357,7 @@ class ListSwipeHandler<T extends ListElement, R extends VirtualRow<T>> extends S
 		})
 	}
 
-	onHorizontalGestureCompleted(delta: {x: number; y: number}): Promise<void> {
+	onHorizontalGestureCompleted(delta: { x: number; y: number }): Promise<void> {
 		if (this.virtualElement && this.virtualElement.entity && Math.abs(delta.x) > ACTION_DISTANCE) {
 			// Gesture is completed
 			let entity = this.virtualElement.entity
@@ -1372,22 +1387,22 @@ class ListSwipeHandler<T extends ListElement, R extends VirtualRow<T>> extends S
 			let ve = neverNull(this.virtualElement)
 			let listTargetPosition = this.xoffset < 0 ? -this.list.width : this.list.width
 			swipeActionPromise = swipeActionPromise
-				.then(commit => commit !== false)
-				.catch(e => {
+				.then((commit) => commit !== false)
+				.catch((e) => {
 					console.error("rejection in swipe action", e)
 					return false
 				})
 			return Promise.all([
 				// animate swipe action to full width
 				ve.domElement &&
-				animations.add(
-					ve.domElement,
-					transform(TransformEnum.TranslateX, this.xoffset, listTargetPosition).chain(TransformEnum.TranslateY, ve.top, ve.top),
-					{
-						easing: ease.inOut,
-						duration: DefaultAnimationTime * 2,
-					},
-				),
+					animations.add(
+						ve.domElement,
+						transform(TransformEnum.TranslateX, this.xoffset, listTargetPosition).chain(TransformEnum.TranslateY, ve.top, ve.top),
+						{
+							easing: ease.inOut,
+							duration: DefaultAnimationTime * 2,
+						},
+					),
 				animations.add(
 					this.list.domSwipeSpacerLeft,
 					transform(TransformEnum.TranslateX, this.xoffset - this.list.width, listTargetPosition - this.list.width).chain(
@@ -1413,52 +1428,52 @@ class ListSwipeHandler<T extends ListElement, R extends VirtualRow<T>> extends S
 					},
 				),
 			])
-						  .then(() => (this.xoffset = listTargetPosition))
-						  .then(() => swipeActionPromise)
-						  .then(success => {
-							  if (success) {
-								  return this.list
-											 .deleteLoadedEntity(id)
-											 .then(() => {
-												 // fade out element
-												 this.xoffset = 0
+				.then(() => (this.xoffset = listTargetPosition))
+				.then(() => swipeActionPromise)
+				.then((success) => {
+					if (success) {
+						return this.list
+							.deleteLoadedEntity(id)
+							.then(() => {
+								// fade out element
+								this.xoffset = 0
 
-												 if (ve.domElement) {
-													 ve.domElement.style.transform = `translateX(${this.xoffset}px) translateY(${ve.top}px)`
-												 }
+								if (ve.domElement) {
+									ve.domElement.style.transform = `translateX(${this.xoffset}px) translateY(${ve.top}px)`
+								}
 
-												 return Promise.all([
-													 animations.add(this.list.domSwipeSpacerLeft, opacity(1, 0, true)),
-													 animations.add(this.list.domSwipeSpacerRight, opacity(1, 0, true)),
-												 ])
-											 })
-											 .then(() => {
-												 // set swipe element to initial configuration
-												 this.list.domSwipeSpacerLeft.style.transform = `translateX(${this.xoffset - this.list.width}px) translateY(${ve.top}px)`
-												 this.list.domSwipeSpacerRight.style.transform = `translateX(${this.xoffset + this.list.width}px) translateY(${ve.top}px)`
-												 this.list.domSwipeSpacerRight.style.opacity = ""
-												 this.list.domSwipeSpacerLeft.style.opacity = ""
-											 })
-							  } else {
-								  return this.reset(delta)
-							  }
-						  })
-						  .finally(() => {
-							  this.virtualElement = null
-						  })
+								return Promise.all([
+									animations.add(this.list.domSwipeSpacerLeft, opacity(1, 0, true)),
+									animations.add(this.list.domSwipeSpacerRight, opacity(1, 0, true)),
+								])
+							})
+							.then(() => {
+								// set swipe element to initial configuration
+								this.list.domSwipeSpacerLeft.style.transform = `translateX(${this.xoffset - this.list.width}px) translateY(${ve.top}px)`
+								this.list.domSwipeSpacerRight.style.transform = `translateX(${this.xoffset + this.list.width}px) translateY(${ve.top}px)`
+								this.list.domSwipeSpacerRight.style.opacity = ""
+								this.list.domSwipeSpacerLeft.style.opacity = ""
+							})
+					} else {
+						return this.reset(delta)
+					}
+				})
+				.finally(() => {
+					this.virtualElement = null
+				})
 		} else {
 			return Promise.resolve()
 		}
 	}
 
-	private getVirtualElement(): VirtualRow<T> {
+	private getVirtualElement(): VirtualRow<ElementType> {
 		if (!this.virtualElement) {
 			let touchAreaOffset = this.touchArea.getBoundingClientRect().top
 			let relativeYposition = this.list.currentPosition + this.startPos.y - touchAreaOffset
 
 			let targetElementPosition = Math.floor(relativeYposition / this.list.config.rowHeight) * this.list.config.rowHeight
 
-			this.virtualElement = this.list.virtualList.find(ve => ve.top === targetElementPosition) ?? null
+			this.virtualElement = this.list.virtualList.find((ve) => ve.top === targetElementPosition) ?? null
 		}
 
 		return assertNotNull(this.virtualElement)
@@ -1470,12 +1485,12 @@ class ListSwipeHandler<T extends ListElement, R extends VirtualRow<T>> extends S
 		this.list.domSwipeSpacerLeft.style.transform = `translateX(${-this.list.width}px) translateY(0px)`
 		this.list.domSwipeSpacerRight.style.transform = `translateX(${this.list.width}px) translateY(0px)`
 
-		this.list.virtualList.forEach(element => {
+		this.list.virtualList.forEach((element) => {
 			element.domElement && applySafeAreaInsetMarginLR(element.domElement)
 		})
 	}
 
-	reset(delta: {x: number; y: number}): Promise<any> {
+	reset(delta: { x: number; y: number }): Promise<any> {
 		try {
 			if (this.xoffset !== 0) {
 				let ve = this.virtualElement
@@ -1524,46 +1539,46 @@ export function listSelectionKeyboardShortcuts<T extends ListElement, R extends 
 	return [
 		{
 			key: Keys.UP,
-			exec: mapLazily(list, list => list.selectPrevious(false)),
+			exec: mapLazily(list, (list) => list.selectPrevious(false)),
 			help: "selectPrevious_action",
 		},
 		{
 			key: Keys.K,
-			exec: mapLazily(list, list => list.selectPrevious(false)),
+			exec: mapLazily(list, (list) => list.selectPrevious(false)),
 			help: "selectPrevious_action",
 		},
 		{
 			key: Keys.UP,
 			shift: true,
-			exec: mapLazily(list, list => list.selectPrevious(true)),
+			exec: mapLazily(list, (list) => list.selectPrevious(true)),
 			help: "addPrevious_action",
 		},
 		{
 			key: Keys.K,
 			shift: true,
-			exec: mapLazily(list, list => list.selectPrevious(true)),
+			exec: mapLazily(list, (list) => list.selectPrevious(true)),
 			help: "addPrevious_action",
 		},
 		{
 			key: Keys.DOWN,
-			exec: mapLazily(list, list => list.selectNext(false)),
+			exec: mapLazily(list, (list) => list.selectNext(false)),
 			help: "selectNext_action",
 		},
 		{
 			key: Keys.J,
-			exec: mapLazily(list, list => list.selectNext(false)),
+			exec: mapLazily(list, (list) => list.selectNext(false)),
 			help: "selectNext_action",
 		},
 		{
 			key: Keys.DOWN,
 			shift: true,
-			exec: mapLazily(list, list => list.selectNext(true)),
+			exec: mapLazily(list, (list) => list.selectNext(true)),
 			help: "addNext_action",
 		},
 		{
 			key: Keys.J,
 			shift: true,
-			exec: mapLazily(list, list => list.selectNext(true)),
+			exec: mapLazily(list, (list) => list.selectNext(true)),
 			help: "addNext_action",
 		},
 	]

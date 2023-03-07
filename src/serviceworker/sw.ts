@@ -3,7 +3,7 @@
 /// <reference lib="webworker" />
 
 // set by the build script
-import {getPathBases} from "../ApplicationPaths"
+import { getPathBases } from "../ApplicationPaths"
 
 declare var filesToCache: () => Array<string>
 declare var version: () => string
@@ -73,27 +73,27 @@ export class ServiceWorker {
 	}
 
 	precache(): Promise<any> {
-		return this._caches.open(this._cacheName).then(cache =>
+		return this._caches.open(this._cacheName).then((cache) =>
 			this._addAllToCache(cache, this._urlsToCache)
 				.then(() => cache.match("index.html"))
-				.then((r) => {
+				.then((r: Response) => {
 					if (!r) {
 						return
 					}
 
 					// Reconstructing response to 1. Save it under different url 2. Get rid of redirect in response<<
-					const clonedResponse = r.clone()
-					const bodyPromise = "body" in clonedResponse ? Promise.resolve(clonedResponse.body) : clonedResponse.blob()
+					const clonedResponse: Response = r.clone()
+					const bodyPromise = clonedResponse.body != null ? Promise.resolve(clonedResponse.body) : clonedResponse.blob()
 					return bodyPromise
 						.then(
-							body =>
+							(body: ReadableStream | Blob) =>
 								new Response(body, {
 									headers: clonedResponse.headers,
 									status: clonedResponse.status,
 									statusText: clonedResponse.statusText,
 								}),
 						)
-						.then(r => cache.put(this._selfLocation, r))
+						.then((r: Response) => cache.put(this._selfLocation, r))
 						.then(() => cache.delete("index.html"))
 				}),
 		)
@@ -101,23 +101,23 @@ export class ServiceWorker {
 
 	deleteOldCaches(): Promise<any> {
 		return this._caches
-				   .keys()
-				   .then(cacheNames => Promise.all(cacheNames.map(cacheName => (cacheName !== this._cacheName ? caches.delete(cacheName) : Promise.resolve()))))
-				   .catch(e => {
-					   console.log("error while deleting old caches", e)
-					   throw e
-				   })
+			.keys()
+			.then((cacheNames) => Promise.all(cacheNames.map((cacheName) => (cacheName !== this._cacheName ? caches.delete(cacheName) : Promise.resolve()))))
+			.catch((e) => {
+				console.log("error while deleting old caches", e)
+				throw e
+			})
 	}
 
 	fromCacheOrFetchAndCache(request: Request): Promise<Response> {
-		return this._caches.open(this._cacheName).then(cache => {
-			return cache.match(request.url).then(response => {
+		return this._caches.open(this._cacheName).then((cache) => {
+			return cache.match(request.url).then((response) => {
 				if (response) {
 					return response
 				} else {
 					return fetch(request, {
 						redirect: "error",
-					}).then(networkResponse => {
+					}).then((networkResponse) => {
 						return cache.put(request, networkResponse.clone()).then(() => networkResponse)
 					})
 				}
@@ -129,17 +129,17 @@ export class ServiceWorker {
 		return (
 			this._caches
 				.open(this._cacheName)
-				.then(cache => cache.match(requestUrl)) // Cache magically disappears on iOS 12.1 after the browser restart.
+				.then((cache) => cache.match(requestUrl)) // Cache magically disappears on iOS 12.1 after the browser restart.
 				// See #758. See https://bugs.webkit.org/show_bug.cgi?id=190269
-				.then(r => r || fetch(requestUrl))
+				.then((r) => r || fetch(requestUrl))
 		)
 	}
 
 	// needed because FF fails to cache.addAll()
 	_addAllToCache(cache: Cache, urlsToCache: string[]): Promise<any> {
 		return Promise.all(
-			urlsToCache.map(url =>
-				cache.add(url).catch(e => {
+			urlsToCache.map((url) =>
+				cache.add(url).catch((e) => {
 					console.log("failed to add", url, e)
 					throw e
 				}),
@@ -179,21 +179,21 @@ const init = (sw: ServiceWorker) => {
 		console.log("SW: being installed", versionString)
 		evt.waitUntil(sw.precache())
 	})
-	scope.addEventListener("activate", event => {
+	scope.addEventListener("activate", (event) => {
 		console.log("sw activate", versionString)
 		event.waitUntil(sw.deleteOldCaches().then(() => scope.clients.claim()))
 	})
 	scope.addEventListener("fetch", (evt: FetchEvent) => {
 		sw.respond(evt)
 	})
-	scope.addEventListener("message", event => {
+	scope.addEventListener("message", (event) => {
 		console.log("sw message", versionString, event)
 
 		if (event.data === "update") {
 			scope.skipWaiting()
 		}
 	})
-	scope.addEventListener("error", ({error}) => {
+	scope.addEventListener("error", ({ error }) => {
 		const serializedError = {
 			name: error.name,
 			message: error.message,
@@ -201,7 +201,7 @@ const init = (sw: ServiceWorker) => {
 			data: error.data,
 		}
 		// @ts-ignore
-		return scope.clients.matchAll().then(allClients =>
+		return scope.clients.matchAll().then((allClients) =>
 			allClients.forEach((c: Client) =>
 				c.postMessage({
 					type: "error",
@@ -223,7 +223,7 @@ if (typeof env === "undefined" || env.mode !== "Test") {
 	const cacheName = "CODE_CACHE-v" + versionString
 	const selfLocation = self.location.href.substring(0, self.location.href.indexOf("sw.js"))
 	const exclusions = customDomainCacheExclusions()
-	const urlsToCache = (isTutanotaDomain() ? filesToCache() : filesToCache().filter(file => !exclusions.includes(file))).map(file => selfLocation + file)
+	const urlsToCache = (isTutanotaDomain() ? filesToCache() : filesToCache().filter((file) => !exclusions.includes(file))).map((file) => selfLocation + file)
 	const applicationPaths = getPathBases()
 	const sw = new ServiceWorker(urlsToCache, caches, cacheName, selfLocation, applicationPaths, isTutanotaDomain())
 	init(sw)

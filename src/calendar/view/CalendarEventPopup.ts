@@ -1,24 +1,23 @@
-import type {Shortcut} from "../../misc/KeyManager"
-import m, {Children, Vnode} from "mithril"
-import {px} from "../../gui/size"
-import {ButtonColor, ButtonN, ButtonType} from "../../gui/base/ButtonN"
-import {Icons} from "../../gui/base/icons/Icons"
-import type {ModalComponent} from "../../gui/base/Modal"
-import {modal} from "../../gui/base/Modal"
-import {EventPreviewView} from "./EventPreviewView"
-import type {CalendarEvent} from "../../api/entities/tutanota/TypeRefs.js"
-import {Dialog} from "../../gui/base/Dialog"
-import type {EventCreateResult} from "../date/CalendarEventViewModel"
-import {CalendarEventViewModel} from "../date/CalendarEventViewModel"
-import {UserError} from "../../api/main/UserError"
-import {DROPDOWN_MARGIN, showDropdown} from "../../gui/base/DropdownN"
-import {Keys} from "../../api/common/TutanotaConstants"
-import type {HtmlSanitizer} from "../../misc/HtmlSanitizer"
-import {prepareCalendarDescription} from "../date/CalendarUtils"
-import {ofClass} from "@tutao/tutanota-utils"
-import {noOp} from "@tutao/tutanota-utils"
-import type {PosRect} from "../../gui/base/Dropdown"
-import {BootIcons} from "../../gui/base/icons/BootIcons"
+import type { Shortcut } from "../../misc/KeyManager"
+import m, { Children, Vnode } from "mithril"
+import { px } from "../../gui/size"
+import { ButtonColor, Button, ButtonType } from "../../gui/base/Button.js"
+import { Icons } from "../../gui/base/icons/Icons"
+import type { ModalComponent } from "../../gui/base/Modal"
+import { modal } from "../../gui/base/Modal"
+import { EventPreviewView } from "./EventPreviewView"
+import type { CalendarEvent } from "../../api/entities/tutanota/TypeRefs.js"
+import { Dialog } from "../../gui/base/Dialog"
+import type { EventCreateResult } from "../date/CalendarEventViewModel"
+import { CalendarEventViewModel } from "../date/CalendarEventViewModel"
+import { UserError } from "../../api/main/UserError"
+import { DROPDOWN_MARGIN, PosRect, showDropdown } from "../../gui/base/Dropdown.js"
+import { Keys } from "../../api/common/TutanotaConstants"
+import type { HtmlSanitizer } from "../../misc/HtmlSanitizer"
+import { prepareCalendarDescription } from "../date/CalendarUtils"
+import { ofClass } from "@tutao/tutanota-utils"
+import { noOp } from "@tutao/tutanota-utils"
+import { BootIcons } from "../../gui/base/icons/BootIcons"
 
 export class CalendarEventPopup implements ModalComponent {
 	_calendarEvent: CalendarEvent
@@ -47,8 +46,8 @@ export class CalendarEventPopup implements ModalComponent {
 		// We receive the HtmlSanitizer from outside and do the sanitization inside, so that we don't have to just assume it was already done
 		this._sanitizedDescription = preparedDescription
 			? htmlSanitizer.sanitizeHTML(preparedDescription, {
-				blockExternalContent: true,
-			}).html
+					blockExternalContent: true,
+			  }).html
 			: ""
 		this._isPersistentEvent = !!calendarEvent._ownerGroup
 		this._isExternal = !this._viewModel
@@ -113,37 +112,37 @@ export class CalendarEventPopup implements ModalComponent {
 				[
 					m(".flex.flex-end", [
 						!!this._viewModel && this._viewModel.isForceUpdateAvailable()
-							? m(ButtonN, {
-								label: "sendUpdates_label",
-								click: () => this._forceSendingUpdatesToAttendees(),
-								type: ButtonType.ActionLarge,
-								icon: () => BootIcons.Mail,
-								colors: ButtonColor.DrawerNav,
-							})
+							? m(Button, {
+									label: "sendUpdates_label",
+									click: () => this._forceSendingUpdatesToAttendees(),
+									type: ButtonType.ActionLarge,
+									icon: () => BootIcons.Mail,
+									colors: ButtonColor.DrawerNav,
+							  })
 							: null,
 						!this._isExternal
-							? m(ButtonN, {
-								label: "edit_action",
-								click: () => {
-									this._onEditEvent()
+							? m(Button, {
+									label: "edit_action",
+									click: () => {
+										this._onEditEvent()
 
-									this._close()
-								},
-								type: ButtonType.ActionLarge,
-								icon: () => Icons.Edit,
-								colors: ButtonColor.DrawerNav,
-							})
+										this._close()
+									},
+									type: ButtonType.ActionLarge,
+									icon: () => Icons.Edit,
+									colors: ButtonColor.DrawerNav,
+							  })
 							: null,
 						this._isDeleteAvailable()
-							? m(ButtonN, {
-								label: "delete_action",
-								click: () => this._deleteEvent(),
-								type: ButtonType.ActionLarge,
-								icon: () => Icons.Trash,
-								colors: ButtonColor.DrawerNav,
-							})
+							? m(Button, {
+									label: "delete_action",
+									click: () => this._deleteEvent(),
+									type: ButtonType.ActionLarge,
+									icon: () => Icons.Trash,
+									colors: ButtonColor.DrawerNav,
+							  })
 							: null,
-						m(ButtonN, {
+						m(Button, {
 							label: "close_alt",
 							click: () => this._close(),
 							type: ButtonType.ActionLarge,
@@ -180,6 +179,7 @@ export class CalendarEventPopup implements ModalComponent {
 	}
 
 	onClose(): void {
+		this._close()
 	}
 
 	shortcuts(): Shortcut[] {
@@ -187,7 +187,8 @@ export class CalendarEventPopup implements ModalComponent {
 	}
 
 	popState(e: Event): boolean {
-		return true
+		modal.remove(this)
+		return false
 	}
 
 	_isDeleteAvailable(): boolean {
@@ -226,7 +227,7 @@ export class CalendarEventPopup implements ModalComponent {
 			const confirmed = await Dialog.confirm("deleteEventConfirmation_msg")
 
 			if (confirmed) {
-				await viewModel.deleteEvent().catch(ofClass(UserError, e => Dialog.message(() => e.message)))
+				await viewModel.deleteEvent().catch(ofClass(UserError, (e) => Dialog.message(() => e.message)))
 
 				this._close()
 			}

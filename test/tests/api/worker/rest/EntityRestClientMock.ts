@@ -1,4 +1,4 @@
-import {EntityRestClient, getIds} from "../../../../../src/api/worker/rest/EntityRestClient.js"
+import { EntityRestClient, getIds } from "../../../../../src/api/worker/rest/EntityRestClient.js"
 import {
 	compareNewestFirst,
 	compareOldestFirst,
@@ -9,12 +9,13 @@ import {
 	listIdPart,
 	timestampToGeneratedId,
 } from "../../../../../src/api/common/utils/EntityUtils.js"
-import {_verifyType, resolveTypeReference} from "../../../../../src/api/common/EntityFunctions.js"
-import {NotFoundError} from "../../../../../src/api/common/error/RestError.js"
-import {downcast, TypeRef} from "@tutao/tutanota-utils"
-import type {ElementEntity, ListElementEntity, SomeEntity} from "../../../../../src/api/common/EntityTypes.js"
-import {InstanceMapper} from "../../../../../src/api/worker/crypto/InstanceMapper.js"
-import {AuthDataProvider} from "../../../../../src/api/worker/facades/UserFacade.js"
+import { _verifyType, resolveTypeReference } from "../../../../../src/api/common/EntityFunctions.js"
+import { NotFoundError } from "../../../../../src/api/common/error/RestError.js"
+import { downcast, TypeRef } from "@tutao/tutanota-utils"
+import type { BlobElementEntity, ElementEntity, ListElementEntity, SomeEntity } from "../../../../../src/api/common/EntityTypes.js"
+import { InstanceMapper } from "../../../../../src/api/worker/crypto/InstanceMapper.js"
+import { AuthDataProvider } from "../../../../../src/api/worker/facades/UserFacade.js"
+import { Type } from "../../../../../src/api/common/EntityConstants"
 
 const authDataProvider: AuthDataProvider = {
 	createAuthHeaders(): Dict {
@@ -22,21 +23,17 @@ const authDataProvider: AuthDataProvider = {
 	},
 	isFullyLoggedIn(): boolean {
 		return true
-	}
+	},
 }
 
 export class EntityRestClientMock extends EntityRestClient {
 	_entities: Record<Id, ElementEntity | Error> = {}
 	_listEntities: Record<Id, Record<Id, ListElementEntity | Error>> = {}
+	_blobEntities: Record<Id, Record<Id, BlobElementEntity | Error>> = {}
 	_lastIdTimestamp: number
 
 	constructor() {
-		super(
-			authDataProvider,
-			downcast({}),
-			() => downcast({}),
-			new InstanceMapper(),
-		)
+		super(authDataProvider, downcast({}), () => downcast({}), new InstanceMapper(), downcast({}))
 		this._lastIdTimestamp = Date.now()
 	}
 
@@ -46,30 +43,36 @@ export class EntityRestClientMock extends EntityRestClient {
 	}
 
 	addElementInstances(...instances: Array<ElementEntity>) {
-		instances.forEach(instance => (this._entities[instance._id] = instance))
+		instances.forEach((instance) => (this._entities[instance._id] = instance))
 	}
 
 	addListInstances(...instances: Array<ListElementEntity>) {
-		instances.forEach(instance => {
+		instances.forEach((instance) => {
 			if (!this._listEntities[getListId(instance)]) this._listEntities[getListId(instance)] = {}
 			this._listEntities[getListId(instance)][getElementId(instance)] = instance
 		})
 	}
 
-	setException(id: Id | IdTuple, error: Error) {
-		if (typeof id === "string") {
-			this._entities[id] = error
-		} else {
-			if (!this._listEntities[listIdPart(id)]) this._listEntities[listIdPart(id)] = {}
-			this._listEntities[listIdPart(id)][elementIdPart(id)] = error
-		}
+	addBlobInstances(...instances: Array<BlobElementEntity>) {
+		instances.forEach((instance) => {
+			if (!this._blobEntities[getListId(instance)]) this._blobEntities[getListId(instance)] = {}
+			this._blobEntities[getListId(instance)][getElementId(instance)] = instance
+		})
+	}
+
+	setElementException(id: Id, error: Error) {
+		this._entities[id] = error
+	}
+
+	setListElementException(id: IdTuple, error: Error) {
+		if (!this._listEntities[listIdPart(id)]) this._listEntities[listIdPart(id)] = {}
+		this._listEntities[listIdPart(id)][elementIdPart(id)] = error
 	}
 
 	_getListEntry(listId: Id, elementId: Id): ListElementEntity | null | undefined {
 		if (!this._listEntities[listId]) {
 			throw new NotFoundError(`Not list ${listId}`)
 		}
-
 		try {
 			return this._handleMockElement(this._listEntities[listId][elementId], [listId, elementId])
 		} catch (e) {
@@ -81,12 +84,22 @@ export class EntityRestClientMock extends EntityRestClient {
 		}
 	}
 
-	async load<T extends SomeEntity>(
-		typeRef: TypeRef<T>,
-		id: T["_id"],
-		queryParameters: Dict | null | undefined,
-		extraHeaders?: Dict,
-	): Promise<T> {
+	_getBlobEntry(listId: Id, elementId: Id): ListElementEntity | null | undefined {
+		if (!this._blobEntities[listId]) {
+			throw new NotFoundError(`Not list ${listId}`)
+		}
+		try {
+			return this._handleMockElement(this._blobEntities[listId][elementId], [listId, elementId])
+		} catch (e) {
+			if (e instanceof NotFoundError) {
+				return null
+			} else {
+				throw e
+			}
+		}
+	}
+
+	async load<T extends SomeEntity>(typeRef: TypeRef<T>, id: T["_id"], queryParameters: Dict | null | undefined, extraHeaders?: Dict): Promise<T> {
 		if (id instanceof Array && id.length === 2) {
 			// list element request
 			const listId = id[0]
@@ -104,46 +117,45 @@ export class EntityRestClientMock extends EntityRestClient {
 		}
 	}
 
-	async loadRange<T extends ListElementEntity>(
-		typeRef: TypeRef<T>,
-		listId: Id,
-		start: Id,
-		count: number,
-		reverse: boolean,
-	): Promise<T[]> {
+	async loadRange<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id, start: Id, count: number, reverse: boolean): Promise<T[]> {
 		let entriesForListId = this._listEntities[listId]
 		if (!entriesForListId) return []
 		let filteredIds
 
 		if (reverse) {
 			filteredIds = Object.keys(entriesForListId)
-								.sort(compareNewestFirst)
-								.filter(id => firstBiggerThanSecond(start, id))
+				.sort(compareNewestFirst)
+				.filter((id) => firstBiggerThanSecond(start, id))
 		} else {
 			filteredIds = Object.keys(entriesForListId)
-								.sort(compareOldestFirst)
-								.filter(id => firstBiggerThanSecond(id, start))
+				.sort(compareOldestFirst)
+				.filter((id) => firstBiggerThanSecond(id, start))
 		}
 
-		return filteredIds.map(id => this._handleMockElement(entriesForListId[id], id))
+		return filteredIds.map((id) => this._handleMockElement(entriesForListId[id], id))
 	}
 
-	async loadMultiple<T extends SomeEntity>(
-		typeRef: TypeRef<T>,
-		listId: Id | null | undefined,
-		elementIds: Array<Id>,
-	): Promise<Array<T>> {
+	async loadMultiple<T extends SomeEntity>(typeRef: TypeRef<T>, listId: Id | null | undefined, elementIds: Array<Id>): Promise<Array<T>> {
 		const lid = listId
 
 		if (lid) {
-			return elementIds
-				.map(id => {
-					return downcast(this._getListEntry(lid, id))
-				})
-				.filter(Boolean)
+			const typeModule = await resolveTypeReference(typeRef)
+			if (typeModule.type === Type.ListElement.valueOf()) {
+				return elementIds
+					.map((id) => {
+						return downcast(this._getListEntry(lid, id))
+					})
+					.filter(Boolean)
+			} else {
+				return elementIds
+					.map((id) => {
+						return downcast(this._getBlobEntry(lid, id))
+					})
+					.filter(Boolean)
+			}
 		} else {
 			return elementIds
-				.map(id => {
+				.map((id) => {
 					try {
 						return this._handleMockElement(this._entities[id], id)
 					} catch (e) {
@@ -159,7 +171,7 @@ export class EntityRestClientMock extends EntityRestClient {
 	}
 
 	erase<T extends SomeEntity>(instance: T): Promise<void> {
-		return resolveTypeReference(instance._type).then(typeModel => {
+		return resolveTypeReference(instance._type).then((typeModel) => {
 			_verifyType(typeModel)
 
 			var ids = getIds(instance, typeModel)

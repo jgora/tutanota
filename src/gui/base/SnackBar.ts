@@ -1,16 +1,17 @@
-import m, {Component, Vnode} from "mithril"
-import {px, size} from "../size"
-import {DefaultAnimationTime, transform, TransformEnum} from "../animation/Animations"
-import {displayOverlay} from "./Overlay"
-import type {ButtonAttrs} from "./ButtonN"
-import {ButtonN, ButtonType} from "./ButtonN"
-import type {TranslationKey} from "../../misc/LanguageViewModel"
-import {lang} from "../../misc/LanguageViewModel"
-import {styles} from "../styles"
-import {LayerType} from "../../RootView"
-import type {lazy} from "@tutao/tutanota-utils"
-import type {clickHandler} from "./GuiUtils"
-import {assertMainOrNode} from "../../api/common/Env"
+import m, { Component, Vnode } from "mithril"
+import { px, size } from "../size"
+import { DefaultAnimationTime, transform, TransformEnum } from "../animation/Animations"
+import { displayOverlay } from "./Overlay"
+import type { ButtonAttrs } from "./Button.js"
+import { Button, ButtonType } from "./Button.js"
+import type { TranslationKey } from "../../misc/LanguageViewModel"
+import { lang } from "../../misc/LanguageViewModel"
+import { styles } from "../styles"
+import { LayerType } from "../../RootView"
+import type { lazy } from "@tutao/tutanota-utils"
+import type { clickHandler } from "./GuiUtils"
+import { assertMainOrNode } from "../../api/common/Env"
+import { getSafeAreaInsetBottom } from "../HtmlUtils"
 
 assertMainOrNode()
 export const SNACKBAR_SHOW_TIME = 6000
@@ -23,7 +24,7 @@ type SnackBarAttrs = {
 	message: TranslationKey | lazy<string>
 	button: ButtonAttrs | null
 }
-type QueueItem = SnackBarAttrs & {onClose: (() => void) | null}
+type QueueItem = SnackBarAttrs & { onClose: (() => void) | null }
 const notificationQueue: QueueItem[] = []
 let currentAnimationTimeout: TimeoutID | null = null
 
@@ -32,7 +33,7 @@ class SnackBar implements Component<SnackBarAttrs> {
 		// use same padding as MinimizedEditor
 		return m(".snackbar-content.flex.flex-space-between.border-radius.plr.pb-xs.pt-xs", [
 			m(".flex.center-vertically.smaller", lang.getMaybeLazy(vnode.attrs.message)),
-			vnode.attrs.button ? m(".flex-end.center-vertically.pl", m(ButtonN, vnode.attrs.button)) : null,
+			vnode.attrs.button ? m(".flex-end.center-vertically.pl", m(Button, vnode.attrs.button)) : null,
 		])
 	}
 }
@@ -51,11 +52,7 @@ function makeButtonAttrsForSnackBar(button: SnackBarButtonAttrs): ButtonAttrs {
  * @param snackBarButton will close the snackbar if it is clicked (onClose() will be called)
  * @param onClose called when the snackbar is closed (either by timeout or button click)
  */
-export function showSnackBar(args: {
-	message: TranslationKey,
-	button: SnackBarButtonAttrs,
-	onClose?: () => void
-}) {
+export function showSnackBar(args: { message: TranslationKey; button: SnackBarButtonAttrs; onClose?: () => void }) {
 	const button = makeButtonAttrsForSnackBar(args.button)
 	notificationQueue.push({
 		message: args.message,
@@ -73,23 +70,24 @@ export function showSnackBar(args: {
 
 function getSnackBarPosition() {
 	// The snackbar will be moved up from off the bottom of the viewport by the transformation animation.
-	const snackBarMargin = styles.isUsingBottomNavigation() ? size.hpad : size.hpad_medium
+	const snackBarMarginLR = styles.isUsingBottomNavigation() ? size.hpad : size.hpad_medium
 	const leftOffset = styles.isDesktopLayout() ? size.drawer_menu_width : 0
-	const snackBarWidth = Math.min(window.innerWidth - leftOffset - 2 * snackBarMargin, MAX_SNACKBAR_WIDTH)
+	const snackBarWidth = Math.min(window.innerWidth - leftOffset - 2 * snackBarMarginLR, MAX_SNACKBAR_WIDTH)
 	return {
 		top: "100%",
 		// The SnackBar is only shown at the right in single column layout
-		left: styles.isSingleColumnLayout() ? px(window.innerWidth - snackBarMargin - snackBarWidth) : px(leftOffset + snackBarMargin),
+		left: styles.isSingleColumnLayout() ? px(window.innerWidth - snackBarMarginLR - snackBarWidth) : px(leftOffset + snackBarMarginLR),
 		width: px(snackBarWidth),
 		zIndex: LayerType.Overlay,
 	}
 }
 
 function showNextNotification() {
-	const {message, button, onClose} = notificationQueue[0] //we shift later because it is still shown
+	const { message, button, onClose } = notificationQueue[0] //we shift later because it is still shown
 
 	currentAnimationTimeout = null
-	const bottomOffset = styles.isUsingBottomNavigation() ? size.bottom_nav_bar + size.hpad : size.hpad_medium
+	const bottomInset = getSafeAreaInsetBottom()
+	const bottomOffset = styles.isUsingBottomNavigation() ? size.bottom_nav_bar + size.hpad + bottomInset : size.hpad_medium
 	const closeFunction = displayOverlay(
 		() => getSnackBarPosition(),
 		{
@@ -99,8 +97,10 @@ function showNextNotification() {
 					button,
 				}),
 		},
-		dom => transform(TransformEnum.TranslateY, 0, -(bottomOffset + dom.offsetHeight)),
-		dom => transform(TransformEnum.TranslateY, -(bottomOffset + dom.offsetHeight), 0),
+		// it is initially below the container and we move it into it with transform
+		(dom) => transform(TransformEnum.TranslateY, 0, -(bottomOffset + dom.offsetHeight)),
+		// it is initially inside the container, we transform it out of it
+		(dom) => transform(TransformEnum.TranslateY, -(bottomOffset + dom.offsetHeight), 0),
 		"minimized-shadow",
 	)
 

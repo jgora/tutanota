@@ -1,59 +1,43 @@
-import {Dialog} from "../gui/base/Dialog"
-import {DataFile} from "../api/common/DataFile"
-import {assertMainOrNode} from "../api/common/Env"
-import {sortableTimestamp} from "@tutao/tutanota-utils"
-import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
-import {lang} from "../misc/LanguageViewModel"
-import {File as TutanotaFile} from "../api/entities/tutanota/TypeRefs.js"
-import {BlobFacade} from "../api/worker/facades/BlobFacade"
-import {FileFacade} from "../api/worker/facades/FileFacade"
-import {downloadAndDecryptDataFile, FileController, handleDownloadErrors, openDataFileInBrowser, zipDataFiles} from "./FileController.js"
+import { DataFile } from "../api/common/DataFile"
+import { assertMainOrNode } from "../api/common/Env"
+import { File as TutanotaFile } from "../api/entities/tutanota/TypeRefs.js"
+import { ProgressObserver, FileController, openDataFileInBrowser, zipDataFiles } from "./FileController.js"
+import { sortableTimestamp } from "@tutao/tutanota-utils"
+import { BlobFacade } from "../api/worker/facades/lazy/BlobFacade.js"
+import { FileFacade } from "../api/worker/facades/lazy/FileFacade.js"
+import { assertOnlyDataFiles, FileReference } from "../api/common/utils/FileUtils.js"
+import { ProgrammingError } from "../api/common/error/ProgrammingError.js"
 
 assertMainOrNode()
 
-export class FileControllerBrowser implements FileController {
-
-	constructor(
-		private readonly blobFacade: BlobFacade,
-		private readonly fileFacade: FileFacade
-	) {
-	}
-
-	async download(file: TutanotaFile) {
-		try {
-			await showProgressDialog(
-				"pleaseWait_msg",
-				this.downloadAndDecrypt(file)
-					.then(file => this.saveDataFile(file))
-			)
-		} catch (e) {
-			console.log("downloadAndOpen error", e.message)
-			await handleDownloadErrors(e, Dialog.message)
-		}
-	}
-
-	async downloadAll(tutanotaFiles: Array<TutanotaFile>): Promise<void> {
-		const downloadedFiles: Array<DataFile> = []
-		for (const file of tutanotaFiles) {
-			try {
-				const downloadedFile = await this.downloadAndDecrypt(file)
-				downloadedFiles.push(downloadedFile)
-			} catch (e) {
-				await handleDownloadErrors(e, msg => Dialog.message(() => lang.get(msg) + " " + file.name))
-			}
-		}
-		await openDataFileInBrowser(await zipDataFiles(downloadedFiles, `${sortableTimestamp()}-attachments.zip`))
-	}
-
-	async open(file: TutanotaFile) {
-		return this.download(file)
+export class FileControllerBrowser extends FileController {
+	constructor(blobFacade: BlobFacade, fileFacade: FileFacade, guiDownload: ProgressObserver) {
+		super(blobFacade, fileFacade, guiDownload)
 	}
 
 	async saveDataFile(file: DataFile): Promise<void> {
 		return openDataFileInBrowser(file)
 	}
 
-	async downloadAndDecrypt(file: TutanotaFile): Promise<DataFile> {
-		return downloadAndDecryptDataFile(file, this.fileFacade, this.blobFacade)
+	async downloadAndDecrypt(file: TutanotaFile): Promise<DataFile | FileReference> {
+		return this.getAsDataFile(file)
+	}
+
+	async writeDownloadedFiles(downloadedFiles: Array<FileReference | DataFile>): Promise<void> {
+		if (downloadedFiles.length < 1) {
+			return
+		}
+		assertOnlyDataFiles(downloadedFiles)
+		const fileToSave = downloadedFiles.length > 1 ? await zipDataFiles(downloadedFiles, `${sortableTimestamp()}-attachments.zip`) : downloadedFiles[0]
+		return await openDataFileInBrowser(fileToSave)
+	}
+
+	async cleanUp(downloadedFiles: DataFile[]): Promise<void> {
+		// there is nothing to do since nothing gets saved until the browser puts it into the final location
+	}
+
+	protected async openDownloadedFiles(downloadedFiles: Array<FileReference | DataFile>): Promise<void> {
+		// opening and downloading a file is the same thing in browser environment
+		return await this.writeDownloadedFiles(downloadedFiles)
 	}
 }

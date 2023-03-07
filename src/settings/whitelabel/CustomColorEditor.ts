@@ -1,18 +1,18 @@
-import m, {Child, Children, Component, Vnode, VnodeDOM} from "mithril"
-import type {TextFieldAttrs} from "../../gui/base/TextFieldN"
-import {TextFieldN} from "../../gui/base/TextFieldN"
+import m, { Child, Children, Component, Vnode, VnodeDOM } from "mithril"
+import type { TextFieldAttrs } from "../../gui/base/TextField.js"
+import { TextField } from "../../gui/base/TextField.js"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
-import {DropDownSelectorN} from "../../gui/base/DropDownSelectorN"
-import {lang} from "../../misc/LanguageViewModel"
-import type {CustomColor} from "./CustomColorsEditorViewModel"
-import {CustomColorsEditorViewModel} from "./CustomColorsEditorViewModel"
-import {ExpanderButtonN, ExpanderPanelN} from "../../gui/base/Expander"
-import {CustomColorEditorPreview} from "./CustomColorEditorPreview"
-import {downcast} from "@tutao/tutanota-utils"
-import {expandHexTriplet} from "../../gui/base/Color"
-import {px} from "../../gui/size"
-import {BaseThemeId} from "../../gui/theme";
+import { DropDownSelector } from "../../gui/base/DropDownSelector.js"
+import { lang } from "../../misc/LanguageViewModel"
+import type { CustomColor } from "./CustomColorsEditorViewModel"
+import { CustomColorsEditorViewModel } from "./CustomColorsEditorViewModel"
+import { ExpanderButton, ExpanderPanel } from "../../gui/base/Expander"
+import { CustomColorEditorPreview } from "./CustomColorEditorPreview"
+import { downcast } from "@tutao/tutanota-utils"
+import { expandHexTriplet } from "../../gui/base/Color"
+import { px } from "../../gui/size"
+import { BaseThemeId } from "../../gui/theme"
 
 export type SimpleCustomColorEditorAttrs = {
 	model: CustomColorsEditorViewModel
@@ -39,18 +39,18 @@ export class CustomColorEditor implements Component<SimpleCustomColorEditorAttrs
 	}
 
 	view(vnode: Vnode<SimpleCustomColorEditorAttrs>): Children {
-		const {model} = vnode.attrs
+		const { model } = vnode.attrs
 		const simpleColorPickerAttrs: TextFieldAttrs = {
 			label: "accentColor_label",
 			value: vnode.attrs.model.accentColor,
 			injectionsRight: () =>
 				renderColorPicker(
-					inputEvent => {
+					(inputEvent) => {
 						vnode.attrs.model.changeAccentColor(downcast<HTMLInputElement>(inputEvent.target).value)
 						m.redraw()
 					},
 					vnode.attrs.model.accentColor,
-					({dom}) => (this._colorPickerDom = dom as HTMLInputElement),
+					({ dom }) => (this._colorPickerDom = dom as HTMLInputElement),
 				),
 			maxWidth: COLOR_PICKER_WIDTH,
 			disabled: true,
@@ -74,10 +74,10 @@ export class CustomColorEditor implements Component<SimpleCustomColorEditorAttrs
 		return m("", [
 			m("", [
 				m(".flex", [
-					m(".mr-s.flex-grow", m(TextFieldN, simpleColorPickerAttrs)),
+					m(".flex-grow", m(TextField, simpleColorPickerAttrs)),
 					m(
 						".ml-s.flex-grow",
-						m(DropDownSelectorN, {
+						m(DropDownSelector, {
 							label: "baseTheme_label",
 							items: [
 								{
@@ -99,12 +99,14 @@ export class CustomColorEditor implements Component<SimpleCustomColorEditorAttrs
 				m(CustomColorEditorPreview),
 			]),
 			m("", [
-				m(ExpanderButtonN, {
+				m(ExpanderButton, {
 					label: "advanced_label",
 					expanded: this._advancedSettingsEnabled(),
 					onExpandedChange: this._advancedSettingsEnabled,
 				}),
-				m(ExpanderPanelN, {
+				m(
+					ExpanderPanel,
+					{
 						expanded: this._advancedSettingsEnabled(),
 					},
 					[
@@ -120,7 +122,7 @@ export class CustomColorEditor implements Component<SimpleCustomColorEditorAttrs
 												maxWidth: px(CATEGORY_WIDTH),
 											},
 										},
-										[colors.map(c => renderCustomColorField(model, c))],
+										[colors.map((c) => renderCustomColorField(model, c))],
 									),
 								])
 							}),
@@ -158,30 +160,31 @@ export class CustomColorEditor implements Component<SimpleCustomColorEditorAttrs
 	}
 }
 
-function renderCustomColorField(model: CustomColorsEditorViewModel, {name, value, defaultValue, valid}: CustomColor): Child {
-	return m("",
+function renderCustomColorField(model: CustomColorsEditorViewModel, { name, value, defaultValue, valid }: CustomColor): Child {
+	return m(
+		"",
 		{
 			style: {
 				maxWidth: px(ADVANCED_TEXTFIELD_WIDTH),
 			},
 		},
 		[
-			m(TextFieldN, {
+			m(TextField, {
 				label: () => name,
 				value: value,
 				injectionsRight: () =>
-					renderColorPicker(event => model.addCustomization(name, downcast<HTMLInputElement>(event.target).value), processColorInputValue(value)),
-				oninput: val => {
+					renderColorPicker((event) => model.addCustomization(name, downcast<HTMLInputElement>(event.target).value), processColorInputValue(value)),
+				oninput: (val) => {
 					model.addCustomization(name, val)
 				},
 			}),
-			renderDefaultColorLine(defaultValue, valid)
+			renderDefaultColorLine(defaultValue, valid),
 		],
 	)
 }
 
 function renderColorPicker(onInput: (arg0: Event) => unknown, value: string, oncreate?: (vnode: VnodeDOM<void>) => void): Child {
-	return m("input.color-picker.mb-xs.mr-s", {
+	return m("input.color-picker.mb-xs", {
 		type: "color",
 		value: value,
 		oninput: onInput,

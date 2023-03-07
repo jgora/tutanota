@@ -1,20 +1,19 @@
-import {getDefaultSender, getEnabledMailAddresses, getSenderNameForUser} from "../mail/model/MailUtils"
-import type {GroupInfo} from "../api/entities/sys/TypeRefs.js"
-import type {ReceivedGroupInvitation} from "../api/entities/sys/TypeRefs.js"
-import {locator} from "../api/main/MainLocator"
-import {logins} from "../api/main/LoginController"
-import {MailMethod} from "../api/common/TutanotaConstants"
-import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
-import type {GroupSharingTexts} from "./GroupGuiUtils"
-import {getDefaultGroupName, getInvitationGroupType, getSharedGroupName} from "./GroupUtils"
-import {PartialRecipient, Recipients} from "../api/common/recipients/Recipient"
+import { getDefaultSender, getEnabledMailAddressesWithUser, getSenderNameForUser } from "../mail/model/MailUtils"
+import type { GroupInfo, ReceivedGroupInvitation } from "../api/entities/sys/TypeRefs.js"
+import { locator } from "../api/main/MainLocator"
+import { logins } from "../api/main/LoginController"
+import { MailMethod } from "../api/common/TutanotaConstants"
+import { showProgressDialog } from "../gui/dialogs/ProgressDialog"
+import type { GroupSharingTexts } from "./GroupGuiUtils"
+import { getDefaultGroupName, getInvitationGroupType, getSharedGroupName } from "./GroupUtils"
+import { PartialRecipient, Recipients } from "../api/common/recipients/Recipient"
 
 export function sendShareNotificationEmail(sharedGroupInfo: GroupInfo, recipients: Array<PartialRecipient>, texts: GroupSharingTexts) {
-	locator.mailModel.getUserMailboxDetails().then(mailboxDetails => {
+	locator.mailModel.getUserMailboxDetails().then((mailboxDetails) => {
 		const senderMailAddress = getDefaultSender(logins, mailboxDetails)
 		const userName = getSenderNameForUser(mailboxDetails, logins.getUserController())
 		// Sending notifications as bcc so that invited people don't see each other
-		const bcc = recipients.map(({name, address}) => ({
+		const bcc = recipients.map(({ name, address }) => ({
 			name,
 			address,
 		}))
@@ -75,23 +74,24 @@ export function sendRejectNotificationEmail(invitation: ReceivedGroupInvitation,
 }
 
 function _sendNotificationEmail(recipients: Recipients, subject: string, body: string, senderMailAddress: string) {
-	import("../misc/HtmlSanitizer").then(({htmlSanitizer}) => {
+	import("../misc/HtmlSanitizer").then(({ htmlSanitizer }) => {
 		const sanitizedBody = htmlSanitizer.sanitizeHTML(body, {
 			blockExternalContent: false,
 			allowRelativeLinks: false,
 			usePlaceholderForInlineImages: false,
 		}).html
-		locator.mailModel.getUserMailboxDetails().then(mailboxDetails => {
-			const sender = getEnabledMailAddresses(mailboxDetails).includes(senderMailAddress) ? senderMailAddress : getDefaultSender(logins, mailboxDetails)
+		locator.mailModel.getUserMailboxDetails().then(async (mailboxDetails) => {
+			const sender = getEnabledMailAddressesWithUser(mailboxDetails, logins.getUserController().userGroupInfo).includes(senderMailAddress)
+				? senderMailAddress
+				: getDefaultSender(logins, mailboxDetails)
 
 			const confirm = () => Promise.resolve(true)
 
 			const wait = showProgressDialog
-			import("../mail/editor/SendMailModel").then(({defaultSendMailModel}) => {
-				return defaultSendMailModel(mailboxDetails)
-					.initWithTemplate(recipients, subject, sanitizedBody, [], true, sender)
-					.then(model => model.send(MailMethod.NONE, confirm, wait, "tooManyMailsAuto_msg"))
-			})
+			const mailboxProperties = await locator.mailModel.getMailboxProperties(mailboxDetails.mailboxGroupRoot)
+			const model = await locator.sendMailModel(mailboxDetails, mailboxProperties)
+			await model.initWithTemplate(recipients, subject, sanitizedBody, [], true, sender)
+			await model.send(MailMethod.NONE, confirm, wait, "tooManyMailsAuto_msg")
 		})
 	})
 }

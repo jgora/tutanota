@@ -1,47 +1,129 @@
-import {Dialog} from "../gui/base/Dialog"
-import {convertToDataFile, createDataFile, DataFile} from "../api/common/DataFile"
-import {assertMainOrNode} from "../api/common/Env"
-import {assertNotNull, neverNull, promiseMap} from "@tutao/tutanota-utils"
-import {CryptoError} from "../api/common/error/CryptoError"
-import {TranslationKey} from "../misc/LanguageViewModel"
-import {BrowserType} from "../misc/ClientConstants"
-import {client} from "../misc/ClientDetector"
-import {File as TutanotaFile} from "../api/entities/tutanota/TypeRefs.js"
-import {deduplicateFilenames, sanitizeFilename} from "../api/common/utils/FileUtils"
-import {isOfflineError} from "../api/common/utils/ErrorCheckUtils.js"
-import {FileFacade} from "../api/worker/facades/FileFacade.js"
-import {BlobFacade} from "../api/worker/facades/BlobFacade.js"
-import {ArchiveDataType} from "../api/common/TutanotaConstants.js"
+import { Dialog } from "../gui/base/Dialog"
+import { convertToDataFile, createDataFile, DataFile } from "../api/common/DataFile"
+import { assertMainOrNode } from "../api/common/Env"
+import { assertNotNull, neverNull, promiseMap } from "@tutao/tutanota-utils"
+import { CryptoError } from "../api/common/error/CryptoError"
+import { lang, TranslationKey } from "../misc/LanguageViewModel"
+import { BrowserType } from "../misc/ClientConstants"
+import { client } from "../misc/ClientDetector"
+import { File as TutanotaFile } from "../api/entities/tutanota/TypeRefs.js"
+import { deduplicateFilenames, FileReference, sanitizeFilename } from "../api/common/utils/FileUtils"
+import { isOfflineError } from "../api/common/utils/ErrorCheckUtils.js"
+import { FileFacade } from "../api/worker/facades/lazy/FileFacade.js"
+import { BlobFacade } from "../api/worker/facades/lazy/BlobFacade.js"
+import { ArchiveDataType } from "../api/common/TutanotaConstants.js"
+import stream from "mithril/stream"
+import { showProgressDialog } from "../gui/dialogs/ProgressDialog.js"
+import { CancelledError } from "../api/common/error/CancelledError.js"
+import { ConnectionError } from "../api/common/error/RestError.js"
+import Stream from "mithril/stream"
 
 assertMainOrNode()
 export const CALENDAR_MIME_TYPE = "text/calendar"
 
-export interface FileController {
+const enum DownloadPostProcessing {
+	Open,
+	Write,
+}
+
+export type ProgressObserver = (somePromise: Promise<void>, progress?: Stream<number>) => Promise<void>
+
+/**
+ * coordinates single and multiple downloads on different platforms
+ */
+export abstract class FileController {
+	protected constructor(
+		protected readonly blobFacade: BlobFacade,
+		protected readonly fileFacade: FileFacade,
+		protected readonly observeProgress: ProgressObserver,
+	) {}
+
+	private async doDownload(tutanotaFiles: TutanotaFile[], action: DownloadPostProcessing, progress?: stream<number>): Promise<void> {
+		const downloadedFiles: Array<FileReference | DataFile> = []
+		try {
+			let isOffline = false
+			for (const file of tutanotaFiles) {
+				try {
+					const downloadedFile = await this.downloadAndDecrypt(file)
+					downloadedFiles.push(downloadedFile)
+					if (progress != null) {
+						progress(((tutanotaFiles.indexOf(file) + 1) / tutanotaFiles.length) * 100)
+					}
+				} catch (e) {
+					await handleDownloadErrors(e, (msg) => {
+						if (msg === "couldNotAttachFile_msg") {
+							isOffline = true
+						} else {
+							Dialog.message(() => lang.get(msg) + " " + file.name)
+						}
+					})
+					if (isOffline) break // don't try to download more files, but the previous ones (if any) will still be downloaded
+				}
+			}
+			if (downloadedFiles.length > 0) {
+				if (action === DownloadPostProcessing.Open) {
+					await this.openDownloadedFiles(downloadedFiles)
+				} else {
+					await this.writeDownloadedFiles(downloadedFiles)
+				}
+			}
+			if (isOffline) {
+				throw new ConnectionError("currently offline")
+			}
+		} finally {
+			// we don't necessarily know when the user is done with the temporary file that was opened.
+			if (action !== DownloadPostProcessing.Open) await this.cleanUp(downloadedFiles)
+		}
+	}
 
 	/**
-	 * Download a file from the server to the filesystem
+	 * get the referenced TutanotaFile as a DataFile without writing anything to disk
 	 */
-	download(file: TutanotaFile): Promise<void>
-
-	/**
-	 * Download all provided files
-	 */
-	downloadAll(files: Array<TutanotaFile>): Promise<void>
-
-	/**
-	 * Open a file in the host system
-	 */
-	open(file: TutanotaFile): Promise<void>
+	async getAsDataFile(file: TutanotaFile): Promise<DataFile> {
+		// using the browser's built-in download since we don't want to write anything to disk here
+		return downloadAndDecryptDataFile(file, this.fileFacade, this.blobFacade)
+	}
 
 	/**
 	 * Save a DataFile locally
 	 */
-	saveDataFile(file: DataFile): Promise<void>
+	abstract saveDataFile(file: DataFile): Promise<void>
+
+	/**
+	 * Download a file from the server to the filesystem
+	 */
+	async download(file: TutanotaFile) {
+		await this.observeProgress(this.doDownload([file], DownloadPostProcessing.Write))
+	}
+
+	/**
+	 * Download all provided files
+	 *
+	 * Temporary files are deleted afterwards in apps.
+	 */
+	async downloadAll(files: Array<TutanotaFile>): Promise<void> {
+		const progress = stream(0)
+		await this.observeProgress(this.doDownload(files, DownloadPostProcessing.Write, progress), progress)
+	}
+
+	/**
+	 * Open a file in the host system
+	 * Temporary files are deleted afterwards in apps.
+	 */
+	async open(file: TutanotaFile) {
+		await this.observeProgress(this.doDownload([file], DownloadPostProcessing.Open))
+	}
+
+	protected abstract writeDownloadedFiles(downloadedFiles: Array<FileReference | DataFile>): Promise<void>
+
+	protected abstract openDownloadedFiles(downloadedFiles: Array<FileReference | DataFile>): Promise<void>
+
+	protected abstract cleanUp(downloadedFiles: Array<FileReference | DataFile>): Promise<void>
 
 	/**
 	 * Get a file from the server and decrypt it
 	 */
-	downloadAndDecrypt(file: TutanotaFile): Promise<DataFile>
+	protected abstract downloadAndDecrypt(file: TutanotaFile): Promise<FileReference | DataFile>
 }
 
 /**
@@ -51,7 +133,7 @@ export interface FileController {
  * @param file
  */
 export function isLegacyFile(file: TutanotaFile): boolean {
-	return file.blobs.length === 0;
+	return file.blobs.length === 0
 }
 
 export function handleDownloadErrors<R>(e: Error, errorAction: (msg: TranslationKey) => R): R {
@@ -74,7 +156,7 @@ export function readLocalFiles(fileList: FileList): Promise<Array<DataFile>> {
 
 	return promiseMap(
 		nativeFiles,
-		nativeFile => {
+		(nativeFile) => {
 			return new Promise((resolve, reject) => {
 				let reader = new FileReader()
 
@@ -99,9 +181,10 @@ export function readLocalFiles(fileList: FileList): Promise<Array<DataFile>> {
 }
 
 /**
+ * @param allowMultiple allow selecting multiple files
  * @param allowedExtensions Array of extensions strings without "."
  */
-export function showFileChooser(multiple: boolean, allowedExtensions?: Array<string>): Promise<Array<DataFile>> {
+export function showFileChooser(allowMultiple: boolean, allowedExtensions?: Array<string>): Promise<Array<DataFile>> {
 	// each time when called create a new file chooser to make sure that the same file can be selected twice directly after another
 	// remove the last file input
 	const fileInput = document.getElementById("hiddenFileChooser")
@@ -115,22 +198,22 @@ export function showFileChooser(multiple: boolean, allowedExtensions?: Array<str
 	const newFileInput = document.createElement("input")
 	newFileInput.setAttribute("type", "file")
 
-	if (multiple) {
+	if (allowMultiple) {
 		newFileInput.setAttribute("multiple", "multiple")
 	}
 
 	newFileInput.setAttribute("id", "hiddenFileChooser")
 
 	if (allowedExtensions) {
-		newFileInput.setAttribute("accept", allowedExtensions.map(e => "." + e).join(","))
+		newFileInput.setAttribute("accept", allowedExtensions.map((e) => "." + e).join(","))
 	}
 
 	newFileInput.style.display = "none"
-	const promise: Promise<Array<DataFile>> = new Promise(resolve => {
+	const promise: Promise<Array<DataFile>> = new Promise((resolve) => {
 		newFileInput.addEventListener("change", (e: Event) => {
 			readLocalFiles((e.target as any).files)
 				.then(resolve)
-				.catch(async e => {
+				.catch(async (e) => {
 					console.log(e)
 					await Dialog.message("couldNotAttachFile_msg")
 					resolve([])
@@ -158,16 +241,12 @@ export function showFileChooser(multiple: boolean, allowedExtensions?: Array<str
 export async function zipDataFiles(dataFiles: Array<DataFile>, name: string): Promise<DataFile> {
 	const jsZip = await import("jszip")
 	const zip = jsZip.default()
-	const deduplicatedMap = deduplicateFilenames(dataFiles.map(df => sanitizeFilename(df.name)))
+	const deduplicatedMap = deduplicateFilenames(dataFiles.map((df) => sanitizeFilename(df.name)))
 	for (let file of dataFiles) {
 		const filename = assertNotNull(deduplicatedMap[file.name].shift())
-		zip.file(
-			sanitizeFilename(filename),
-			file.data,
-			{binary: true}
-		)
+		zip.file(sanitizeFilename(filename), file.data, { binary: true })
 	}
-	const zipData = await zip.generateAsync({type: "uint8array"})
+	const zipData = await zip.generateAsync({ type: "uint8array" })
 	return createDataFile(name, "application/zip", zipData)
 }
 
@@ -183,15 +262,11 @@ export async function openDataFileInBrowser(dataFile: DataFile): Promise<void> {
 		// Maybe it will gain enough traction that it will be reverted
 		// It's unclear to me why target=_blank is being ignored. If there is a way to ensure that it always opens a new tab,
 		// Then we should do that instead of this, because it's preferable to keep the mime type.
-		const needsPdfWorkaround = dataFile.mimeType === "application/pdf"
-			&& client.browser === BrowserType.FIREFOX
-			&& client.browserVersion >= 98
+		const needsPdfWorkaround = dataFile.mimeType === "application/pdf" && client.browser === BrowserType.FIREFOX && client.browserVersion >= 98
 
-		const mimeType = needsPdfWorkaround
-			? "application/octet-stream"
-			: dataFile.mimeType
+		const mimeType = needsPdfWorkaround ? "application/octet-stream" : dataFile.mimeType
 
-		const blob = new Blob([dataFile.data], {type: mimeType,})
+		const blob = new Blob([dataFile.data], { type: mimeType })
 		const url = URL.createObjectURL(blob)
 		const a = document.createElement("a")
 
@@ -210,7 +285,7 @@ export async function openDataFileInBrowser(dataFile: DataFile): Promise<void> {
 		} else {
 			if (client.isIos() && client.browser === BrowserType.CHROME && typeof FileReader === "function") {
 				const reader = new FileReader()
-				const downloadPromise = new Promise(resolve => {
+				const downloadPromise = new Promise((resolve) => {
 					reader.onloadend = async function () {
 						const url = reader.result as any
 						resolve(await Dialog.legacyDownload(dataFile.name, url))
@@ -238,4 +313,15 @@ export async function downloadAndDecryptDataFile(file: TutanotaFile, fileFacade:
 	}
 }
 
-
+export async function guiDownload(downloadPromise: Promise<void>, progress?: stream<number>): Promise<void> {
+	try {
+		await showProgressDialog("pleaseWait_msg", downloadPromise, progress)
+	} catch (e) {
+		// handle the user cancelling the dialog
+		if (e instanceof CancelledError) {
+			return
+		}
+		console.log("downloadAndOpen error", e.message)
+		await handleDownloadErrors(e, Dialog.message)
+	}
+}

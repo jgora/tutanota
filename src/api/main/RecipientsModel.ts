@@ -1,12 +1,13 @@
-import type {ContactModel} from "../../contacts/model/ContactModel.js";
-import type {LoginController} from "./LoginController.js";
-import type {MailFacade} from "../worker/facades/MailFacade.js";
-import type {EntityClient} from "../common/EntityClient.js";
-import {createNewContact, isTutanotaMailAddress} from "../../mail/model/MailUtils.js";
-import {getContactDisplayName} from "../../contacts/model/ContactUtils.js";
-import {PartialRecipient, Recipient, RecipientType} from "../common/recipients/Recipient.js";
-import {LazyLoaded} from "@tutao/tutanota-utils"
-import {Contact, ContactTypeRef} from "../entities/tutanota/TypeRefs"
+import type { ContactModel } from "../../contacts/model/ContactModel.js"
+import type { LoginController } from "./LoginController.js"
+import type { MailFacade } from "../worker/facades/lazy/MailFacade.js"
+import type { EntityClient } from "../common/EntityClient.js"
+import { createNewContact, isTutanotaMailAddress } from "../../mail/model/MailUtils.js"
+import { getContactDisplayName } from "../../contacts/model/ContactUtils.js"
+import { PartialRecipient, Recipient, RecipientType } from "../common/recipients/Recipient.js"
+import { LazyLoaded } from "@tutao/tutanota-utils"
+import { Contact, ContactTypeRef } from "../entities/tutanota/TypeRefs"
+import { cleanMailAddress } from "../common/utils/CommonCalendarUtils.js"
 
 /**
  * A recipient that can be resolved to obtain contact and recipient type
@@ -32,7 +33,7 @@ export interface ResolvableRecipient extends Recipient {
 
 export enum ResolveMode {
 	Lazy,
-	Eager
+	Eager,
 }
 
 export class RecipientsModel {
@@ -41,27 +42,19 @@ export class RecipientsModel {
 		private readonly loginController: LoginController,
 		private readonly mailFacade: MailFacade,
 		private readonly entityClient: EntityClient,
-	) {
-	}
+	) {}
 
 	/**
 	 * Start resolving a recipient
 	 * If resolveLazily === true, Then resolution will not be initiated (i.e. no server calls will be made) until the first call to `resolved`
 	 */
 	resolve(recipient: PartialRecipient, resolveMode: ResolveMode): ResolvableRecipient {
-		return new ResolvableRecipientImpl(
-			recipient,
-			this.contactModel,
-			this.loginController,
-			this.mailFacade,
-			this.entityClient,
-			resolveMode
-		)
+		return new ResolvableRecipientImpl(recipient, this.contactModel, this.loginController, this.mailFacade, this.entityClient, resolveMode)
 	}
 }
 
 class ResolvableRecipientImpl implements ResolvableRecipient {
-	public readonly address: string
+	private _address: string
 	private _name: string | null
 	private readonly lazyType: LazyLoaded<RecipientType>
 	private readonly lazyContact: LazyLoaded<Contact | null>
@@ -70,6 +63,10 @@ class ResolvableRecipientImpl implements ResolvableRecipient {
 	private readonly initialContact: Contact | null = null
 
 	private overrideContact: Contact | null = null
+
+	get address(): string {
+		return this._address
+	}
 
 	get name(): string {
 		return this._name ?? ""
@@ -89,31 +86,32 @@ class ResolvableRecipientImpl implements ResolvableRecipient {
 		private readonly loginController: LoginController,
 		private readonly mailFacade: MailFacade,
 		private readonly entityClient: EntityClient,
-		resolveMode: ResolveMode
+		resolveMode: ResolveMode,
 	) {
-		this.address = arg.address
+		if (isTutanotaMailAddress(arg.address) || arg.type === RecipientType.INTERNAL) {
+			this.initialType = RecipientType.INTERNAL
+			this._address = cleanMailAddress(arg.address)
+		} else if (arg.type) {
+			this.initialType = arg.type
+			this._address = arg.address
+		} else {
+			this._address = arg.address
+		}
+
 		this._name = arg.name ?? null
 
 		if (!(arg.contact instanceof Array)) {
 			this.initialContact = arg.contact ?? null
 		}
 
-		if (isTutanotaMailAddress(this.address)) {
-			this.initialType = RecipientType.INTERNAL
-		} else if (arg.type) {
-			this.initialType = arg.type
-		}
-
 		this.lazyType = new LazyLoaded(() => this.resolveType())
-		this.lazyContact = new LazyLoaded(
-			async () => {
-				const contact = await this.resolveContact(arg.contact)
-				if (contact != null && this._name == null) {
-					this._name = getContactDisplayName(contact)
-				}
-				return contact
+		this.lazyContact = new LazyLoaded(async () => {
+			const contact = await this.resolveContact(arg.contact)
+			if (contact != null && this._name == null) {
+				this._name = getContactDisplayName(contact)
 			}
-		)
+			return contact
+		})
 
 		if (resolveMode === ResolveMode.Eager) {
 			this.lazyType.load()
@@ -131,9 +129,7 @@ class ResolvableRecipientImpl implements ResolvableRecipient {
 	}
 
 	async resolved(): Promise<Recipient> {
-
 		await Promise.all([this.lazyType.getAsync(), this.lazyContact.getAsync()])
-
 		return {
 			address: this.address,
 			name: this.name,
@@ -157,8 +153,15 @@ class ResolvableRecipientImpl implements ResolvableRecipient {
 	 */
 	private async resolveType(): Promise<RecipientType> {
 		if (this.initialType === RecipientType.UNKNOWN) {
-			const keyData = await this.mailFacade.getRecipientKeyData(this.address)
-			return keyData == null ? RecipientType.EXTERNAL : RecipientType.INTERNAL
+			const cleanedAddress = cleanMailAddress(this.address)
+			const keyData = await this.mailFacade.getRecipientKeyData(cleanedAddress)
+			if (keyData != null) {
+				// we know this is one of ours, so it's safe to clean it up
+				this._address = cleanedAddress
+				return RecipientType.INTERNAL
+			} else {
+				return RecipientType.EXTERNAL
+			}
 		} else {
 			return this.initialType
 		}
@@ -176,8 +179,16 @@ class ResolvableRecipientImpl implements ResolvableRecipient {
 			} else if (contact instanceof Array) {
 				return await this.entityClient.load(ContactTypeRef, contact)
 			} else if (contact == null) {
-				return await this.contactModel.searchForContact(this.address)
-					?? createNewContact(this.loginController.getUserController().user, this.address, this.name)
+				const foundContact = await this.contactModel.searchForContact(this.address)
+				if (foundContact) {
+					return foundContact
+				} else {
+					// we don't want to create a mixed-case contact if the address is an internal one.
+					// after lazyType is loaded, if it resolves to RecipientType.INTERNAL, we have the
+					// cleaned address in this.address.
+					await this.lazyType
+					return createNewContact(this.loginController.getUserController().user, this.address, this.name)
+				}
 			} else {
 				return contact
 			}

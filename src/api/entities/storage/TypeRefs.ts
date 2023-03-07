@@ -14,7 +14,7 @@ export type BlobAccessTokenPostIn = {
 	_type: TypeRef<BlobAccessTokenPostIn>;
 
 	_format: NumberString;
-	archiveDataType: NumberString;
+	archiveDataType: null | NumberString;
 
 	read:  null | BlobReadData;
 	write:  null | BlobWriteData;
@@ -143,6 +143,7 @@ export type BlobServerAccessInfo = {
 
 	_id: Id;
 	blobAccessToken: string;
+	expires: Date;
 
 	servers: BlobServerUrl[];
 }

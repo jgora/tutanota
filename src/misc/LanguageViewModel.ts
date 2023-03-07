@@ -1,8 +1,8 @@
-import type {lazy} from "@tutao/tutanota-utils"
-import {downcast, replaceAll, typedEntries} from "@tutao/tutanota-utils"
-import type {TranslationKeyType} from "./TranslationKey"
-import {getWhitelabelCustomizations, WhitelabelCustomizations} from "./WhitelabelCustomizations"
-import {assertMainOrNodeBoot} from "../api/common/Env"
+import type { lazy } from "@tutao/tutanota-utils"
+import { downcast, replaceAll, typedEntries } from "@tutao/tutanota-utils"
+import type { TranslationKeyType } from "./TranslationKey"
+import { getWhitelabelCustomizations, WhitelabelCustomizations } from "./WhitelabelCustomizations"
+import { assertMainOrNodeBoot } from "../api/common/Env"
 
 export type TranslationKey = TranslationKeyType
 export type TranslationText = TranslationKey | lazy<string>
@@ -45,6 +45,7 @@ const translationImportMap: Record<LanguageCode, () => Promise<any>> = {
 	pt_pt: () => import("../translations/pt_pt.js"),
 	ro: () => import("../translations/ro.js"),
 	ru: () => import("../translations/ru.js"),
+	si: () => import("../translations/si.js"),
 	sk: () => import("../translations/sk.js"),
 	sl: () => import("../translations/sl.js"),
 	sr_cyrl: () => import("../translations/sr_cyrl.js"),
@@ -100,6 +101,7 @@ export const LanguageNames: Record<string, TranslationKey> = Object.freeze({
 	pt_pt: "languagePortugesePortugal_label",
 	ro: "languageRomanian_label",
 	ru: "languageRussian_label",
+	si: "languageSinhalese_label",
 	sk: "languageSlovak_label",
 	sl: "languageSlovenian_label",
 	sr_cyrl: "languageSerbian_label",
@@ -140,7 +142,7 @@ export const enum InfoLink {
 	About = "https://tutanota.com/imprint",
 	//terms
 	Terms = "https://tutanota.com/terms",
-	Privacy = "https://tutanota.com/privacy",
+	Privacy = "https://tutanota.com/privacy-policy",
 	GiftCardsTerms = "https://tutanota.com/giftCardsTerms",
 	//faq
 	RecoverCode = "https://tutanota.com/faq#reset",
@@ -153,6 +155,7 @@ export const enum InfoLink {
 	MailAuth = "https://tutanota.com/faq#mail-auth",
 	RunInBackground = "https://tutanota.com/faq#tray-desktop",
 	LoadImages = "https://tutanota.com/faq#load-images",
+	Usage = "https://tutanota.com/faq#usage",
 	//blog
 	PremiumProBusiness = "https://tutanota.com/blog/posts/premium-pro-business",
 }
@@ -210,11 +213,11 @@ export class LanguageViewModel {
 		this.code = "en"
 		const language = getLanguage()
 		return this.setLanguage(language) // Service worker currently caches only English. We don't want the whole app to fail if we cannot fetch the language.
-				   .catch(e => {
-					   console.warn("Could not set language", language, e)
+			.catch((e) => {
+				console.warn("Could not set language", language, e)
 
-					   this._setLanguageTag("en-US")
-				   })
+				this._setLanguageTag("en-US")
+			})
 	}
 
 	addStaticTranslation(key: string, text: string) {
@@ -227,7 +230,7 @@ export class LanguageViewModel {
 		this.code = code
 	}
 
-	setLanguage(lang: {code: LanguageCode; languageTag: string}): Promise<void> {
+	setLanguage(lang: { code: LanguageCode; languageTag: string }): Promise<void> {
 		this._setLanguageTag(lang.languageTag)
 
 		if (this.code === lang.code) {
@@ -236,7 +239,7 @@ export class LanguageViewModel {
 
 		// we don't support multiple language files for en so just use the one and only.
 		const code: LanguageCode = lang.code.startsWith("en") ? "en" : lang.code
-		return translationImportMap[code]().then(translationsModule => {
+		return translationImportMap[code]().then((translationsModule) => {
 			this.translations = translationsModule.default
 			this.code = lang.code
 		})
@@ -244,7 +247,7 @@ export class LanguageViewModel {
 
 	/**
 	 * must be invoked at startup from LanguageViewModel to initialize all DateTimeFormats
-	 * @param codes
+	 * @param tag
 	 */
 	_setLanguageTag(tag: string) {
 		this.languageTag = tag
@@ -435,14 +438,13 @@ export class LanguageViewModel {
 	getMaybeLazy(value: TranslationText): string {
 		return typeof value === "function" ? value() : lang.get(value)
 	}
-
 }
 
 /**
  * Gets the default language derived from the browser language.
  * @param restrictions An array of language codes the selection should be restricted to
  */
-export function getLanguageNoDefault(restrictions?: LanguageCode[]): | {code: LanguageCode, languageTag: string} | null {
+export function getLanguageNoDefault(restrictions?: LanguageCode[]): { code: LanguageCode; languageTag: string } | null {
 	// navigator.languages can be an empty array on android 5.x devices
 	let languageTags
 
@@ -476,9 +478,7 @@ export function getLanguageNoDefault(restrictions?: LanguageCode[]): | {code: La
  * Gets the default language derived from the browser language.
  * @param restrictions An array of language codes the selection should be restricted to
  */
-export function getLanguage(
-	restrictions?: LanguageCode[],
-): {
+export function getLanguage(restrictions?: LanguageCode[]): {
 	code: LanguageCode
 	languageTag: string
 } {
@@ -500,14 +500,14 @@ export function getLanguage(
 
 export function getSubstitutedLanguageCode(tag: string, restrictions?: LanguageCode[]): LanguageCode | null {
 	let code = tag.toLowerCase().replace("-", "_")
-	let language = languages.find(l => l.code === code && (restrictions == null || restrictions.indexOf(l.code) !== -1))
+	let language = languages.find((l) => l.code === code && (restrictions == null || restrictions.indexOf(l.code) !== -1))
 
 	if (language == null) {
 		if (code === "zh_hk" || code === "zh_tw") {
-			language = languages.find(l => l.code === "zh_hant")
+			language = languages.find((l) => l.code === "zh_hant")
 		} else {
 			let basePart = getBasePart(code)
-			language = languages.find(l => getBasePart(l.code) === basePart && (restrictions == null || restrictions.indexOf(l.code) !== -1))
+			language = languages.find((l) => getBasePart(l.code) === basePart && (restrictions == null || restrictions.indexOf(l.code) !== -1))
 		}
 	}
 

@@ -1,6 +1,6 @@
 import stream from "mithril/stream"
-import m, {Children, Component, Vnode} from "mithril"
-import {DropDownSelectorAttrs, DropDownSelectorN, SelectorItemList} from "../../gui/base/DropDownSelectorN"
+import m, { Children, Component, Vnode } from "mithril"
+import { DropDownSelectorAttrs, DropDownSelector, SelectorItemList } from "../../gui/base/DropDownSelector.js"
 
 export type GermanLanguageCode = "de" | "de_sie"
 export type WhitelabelGermanLanguageFileSettingsAttrs = {
@@ -9,11 +9,10 @@ export type WhitelabelGermanLanguageFileSettingsAttrs = {
 }
 
 export class WhitelabelGermanLanguageFileSettings implements Component<WhitelabelGermanLanguageFileSettingsAttrs> {
-	constructor(vnode: Vnode<WhitelabelGermanLanguageFileSettingsAttrs>) {
-	}
+	constructor(vnode: Vnode<WhitelabelGermanLanguageFileSettingsAttrs>) {}
 
 	view(vnode: Vnode<WhitelabelGermanLanguageFileSettingsAttrs>): Children {
-		const {customGermanLanguageFile, onGermanLanguageFileChanged} = vnode.attrs
+		const { customGermanLanguageFile, onGermanLanguageFileChanged } = vnode.attrs
 		return this._renderDefaultGermanLanguageFileSettings(customGermanLanguageFile, onGermanLanguageFileChanged)
 	}
 
@@ -38,6 +37,6 @@ export class WhitelabelGermanLanguageFileSettings implements Component<Whitelabe
 			selectedValue: selectedValue,
 			selectionChangedHandler: onGermanLanguageFileChanged,
 		} as const
-		return m(DropDownSelectorN, defaultGermanLanguageFileDropDownAttrs)
+		return m(DropDownSelector, defaultGermanLanguageFileDropDownAttrs)
 	}
 }

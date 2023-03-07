@@ -17,7 +17,7 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>3.98.12</string>
+	<string>3.110.0</string>
 	<key>CFBundleURLTypes</key>
 	<array>
 		<dict>
@@ -27,12 +27,13 @@
 			<string>de.tutao.tutanota</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
+				<string>tutashare</string>
 				<string>tutanota</string>
 			</array>
 		</dict>
 	</array>
 	<key>CFBundleVersion</key>
-	<string>3.98.12</string>
+	<string>3.110.0</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>LSRequiresIPhoneOS</key>
@@ -57,7 +58,7 @@
 	<key>NSRemindersUsageDescription</key>
 	<string>Shows notification when new email arrives.</string>
 	<key>TutanotaApplicationPath</key>
-	<string>build/dist/</string>
+	<string>build/</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>ionicons.ttf</string>

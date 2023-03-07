@@ -19,7 +19,7 @@ platform :ios do
 	desc "Push a new release to AppStore"
 	lane :release do |options|
 		match(
-			app_identifier: "de.tutao.tutanota",
+			app_identifier: ["de.tutao.tutanota", "de.tutao.tutanota.TutanotaShareExtension"],
 			type: "appstore",
 			verbose: false,
 			readonly: true,
@@ -31,7 +31,6 @@ platform :ios do
 			scheme: "tutanota-dist",
 			output_directory: "releases",
 			output_name: "tutanota-" + get_version_number(target: "tutanota"),
-			include_bitcode: true,
 			include_symbols: true,
 			verbose: false
 		)
@@ -50,7 +49,7 @@ platform :ios do
 	desc "Build a new release for ad-hoc"
 	lane :adhoc do |options|
 		match(
-			app_identifier: "de.tutao.tutanota",
+			app_identifier: ["de.tutao.tutanota", "de.tutao.tutanota.TutanotaShareExtension"],
 			type: "adhoc",
 			verbose: false,
 			readonly: true,
@@ -65,7 +64,6 @@ platform :ios do
 			export_options: {
 				method: "ad-hoc"
 			},
-			include_bitcode: true,
 			verbose: false
 		)
 	end
@@ -73,7 +71,7 @@ platform :ios do
 	desc "Build against test system"
 	lane :adhoctest do
 		match(
-			app_identifier: "de.tutao.tutanota",
+			app_identifier: ["de.tutao.tutanota", "de.tutao.tutanota.TutanotaShareExtension"],
 			type: "adhoc",
 			verbose: false,
 			readonly: true,
@@ -88,7 +86,6 @@ platform :ios do
 			export_options: {
 				method: "ad-hoc"
 			},
-			include_bitcode: true,
 			verbose: false
 		)
 	end
@@ -97,17 +94,17 @@ platform :ios do
 	lane :test do
 		# Create tutanota-3/build if it's not there because we try to copy it during build
 		sh "mkdir -p ../../build"
- 		sh "if xcrun simctl list | grep iphone-6s-ios-15.4; then echo 'Using existing simulator'; else xcrun simctl create iphone-6s-ios-15.4 com.apple.CoreSimulator.SimDeviceType.iPhone-6s com.apple.CoreSimulator.SimRuntime.iOS-15-4; fi"
+ 		sh "if xcrun simctl list | grep iphone-12-ios-16-2; then echo 'Using existing simulator'; else xcrun simctl create iphone-12-ios-16-2 com.apple.CoreSimulator.SimDeviceType.iPhone-12 com.apple.CoreSimulator.SimRuntime.iOS-16-2; fi"
 		run_tests(
 				scheme: "tutanota",
-				devices: ["iphone-6s-ios-15.4"]
+				devices: ["iphone-12-ios-16-2"]
 		)
  	end
 
  	desc "Renew adhoc cert"
  	lane :renewadhoccert do
 		match(
-			app_identifier: "de.tutao.tutanota",
+			app_identifier: ["de.tutao.tutanota", "de.tutao.tutanota.TutanotaShareExtension"],
 			type: "adhoc",
 			verbose: true,
 			readonly: false,
@@ -121,7 +118,7 @@ platform :ios do
 	desc "Renew appstore cert"
 	lane :renewappstorecert do
 		match(
-			app_identifier: "de.tutao.tutanota",
+			app_identifier: ["de.tutao.tutanota", "de.tutao.tutanota.TutanotaShareExtension"],
 			type: "appstore",
 			verbose: true,
 			readonly: false,

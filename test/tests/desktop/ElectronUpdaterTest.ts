@@ -1,33 +1,39 @@
 import o from "ospec"
-import type {App} from "electron"
-import type {DesktopNativeCryptoFacade} from "../../../src/desktop/DesktopNativeCryptoFacade.js"
-import {delay, downcast} from "@tutao/tutanota-utils"
-import {ElectronUpdater} from "../../../src/desktop/ElectronUpdater.js"
-import type {DesktopTray} from "../../../src/desktop/tray/DesktopTray.js"
-import type {UpdaterWrapper} from "../../../src/desktop/UpdaterWrapper.js"
+import type { App } from "electron"
+import type { DesktopNativeCryptoFacade } from "../../../src/desktop/DesktopNativeCryptoFacade.js"
+import { delay, downcast } from "@tutao/tutanota-utils"
+import { ElectronUpdater } from "../../../src/desktop/ElectronUpdater.js"
+import type { UpdaterWrapper } from "../../../src/desktop/UpdaterWrapper.js"
 import n from "../nodemocker.js"
-import type {DesktopConfig} from "../../../src/desktop/config/DesktopConfig.js"
-import type {DesktopNotifier} from "../../../src/desktop/DesktopNotifier.js"
-import {lang} from "../../../src/misc/LanguageViewModel.js"
+import type { DesktopConfig } from "../../../src/desktop/config/DesktopConfig.js"
+import type { DesktopNotifier } from "../../../src/desktop/DesktopNotifier.js"
+import { lang } from "../../../src/misc/LanguageViewModel.js"
 import en from "../../../src/translations/en.js"
-import {object} from "testdouble"
+import { matchers, object, verify, when } from "testdouble"
+import { FsExports } from "../../../src/desktop/ElectronExportTypes.js"
 
 lang.init(en)
+
+const sigB64 = "c2lnbmF0dXJlCg=="
+const shaB64 = "c2hhNTEyCg=="
+const data = Buffer.from([1, 2, 3])
 
 o.spec("ElectronUpdater Test", function () {
 	let electron: {
 		app: App
 	}
-	let rightKey
-	let wrongKey
-	let crypto
+	let fs: FsExports
+	let crypto: DesktopNativeCryptoFacade
 	let autoUpdater
 	let conf: DesktopConfig
 	let notifier: DesktopNotifier
 	let updaterImpl: UpdaterWrapper
 	o.beforeEach(function () {
+		fs = object()
+		when(fs.promises.unlink("downloadedFile.AppImage")).thenResolve()
+		when(fs.promises.readFile("downloadedFile.AppImage")).thenResolve(data)
 		notifier = downcast({
-			showOneShot: o.spy((prop: {title: string; body: string; icon: any}) => Promise.resolve("click")),
+			showOneShot: o.spy((prop: { title: string; body: string; icon: any }) => Promise.resolve("click")),
 		})
 		conf = downcast({
 			removeListener: o.spy((key: string, cb: () => void) => conf),
@@ -64,27 +70,17 @@ o.spec("ElectronUpdater Test", function () {
 				}
 			},
 		})
-		electron = {
-			app: downcast({
-				getPath: (path: string) => `/mock-${path}/`,
-				getVersion: (): string => "3.45.0",
-				emit: o.spy(),
-				callbacks: [],
-				once: function (ev: string, cb: () => void) {
-					this.callbacks[ev] = cb
-					return electron.app
-				},
-			}),
-		}
-		rightKey = {
-			verify: o.spy(() => true),
-		}
-		wrongKey = {
-			verify: o.spy(() => false),
-		}
-		crypto = downcast<DesktopNativeCryptoFacade>({
-			publicKeyFromPem: o.spy((pem: string) => (pem === "yes" ? rightKey : wrongKey)),
-		})
+		const app: Electron.App = object()
+		when(app.getVersion()).thenReturn("3.45.0")
+		electron = { app }
+		const pathCaptor = matchers.captor()
+		when(app.getPath(pathCaptor.capture())).thenReturn(`/mock-${pathCaptor.value}/`)
+		when(app.once(matchers.anything(), matchers.anything())).thenReturn(app)
+
+		crypto = object()
+		when(crypto.verifySignature("yes", data, Buffer.from(sigB64, "base64"))).thenReturn(true)
+		when(crypto.verifySignature("no", matchers.anything(), matchers.anything())).thenReturn(false)
+
 		autoUpdater = {
 			callbacks: {},
 			logger: undefined,
@@ -106,7 +102,7 @@ o.spec("ElectronUpdater Test", function () {
 			},
 			removeListener: function (ev: string, cb: (arg0: any) => void) {
 				if (!this.callbacks[ev]) return
-				this.callbacks[ev] = this.callbacks[ev].filter(entry => entry.fn !== cb)
+				this.callbacks[ev] = this.callbacks[ev].filter((entry) => entry.fn !== cb)
 			},
 			removeAllListeners: o.spy(function (ev: string) {
 				this.callbacks[ev] = []
@@ -114,26 +110,32 @@ o.spec("ElectronUpdater Test", function () {
 			}),
 			emit: function (ev: string, args: any) {
 				const entries = this.callbacks[ev]
-				entries.forEach(entry => {
+				entries.forEach((entry) => {
 					setTimeout(() => entry.fn(args), 1)
 				})
-				this.callbacks[ev] = entries.filter(entry => !entry.once)
+				this.callbacks[ev] = entries.filter((entry) => !entry.once)
 			},
 			checkForUpdates: o.spy(function () {
 				this.emit("update-available", {
-					sha512: "sha512",
-					signature: "signature",
+					downloadedFile: "downloadedFile.AppImage",
+					sha512: shaB64,
+					signature: sigB64,
+					version: "4.5.0",
 				})
 				return Promise.resolve()
 			}),
 			downloadUpdate: o.spy(function () {
 				this.emit("update-downloaded", {
+					downloadedFile: "downloadedFile.AppImage",
+					sha512: shaB64, // "sha512"
+					signature: sigB64,
 					version: "4.5.0",
 				})
 				return Promise.resolve()
 			}),
 			quitAndInstall: o.spy(),
 		}
+
 		updaterImpl = downcast({
 			electronUpdater: Promise.resolve(autoUpdater),
 			updatesEnabledInBuild: () => true,
@@ -142,7 +144,7 @@ o.spec("ElectronUpdater Test", function () {
 	o("update is available", async function () {
 		downcast(updaterImpl).updatesEnabledInBuild = () => true
 
-		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl)
+		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl, fs)
 		upd.start()
 		o(conf.setVar.callCount).equals(1)
 		o(conf.setVar.args).deepEquals(["showAutoUpdateOption", true])
@@ -152,37 +154,27 @@ o.spec("ElectronUpdater Test", function () {
 		o(conf.on.callCount).equals(1)
 		await updaterImpl.electronUpdater
 		await delay(190)
-		// check signature
-		o(crypto.publicKeyFromPem.callCount).equals(2)
-		o(rightKey.verify.callCount).equals(1)
-		o(rightKey.verify.args[0]).equals(Buffer.from("sha512", "base64").toString("binary"))
-		o(rightKey.verify.args[1]).equals(Buffer.from("signature", "base64").toString("binary"))
-		o(wrongKey.verify.callCount).equals(1)
-		o(wrongKey.verify.args[0]).equals(Buffer.from("sha512", "base64").toString("binary"))
-		o(wrongKey.verify.args[1]).equals(Buffer.from("signature", "base64").toString("binary"))
 		// show notification
 		o(notifier.showOneShot.callCount).equals(1)
-		o(electron.app.emit.callCount).equals(1)
-		o(electron.app.emit.args[0]).equals("enable-force-quit")
+		verify(electron.app.emit("enable-force-quit"), { times: 1 })
 		o(autoUpdater.quitAndInstall.callCount).equals(1)
 		o(autoUpdater.quitAndInstall.args[0]).equals(false)
 		o(autoUpdater.quitAndInstall.args[1]).equals(true)
 	})
 	o("update is not available", async function () {
 		autoUpdater.checkForUpdates = o.spy(() => Promise.resolve())
-		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl)
+		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl, fs)
 		upd.start()
 		await delay(190)
 		o(autoUpdater.checkForUpdates.callCount).equals(1)
 		// don't check signature
-		o(crypto.publicKeyFromPem.callCount).equals(0)
-		o(rightKey.verify.callCount).equals(0)
-		o(wrongKey.verify.callCount).equals(0)
+		verify(crypto.verifySignature(matchers.anything(), matchers.anything(), matchers.anything()), { times: 0 })
 		// don't show notification
 		o(notifier.showOneShot.callCount).equals(0)
 		o(autoUpdater.quitAndInstall.callCount).equals(0)
 
-		upd._stopPolling() // makes the test halt
+		// @ts-ignore makes the test halt
+		upd.stopPolling()
 	})
 	o("enable autoUpdate while running", async function () {
 		//mock instances
@@ -216,25 +208,18 @@ o.spec("ElectronUpdater Test", function () {
 				},
 			})
 			.set()
-		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl)
+		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl, fs)
 		upd.start()
 		await delay(100)
 		// entered start() twice
 		o(conf.removeListener.callCount).equals(2)
 		o(conf.on.callCount).equals(2)
 		// check signature
-		o(crypto.publicKeyFromPem.callCount).equals(2)
-		o(crypto.publicKeyFromPem.args[0]).equals("yes")
-		o(rightKey.verify.callCount).equals(1)
-		o(rightKey.verify.args[0]).equals(Buffer.from("sha512", "base64").toString("binary"))
-		o(rightKey.verify.args[1]).equals(Buffer.from("signature", "base64").toString("binary"))
-		o(wrongKey.verify.callCount).equals(1)
-		o(wrongKey.verify.args[0]).equals(Buffer.from("sha512", "base64").toString("binary"))
-		o(wrongKey.verify.args[1]).equals(Buffer.from("signature", "base64").toString("binary"))
+		verify(crypto.verifySignature("yes", data, Buffer.from(sigB64, "base64")))
+		verify(crypto.verifySignature("no", data, Buffer.from(sigB64, "base64")))
 		// show notification
 		o(notifier.showOneShot.callCount).equals(1)
-		o(electron.app.emit.callCount).equals(1)
-		o(electron.app.emit.args[0]).equals("enable-force-quit")
+		verify(electron.app.emit("enable-force-quit"), { times: 1 })
 		o(autoUpdater.quitAndInstall.callCount).equals(1)
 		o(autoUpdater.quitAndInstall.args[0]).equals(false)
 		o(autoUpdater.quitAndInstall.args[1]).equals(true)
@@ -262,7 +247,7 @@ o.spec("ElectronUpdater Test", function () {
 
 		const scheduler = (fn, time) => setInterval(fn, 10)
 
-		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl, scheduler)
+		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl, fs, scheduler)
 		upd.start()
 		// after the error
 		await delay(2)
@@ -280,20 +265,21 @@ o.spec("ElectronUpdater Test", function () {
 			return Promise.resolve()
 		}
 
-		const scheduler = fn => setInterval(fn, 5)
+		const scheduler = (fn) => setInterval(fn, 5)
 
-		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl, scheduler)
+		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl, fs, scheduler)
 		upd.start()
 		await delay(150)
 
-		upd._stopPolling()
+		// @ts-ignore
+		upd.stopPolling()
 
 		o(autoUpdater.removeAllListeners.callCount).equals(4)("removeAllListeners")
 		o(notifier.showOneShot.callCount).equals(1)("showOneShot")
 	})
 	o("works if second key is right one", async function () {
 		o.timeout(1000)
-		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl)
+		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl, fs)
 		upd.start()
 		// there is only one enableAutoUpdate listener
 		o(conf.removeListener.callCount).equals(1)
@@ -302,28 +288,22 @@ o.spec("ElectronUpdater Test", function () {
 		await delay(250)
 		o(autoUpdater.checkForUpdates.callCount).equals(1)
 		// check signature
-		o(crypto.publicKeyFromPem.callCount).equals(2)
-		o(crypto.publicKeyFromPem.args[0]).equals("yes")
-		o(wrongKey.verify.callCount).equals(1)
-		o(wrongKey.verify.args[0]).equals(Buffer.from("sha512", "base64").toString("binary"))
-		o(wrongKey.verify.args[1]).equals(Buffer.from("signature", "base64").toString("binary"))
-		o(rightKey.verify.callCount).equals(1)
-		o(rightKey.verify.args[0]).equals(Buffer.from("sha512", "base64").toString("binary"))
-		o(rightKey.verify.args[1]).equals(Buffer.from("signature", "base64").toString("binary"))
+		verify(crypto.verifySignature("no", data, Buffer.from(sigB64, "base64")))
+		verify(crypto.verifySignature("yes", data, Buffer.from(sigB64, "base64")))
 		// show notification
 		o(notifier.showOneShot.callCount).equals(1)
-		o(electron.app.emit.callCount).equals(1)
-		o(electron.app.emit.args[0]).equals("enable-force-quit")
+		verify(electron.app.emit("enable-force-quit"), { times: 1 })
 		o(autoUpdater.quitAndInstall.callCount).equals(1)
 		o(autoUpdater.quitAndInstall.args[0]).equals(false)
 		o(autoUpdater.quitAndInstall.args[1]).equals(true)
 
-		upd._stopPolling()
+		// @ts-ignore
+		upd.stopPolling()
 	})
 	o("updater disables itself if accessSync throws", async function () {
 		downcast(updaterImpl).updatesEnabledInBuild = () => false
 
-		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl)
+		const upd = new ElectronUpdater(conf, notifier, crypto, electron.app, object(), updaterImpl, fs)
 		await updaterImpl.electronUpdater
 		o(autoUpdater.on.callCount).equals(6)
 		upd.start()

@@ -23,23 +23,23 @@ import {
 	RepeatPeriod,
 	WeekStart,
 } from "../../api/common/TutanotaConstants"
-import {DateTime, FixedOffsetZone, IANAZone} from "luxon"
-import type {CalendarEvent, CalendarGroupRoot, CalendarRepeatRule, UserSettingsGroupRoot} from "../../api/entities/tutanota/TypeRefs.js"
-import {createCalendarRepeatRule} from "../../api/entities/tutanota/TypeRefs.js"
-import {DAYS_SHIFTED_MS, generateEventElementId, isAllDayEvent, isAllDayEventByTimes} from "../../api/common/utils/CommonCalendarUtils"
-import {lang} from "../../misc/LanguageViewModel"
-import {formatDateTime, formatDateWithMonth, formatTime, timeStringFromParts} from "../../misc/Formatter"
-import {size} from "../../gui/size"
-import type {RepeatRule, User} from "../../api/entities/sys/TypeRefs.js"
-import {isColorLight} from "../../gui/base/Color"
-import type {GroupColors} from "../view/CalendarView"
-import {isSameId} from "../../api/common/utils/EntityUtils"
-import type {Time} from "../../api/common/utils/Time"
-import type {SelectorItemList} from "../../gui/base/DropDownSelectorN"
-import type {CalendarInfo} from "../model/CalendarModel"
-import {assertMainOrNode} from "../../api/common/Env"
-import {ChildArray, Children} from "mithril";
-import {DateProvider} from "../../api/common/DateProvider"
+import { DateTime, FixedOffsetZone, IANAZone } from "luxon"
+import { CalendarEvent, CalendarGroupRoot, CalendarRepeatRule, createCalendarRepeatRule, UserSettingsGroupRoot } from "../../api/entities/tutanota/TypeRefs.js"
+import { DAYS_SHIFTED_MS, generateEventElementId, isAllDayEvent, isAllDayEventByTimes } from "../../api/common/utils/CommonCalendarUtils"
+import { lang } from "../../misc/LanguageViewModel"
+import { formatDateTime, formatDateWithMonth, formatTime, timeStringFromParts } from "../../misc/Formatter"
+import { size } from "../../gui/size"
+import type { RepeatRule, User } from "../../api/entities/sys/TypeRefs.js"
+import { isColorLight } from "../../gui/base/Color"
+import type { GroupColors } from "../view/CalendarView"
+import { isSameId } from "../../api/common/utils/EntityUtils"
+import type { Time } from "../../api/common/utils/Time"
+import type { SelectorItemList } from "../../gui/base/DropDownSelector.js"
+import type { CalendarInfo } from "../model/CalendarModel"
+import { assertMainOrNode } from "../../api/common/Env"
+import { ChildArray, Children } from "mithril"
+import { DateProvider } from "../../api/common/DateProvider"
+import { TIMESTAMP_ZERO_YEAR } from "@tutao/tutanota-utils/dist/DateUtils"
 
 assertMainOrNode()
 export const CALENDAR_EVENT_HEIGHT: number = size.calendar_line_height + 2
@@ -78,7 +78,7 @@ export function timeString(date: Date, amPm: boolean): string {
 }
 
 export function timeStringInZone(date: Date, amPm: boolean, zone: string): string {
-	const {hour, minute} = DateTime.fromJSDate(date, {
+	const { hour, minute } = DateTime.fromJSDate(date, {
 		zone,
 	})
 	return timeStringFromParts(hour, minute, amPm)
@@ -117,29 +117,29 @@ export function getStartOfDayWithZone(date: Date, zone: string): Date {
 	return DateTime.fromJSDate(date, {
 		zone,
 	})
-				   .set({
-					   hour: 0,
-					   minute: 0,
-					   second: 0,
-					   millisecond: 0,
-				   })
-				   .toJSDate()
+		.set({
+			hour: 0,
+			minute: 0,
+			second: 0,
+			millisecond: 0,
+		})
+		.toJSDate()
 }
 
 export function getStartOfNextDayWithZone(date: Date, zone: string): Date {
 	return DateTime.fromJSDate(date, {
 		zone,
 	})
-				   .set({
-					   hour: 0,
-					   minute: 0,
-					   second: 0,
-					   millisecond: 0,
-				   })
-				   .plus({
-					   day: 1,
-				   })
-				   .toJSDate()
+		.set({
+			hour: 0,
+			minute: 0,
+			second: 0,
+			millisecond: 0,
+		})
+		.plus({
+			day: 1,
+		})
+		.toJSDate()
 }
 
 export function calculateAlarmTime(date: Date, interval: AlarmInterval, ianaTimeZone?: string): Date {
@@ -203,17 +203,20 @@ export function calculateAlarmTime(date: Date, interval: AlarmInterval, ianaTime
 	return DateTime.fromJSDate(date, {
 		zone: ianaTimeZone,
 	})
-				   .minus(diff)
-				   .toJSDate()
+		.minus(diff)
+		.toJSDate()
 }
 
+/** takes a date which encodes the day in UTC and produces a date that encodes the same date but in local time zone. All times must be 0. */
 export function getAllDayDateForTimezone(utcDate: Date, timeZone: string): Date {
-	return DateTime.fromObject({
-		year: utcDate.getUTCFullYear(),
-		month: utcDate.getUTCMonth() + 1,
-		day: utcDate.getUTCDate(),
-		zone: timeZone,
-	}).toJSDate()
+	return DateTime.fromObject(
+		{
+			year: utcDate.getUTCFullYear(),
+			month: utcDate.getUTCMonth() + 1,
+			day: utcDate.getUTCDate(),
+		},
+		{ zone: timeZone },
+	).toJSDate()
 }
 
 export function incrementByRepeatPeriod(date: Date, repeatPeriod: RepeatPeriod, interval: number, ianaTimeZone: string): Date {
@@ -222,37 +225,37 @@ export function incrementByRepeatPeriod(date: Date, repeatPeriod: RepeatPeriod, 
 			return DateTime.fromJSDate(date, {
 				zone: ianaTimeZone,
 			})
-						   .plus({
-							   days: interval,
-						   })
-						   .toJSDate()
+				.plus({
+					days: interval,
+				})
+				.toJSDate()
 
 		case RepeatPeriod.WEEKLY:
 			return DateTime.fromJSDate(date, {
 				zone: ianaTimeZone,
 			})
-						   .plus({
-							   weeks: interval,
-						   })
-						   .toJSDate()
+				.plus({
+					weeks: interval,
+				})
+				.toJSDate()
 
 		case RepeatPeriod.MONTHLY:
 			return DateTime.fromJSDate(date, {
 				zone: ianaTimeZone,
 			})
-						   .plus({
-							   months: interval,
-						   })
-						   .toJSDate()
+				.plus({
+					months: interval,
+				})
+				.toJSDate()
 
 		case RepeatPeriod.ANNUALLY:
 			return DateTime.fromJSDate(date, {
 				zone: ianaTimeZone,
 			})
-						   .plus({
-							   years: interval,
-						   })
-						   .toJSDate()
+				.plus({
+					years: interval,
+				})
+				.toJSDate()
 
 		default:
 			throw new Error("Unknown repeat period")
@@ -308,11 +311,23 @@ export function colorForBg(color: string): string {
 	return isColorLight(color) ? "black" : "white"
 }
 
+export const enum EventLayoutMode {
+	/** Take event start and end times into account when laying out. */
+	TimeBasedColumn,
+	/** Each event is treated as if it would take the whole day when laying out. */
+	DayBasedColumn,
+}
+
+/**
+ * Function which sorts events into the "columns" and "rows" and renders them using {@param renderer}.
+ * Columns are abstract and can be actually the rows. A single column progresses in time while multiple columns can happen in parallel.
+ * in one column on a single day (it will "stretch" events from the day start until the next day).
+ */
 export function layOutEvents(
 	events: Array<CalendarEvent>,
 	zone: string,
 	renderer: (columns: Array<Array<CalendarEvent>>) => ChildArray,
-	handleAsAllDay: boolean,
+	layoutMode: EventLayoutMode,
 ): ChildArray {
 	events.sort((e1, e2) => {
 		const e1Start = getEventStart(e1, zone)
@@ -325,16 +340,21 @@ export function layOutEvents(
 		if (e1End > e2End) return 1
 		return 0
 	})
-	let lastEventEnding: number | null = null
+	let lastEventEnding: Date | null = null
+	let lastEventStart: Date | null = null
 	let columns: Array<Array<CalendarEvent>> = []
 	const children: Array<Children> = []
 	// Cache for calculation events
 	const calcEvents = new Map()
-	events.forEach(e => {
-		const calcEvent = getFromMap(calcEvents, e, () => getCalculationEvent(e, zone, handleAsAllDay))
-
+	events.forEach((e) => {
+		const calcEvent = getFromMap(calcEvents, e, () => getCalculationEvent(e, zone, layoutMode))
 		// Check if a new event group needs to be started
-		if (lastEventEnding != null && lastEventEnding <= calcEvent.startTime.getTime()) {
+		if (
+			lastEventEnding != null &&
+			lastEventStart != null &&
+			lastEventEnding <= calcEvent.startTime.getTime() &&
+			(layoutMode === EventLayoutMode.DayBasedColumn || !visuallyOverlaps(lastEventStart, lastEventEnding, calcEvent.startTime))
+		) {
 			// The latest event is later than any of the event in the
 			// current group. There is no overlap. Output the current
 			// event group and start a new event group.
@@ -342,6 +362,7 @@ export function layOutEvents(
 			columns = [] // This starts new event group.
 
 			lastEventEnding = null
+			lastEventStart = null
 		}
 
 		// Try to place the event inside the existing columns
@@ -350,9 +371,12 @@ export function layOutEvents(
 		for (let i = 0; i < columns.length; i++) {
 			const col = columns[i]
 			const lastEvent = col[col.length - 1]
-			const lastCalcEvent = getFromMap(calcEvents, lastEvent, () => getCalculationEvent(lastEvent, zone, handleAsAllDay))
+			const lastCalcEvent = getFromMap(calcEvents, lastEvent, () => getCalculationEvent(lastEvent, zone, layoutMode))
 
-			if (!collidesWith(lastCalcEvent, calcEvent)) {
+			if (
+				!collidesWith(lastCalcEvent, calcEvent) &&
+				(layoutMode === EventLayoutMode.DayBasedColumn || !visuallyOverlaps(lastCalcEvent.startTime, lastCalcEvent.endTime, calcEvent.startTime))
+			) {
 				col.push(e) // push real event here not calc event
 
 				placed = true
@@ -366,18 +390,21 @@ export function layOutEvents(
 			columns.push([e])
 		}
 
-		// Remember the latest event end time of the current group.
+		// Remember the latest event end time and start time of the current group.
 		// This is later used to determine if a new groups starts.
-		if (lastEventEnding == null || lastEventEnding < calcEvent.endTime.getTime()) {
-			lastEventEnding = calcEvent.endTime.getTime()
+		if (lastEventEnding == null || lastEventEnding.getTime() < calcEvent.endTime.getTime()) {
+			lastEventEnding = calcEvent.endTime
+		}
+		if (lastEventStart == null || lastEventStart.getTime() < calcEvent.startTime.getTime()) {
+			lastEventStart = calcEvent.startTime
 		}
 	})
 	children.push(...renderer(columns))
 	return children
 }
 
-function getCalculationEvent(event: CalendarEvent, zone: string, handleAsAllDay: boolean): CalendarEvent {
-	if (handleAsAllDay) {
+function getCalculationEvent(event: CalendarEvent, zone: string, eventLayoutMode: EventLayoutMode): CalendarEvent {
+	if (eventLayoutMode === EventLayoutMode.DayBasedColumn) {
 		const calcEvent = clone(event)
 
 		if (isAllDayEvent(event)) {
@@ -394,8 +421,44 @@ function getCalculationEvent(event: CalendarEvent, zone: string, handleAsAllDay:
 	}
 }
 
+/**
+ * This function checks whether two events collide based on their start and end time
+ * Assuming vertical columns with time going top-to-bottom, this would be true in these cases:
+ *
+ * case 1:
+ * +-----------+
+ * |           |
+ * |           |   +----------+
+ * +-----------+   |          |
+ *                 |          |
+ *                 +----------+
+ * case 2:
+ * +-----------+
+ * |           |   +----------+
+ * |           |   |          |
+ * |           |   +----------+
+ * +-----------+
+ *
+ * There could be a case where they are flipped vertically, but we don't have them because earlier events will be always first. so the "left" top edge will
+ * always be "above" the "right" top edge.
+ */
 function collidesWith(a: CalendarEvent, b: CalendarEvent): boolean {
 	return a.endTime.getTime() > b.startTime.getTime() && a.startTime.getTime() < b.endTime.getTime()
+}
+
+/**
+ * Due to the minimum height for events they overlap if a short event is directly followed by another event,
+ * therefore, we check whether the event height is less than the minimum height.
+ *
+ * This does not cover all the cases but handles the case when the second event starts right after the first one.
+ */
+function visuallyOverlaps(firstEventStart: Date, firstEventEnd: Date, secondEventStart: Date): boolean {
+	// We are only interested in the height on the last day of the event because an event ending later will take up the whole column until the next day anyway.
+	const firstEventStartOnSameDay = isSameDay(firstEventStart, firstEventEnd) ? firstEventStart.getTime() : getStartOfDay(firstEventEnd).getTime()
+	const eventDurationMs = firstEventEnd.getTime() - firstEventStartOnSameDay
+	const eventDurationHours = eventDurationMs / (1000 * 60 * 60)
+	const height = eventDurationHours * size.calendar_hour_height - size.calendar_event_border
+	return firstEventEnd.getTime() === secondEventStart.getTime() && height < size.calendar_line_height
 }
 
 export function formatEventTime(event: CalendarEvent, showTime: EventTextTimeOption): string {
@@ -423,7 +486,7 @@ export function expandEvent(ev: CalendarEvent, columnIndex: number, columns: Arr
 		for (let j = 0; j < col.length; j++) {
 			let ev1 = col[j]
 
-			if (collidesWith(ev, ev1)) {
+			if (collidesWith(ev, ev1) || visuallyOverlaps(ev.startTime, ev.endTime, ev1.startTime)) {
 				return colSpan
 			}
 		}
@@ -519,10 +582,10 @@ export function getAllDayDateUTCFromZone(date: Date, timeZone: string): Date {
 	return DateTime.fromJSDate(date, {
 		zone: timeZone,
 	})
-				   .setZone("utc", {
-					   keepLocalTime: true,
-				   })
-				   .toJSDate()
+		.setZone("utc", {
+			keepLocalTime: true,
+		})
+		.toJSDate()
 }
 
 export function isLongEvent(event: CalendarEvent, zone: string): boolean {
@@ -555,6 +618,35 @@ function assertDateIsValid(date: Date) {
 	if (!isValidDate(date)) {
 		throw new Error("Date is invalid!")
 	}
+}
+
+/**
+ * we don't want to deal with some calendar event edge cases,
+ * like pre-1970 events that would have negative timestamps.
+ * during import, we can also get faulty events that are
+ * impossible to create through the interface.
+ */
+export const enum CalendarEventValidity {
+	InvalidContainsInvalidDate,
+	InvalidEndBeforeStart,
+	InvalidPre1970,
+	Valid,
+}
+
+/**
+ * check if a given event should be allowed to be created in a tutanota calendar.
+ * @param event
+ * @returns Enum describing the reason to reject the event, if any.
+ */
+export function checkEventValidity(event: CalendarEvent): CalendarEventValidity {
+	if (!isValidDate(event.startTime) || !isValidDate(event.endTime)) {
+		return CalendarEventValidity.InvalidContainsInvalidDate
+	} else if (event.endTime.getTime() <= event.startTime.getTime()) {
+		return CalendarEventValidity.InvalidEndBeforeStart
+	} else if (event.startTime.getFullYear() < TIMESTAMP_ZERO_YEAR) {
+		return CalendarEventValidity.InvalidPre1970
+	}
+	return CalendarEventValidity.Valid
 }
 
 const MAX_EVENT_ITERATIONS = 10000
@@ -593,7 +685,7 @@ export function addDaysForEvent(events: Map<number, Array<CalendarEvent>>, event
 	}
 
 	// If the duration of the original event was reduced, we also have delete the remaining days of the original event
-	const remainingDaysForExistingEvent: CalendarEvent | null = events.get(calculationDate.getTime())?.find(e => isSameEvent(e, event)) ?? null
+	const remainingDaysForExistingEvent: CalendarEvent | null = events.get(calculationDate.getTime())?.find((e) => isSameEvent(e, event)) ?? null
 
 	if (remainingDaysForExistingEvent) {
 		const existingEventEndDate = getEventEnd(remainingDaysForExistingEvent, zone)
@@ -608,7 +700,7 @@ export function addDaysForEvent(events: Map<number, Array<CalendarEvent>>, event
 
 				findAllAndRemove(
 					getFromMap(events, calculationDate.getTime(), () => []),
-					e => isSameEvent(e, event),
+					(e) => isSameEvent(e, event),
 				)
 				calculationDate = incrementByRepeatPeriod(calculationDate, RepeatPeriod.DAILY, 1, zone)
 				iterations++
@@ -675,7 +767,7 @@ export function addDaysForRecurringEvent(events: Map<number, Array<CalendarEvent
 		(endOccurrences == null || iteration <= endOccurrences) &&
 		(repeatEndTime == null || calcStartTime.getTime() < repeatEndTime.getTime()) &&
 		calcStartTime.getTime() < month.end.getTime()
-		) {
+	) {
 		assertDateIsValid(calcStartTime)
 		assertDateIsValid(calcEndTime)
 
@@ -988,7 +1080,7 @@ export function findPrivateCalendar(calendarInfo: Map<Id, CalendarInfo>): Calend
  * ```
  */
 export function prepareCalendarDescription(description: string): string {
-	return description.replace(/<(http|https):\/\/[A-z0-9$-_.+!*‘(),\/?]+>/gi, possiblyLink => {
+	return description.replace(/<(http|https):\/\/[A-z0-9$-_.+!*‘(),\/?]+>/gi, (possiblyLink) => {
 		try {
 			const withoutBrackets = possiblyLink.slice(1, -1)
 			const url = new URL(withoutBrackets)

@@ -11,6 +11,7 @@ import android.media.RingtoneManager
 import android.os.Build
 import android.util.Log
 import androidx.annotation.ColorInt
+import androidx.annotation.RequiresApi
 import androidx.annotation.StringRes
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -18,6 +19,9 @@ import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import de.tutao.tutanota.*
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
 
 const val NOTIFICATION_DISMISSED_ADDR_EXTRA = "notificationDismissed"
@@ -213,7 +217,7 @@ class LocalNotificationsFacade(private val context: Context) {
 										context,
 										(Math.random() * 20000).toInt(),
 										intent,
-										PendingIntent.FLAG_UPDATE_CURRENT
+										PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 								)
 						)
 						.setAutoCancel(true)
@@ -221,7 +225,7 @@ class LocalNotificationsFacade(private val context: Context) {
 		notificationManager.notify(1000, notification)
 	}
 
-	@TargetApi(Build.VERSION_CODES.O)
+	@RequiresApi(Build.VERSION_CODES.O)
 	fun createNotificationChannels() {
 		val mailNotificationChannel = NotificationChannel(
 				EMAIL_NOTIFICATION_CHANNEL_ID,
@@ -252,7 +256,7 @@ class LocalNotificationsFacade(private val context: Context) {
 		notificationManager.createNotificationChannel(downloadNotificationsChannel)
 	}
 
-	@TargetApi(Build.VERSION_CODES.O)
+	@RequiresApi(Build.VERSION_CODES.O)
 	private fun NotificationChannel.default(): NotificationChannel {
 		val ringtoneUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 		val att = AudioAttributes.Builder()
@@ -284,7 +288,7 @@ class LocalNotificationsFacade(private val context: Context) {
 				context.applicationContext,
 				makeNotificationId("dismiss${addresses.joinToString("+")}"),
 				deleteIntent,
-				PendingIntent.FLAG_UPDATE_CURRENT
+				PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 		)
 	}
 
@@ -295,7 +299,7 @@ class LocalNotificationsFacade(private val context: Context) {
 		val openMailboxIntent = Intent(context, MainActivity::class.java)
 		openMailboxIntent.action = MainActivity.OPEN_USER_MAILBOX_ACTION
 		openMailboxIntent.putExtra(
-				MainActivity.OPEN_USER_MAILBOX_MAILADDRESS_KEY,
+				MainActivity.OPEN_USER_MAILBOX_MAIL_ADDRESS_KEY,
 				notificationInfo.mailAddress
 		)
 		openMailboxIntent.putExtra(
@@ -307,7 +311,7 @@ class LocalNotificationsFacade(private val context: Context) {
 				context.applicationContext,
 				makeNotificationId(notificationInfo.mailAddress + "@isSummary" + isSummary),
 				openMailboxIntent,
-				PendingIntent.FLAG_UPDATE_CURRENT
+				PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 		)
 	}
 
@@ -327,7 +331,10 @@ fun notificationDismissedIntent(
 }
 
 fun showAlarmNotification(context: Context, timestamp: Long, summary: String, intent: Intent) {
-	val contentText = String.format("%tR %s", timestamp, summary)
+	val contentText = when {
+		isSameDay(timestamp, Date().time) -> String.format("%tR %s", timestamp, summary)
+		else -> String.format("%1\$ta %1\$td %1\$tb %1\$tR %2\$s", timestamp, summary) // e.g. Fri 25 Nov 12:31 summary
+	}
 	val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 	@ColorInt val red = context.resources.getColor(R.color.red, context.theme)
 	notificationManager.notify(
@@ -344,6 +351,19 @@ fun showAlarmNotification(context: Context, timestamp: Long, summary: String, in
 	)
 }
 
+/**
+ * Returns whether two timestamps belong to the same day considering the time zone
+ * @param time1 epoch time 1 in milliseconds
+ * @param time2 epoch time 2 in milliseconds
+ * @param timeZone optional, should only be used for testing! | otherwise the default value is used
+ * @return boolean whether both timestamp are on the same day
+ */
+fun isSameDay(time1: Long, time2: Long, timeZone: TimeZone = TimeZone.getDefault()): Boolean {
+	val customDateFormat = SimpleDateFormat("yyyy-MM-dd")
+	customDateFormat.setTimeZone(timeZone)
+	return customDateFormat.format(time1).equals(customDateFormat.format(time2))
+}
+
 private fun openCalendarIntent(context: Context, alarmIntent: Intent): PendingIntent {
 	val userId = alarmIntent.getStringExtra(MainActivity.OPEN_USER_MAILBOX_USERID_KEY)
 	val openCalendarEventIntent = Intent(context, MainActivity::class.java)
@@ -353,7 +373,7 @@ private fun openCalendarIntent(context: Context, alarmIntent: Intent): PendingIn
 			context,
 			alarmIntent.data.toString().hashCode(),
 			openCalendarEventIntent,
-			PendingIntent.FLAG_UPDATE_CURRENT
+			PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
 	)
 }
 
@@ -369,7 +389,7 @@ fun showDownloadNotification(context: Context, file: File) {
 		flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
 		setDataAndType(uri, mimeType)
 	}
-	val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE);
+	val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE)
 	notificationManager.notify(System.currentTimeMillis().toInt(),
 			NotificationCompat.Builder(context, DOWNLOAD_NOTIFICATION_CHANNEL_ID)
 					.setSmallIcon(R.drawable.ic_download)

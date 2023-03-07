@@ -1,7 +1,7 @@
-import {OfflineStorage} from "./OfflineStorage.js"
-import {modelInfos} from "../../common/EntityFunctions.js"
-import {typedKeys, TypeRef} from "@tutao/tutanota-utils"
-import {ListElementEntity, SomeEntity} from "../../common/EntityTypes.js"
+import { OfflineStorage } from "./OfflineStorage.js"
+import { modelInfos } from "../../common/EntityFunctions.js"
+import { typedKeys, TypeRef } from "@tutao/tutanota-utils"
+import { ElementEntity, ListElementEntity, SomeEntity } from "../../common/EntityTypes.js"
 
 export async function migrateAllListElements<T extends ListElementEntity>(typeRef: TypeRef<T>, storage: OfflineStorage, migrations: Array<Migration<T>>) {
 	let entities = await storage.getListElementsOfType(typeRef)
@@ -15,7 +15,19 @@ export async function migrateAllListElements<T extends ListElementEntity>(typeRe
 	}
 }
 
-type Migration<T extends SomeEntity> = (entity: any) => T
+export async function migrateAllElements<T extends ElementEntity>(typeRef: TypeRef<T>, storage: OfflineStorage, migrations: Array<Migration<T>>) {
+	let entities = await storage.getElementsOfType(typeRef)
+
+	for (const migration of migrations) {
+		entities = entities.map(migration)
+	}
+
+	for (const entity of entities) {
+		await storage.put(entity)
+	}
+}
+
+export type Migration<T extends SomeEntity> = (entity: any) => T
 
 export function renameAttribute<T extends SomeEntity>(oldName: string, newName: keyof T): Migration<T> {
 	return function (entity) {
@@ -31,7 +43,6 @@ export function removeValue<T extends SomeEntity>(valueName: string): Migration<
 		return entity
 	}
 }
-
 
 export function booleanToNumberValue<T extends SomeEntity>(attribute: string): Migration<T> {
 	return function (entity) {

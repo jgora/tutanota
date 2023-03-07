@@ -1,27 +1,16 @@
-import m, {Component} from "mithril"
-import {Dialog} from "../gui/base/Dialog"
-import {lang} from "../misc/LanguageViewModel"
-import {ButtonN, ButtonType} from "../gui/base/ButtonN"
-import type {AccountingInfo, Booking, Customer, CustomerInfo, SwitchAccountTypeData} from "../api/entities/sys/TypeRefs.js"
-import {createSwitchAccountTypeData} from "../api/entities/sys/TypeRefs.js"
-import {AccountType, BookingItemFeatureByCode, BookingItemFeatureType, Const, Keys, UnsubscribeFailureReason} from "../api/common/TutanotaConstants"
-import {SubscriptionSelector} from "./SubscriptionSelector"
+import m from "mithril"
+import { Dialog } from "../gui/base/Dialog"
+import { lang } from "../misc/LanguageViewModel"
+import { ButtonAttrs, ButtonType } from "../gui/base/Button.js"
+import type { AccountingInfo, Booking, Customer, CustomerInfo, SwitchAccountTypeData } from "../api/entities/sys/TypeRefs.js"
+import { createSwitchAccountTypeData } from "../api/entities/sys/TypeRefs.js"
+import { AccountType, BookingItemFeatureByCode, BookingItemFeatureType, Const, Keys, UnsubscribeFailureReason } from "../api/common/TutanotaConstants"
+import { SubscriptionActionButtons, SubscriptionSelector } from "./SubscriptionSelector"
 import stream from "mithril/stream"
-import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
-import type {SubscriptionActionButtons} from "./SubscriptionUtils"
-import {
-	buyAliases,
-	buyBusiness,
-	buySharing,
-	buyStorage,
-	buyWhitelabel,
-	getDisplayNameOfSubscriptionType,
-	isDowngrade,
-	subscriptions,
-	SubscriptionType,
-} from "./SubscriptionUtils"
-import type {DialogHeaderBarAttrs} from "../gui/base/DialogHeaderBar"
-import type {CurrentSubscriptionInfo} from "./SwitchSubscriptionDialogModel"
+import { showProgressDialog } from "../gui/dialogs/ProgressDialog"
+import { buyAliases, buyBusiness, buySharing, buyStorage, buyWhitelabel } from "./SubscriptionUtils"
+import type { DialogHeaderBarAttrs } from "../gui/base/DialogHeaderBar"
+import type { CurrentSubscriptionInfo } from "./SwitchSubscriptionDialogModel"
 import {
 	isDowngradeAliasesNeeded,
 	isDowngradeBusinessNeeded,
@@ -35,16 +24,22 @@ import {
 	isUpgradeWhitelabelNeeded,
 	SwitchSubscriptionDialogModel,
 } from "./SwitchSubscriptionDialogModel"
-import {locator} from "../api/main/MainLocator"
-import {SwitchAccountTypeService} from "../api/entities/sys/Services.js"
-import {BadRequestError, InvalidDataError, PreconditionFailedError} from "../api/common/error/RestError.js"
+import { locator } from "../api/main/MainLocator"
+import { SwitchAccountTypeService } from "../api/entities/sys/Services.js"
+import { BadRequestError, InvalidDataError, PreconditionFailedError } from "../api/common/error/RestError.js"
+import { FeatureListProvider, getDisplayNameOfSubscriptionType, SubscriptionType } from "./FeatureListProvider"
+import { isSubscriptionDowngrade, PriceAndConfigProvider } from "./PriceUtils"
+import { lazy } from "@tutao/tutanota-utils"
 
 /**
  * Only shown if the user is already a Premium user. Allows cancelling the subscription (only private use) and switching the subscription to a different paid subscription.
  */
 export async function showSwitchDialog(customer: Customer, customerInfo: CustomerInfo, accountingInfo: AccountingInfo, lastBooking: Booking): Promise<void> {
-	const model = new SwitchSubscriptionDialogModel(locator.bookingFacade, customer, customerInfo, accountingInfo, lastBooking)
-	const prices = await showProgressDialog("pleaseWait_msg", model.loadSwitchSubscriptionPrices())
+	const [featureListProvider, priceAndConfigProvider] = await showProgressDialog(
+		"pleaseWait_msg",
+		Promise.all([FeatureListProvider.getInitializedInstance(), PriceAndConfigProvider.getInitializedInstance(null)]),
+	)
+	const model = new SwitchSubscriptionDialogModel(locator.bookingFacade, customer, customerInfo, accountingInfo, lastBooking, priceAndConfigProvider)
 	const cancelAction = () => dialog.close()
 
 	const headerBarAttrs: DialogHeaderBarAttrs = {
@@ -71,32 +66,31 @@ export async function showSwitchDialog(customer: Customer, customerInfo: Custome
 					},
 					campaignInfoTextId: null,
 					boxWidth: 230,
-					boxHeight: 230,
+					boxHeight: 270,
 					currentSubscriptionType: currentSubscriptionInfo.subscriptionType,
 					currentlySharingOrdered: currentSubscriptionInfo.currentlySharingOrdered,
 					currentlyBusinessOrdered: currentSubscriptionInfo.currentlyBusinessOrdered,
 					currentlyWhitelabelOrdered: currentSubscriptionInfo.currentlyWhitelabelOrdered,
 					orderedContactForms: currentSubscriptionInfo.orderedContactForms,
 					isInitialUpgrade: false,
-					planPrices: prices,
 					actionButtons: subscriptionActionButtons,
+					featureListProvider: featureListProvider,
+					priceAndConfigProvider,
 				}),
 			),
-	}).addShortcut({
-		key: Keys.ESC,
-		exec: cancelAction,
-		help: "close_alt",
-	}).setCloseHandler(cancelAction)
+	})
+		.addShortcut({
+			key: Keys.ESC,
+			exec: cancelAction,
+			help: "close_alt",
+		})
+		.setCloseHandler(cancelAction)
 	const subscriptionActionButtons: SubscriptionActionButtons = {
-		Free: {
-			view: () => {
-				return m(ButtonN, {
-					label: "pricing.select_action",
-					click: () => cancelSubscription(dialog, currentSubscriptionInfo),
-					type: ButtonType.Login,
-				})
-			},
-		},
+		Free: () => ({
+			label: "pricing.select_action",
+			click: () => cancelSubscription(dialog, currentSubscriptionInfo),
+			type: ButtonType.Login,
+		}),
 		Premium: createSubscriptionPlanButton(dialog, SubscriptionType.Premium, currentSubscriptionInfo),
 		PremiumBusiness: createSubscriptionPlanButton(dialog, SubscriptionType.PremiumBusiness, currentSubscriptionInfo),
 		Teams: createSubscriptionPlanButton(dialog, SubscriptionType.Teams, currentSubscriptionInfo),
@@ -110,18 +104,14 @@ function createSubscriptionPlanButton(
 	dialog: Dialog,
 	targetSubscription: SubscriptionType,
 	currentSubscriptionInfo: CurrentSubscriptionInfo,
-): Component {
-	return {
-		view: () => {
-			return m(ButtonN, {
-				label: "pricing.select_action",
-				click: () => {
-					switchSubscription(targetSubscription, dialog, currentSubscriptionInfo)
-				},
-				type: ButtonType.Login,
-			})
+): lazy<ButtonAttrs> {
+	return () => ({
+		label: "pricing.select_action",
+		click: () => {
+			switchSubscription(targetSubscription, dialog, currentSubscriptionInfo)
 		},
-	}
+		type: ButtonType.Login,
+	})
 }
 
 function handleSwitchAccountPreconditionFailed(e: PreconditionFailedError): Promise<void> {
@@ -175,7 +165,6 @@ function handleSwitchAccountPreconditionFailed(e: PreconditionFailedError): Prom
 	}
 }
 
-
 async function tryDowngradePremiumToFree(switchAccountTypeData: SwitchAccountTypeData, currentSubscriptionInfo: CurrentSubscriptionInfo): Promise<void> {
 	const failed = await cancelAllAdditionalFeatures(SubscriptionType.Free, currentSubscriptionInfo)
 	if (failed) {
@@ -197,7 +186,7 @@ async function tryDowngradePremiumToFree(switchAccountTypeData: SwitchAccountTyp
 }
 
 async function cancelSubscription(dialog: Dialog, currentSubscriptionInfo: CurrentSubscriptionInfo): Promise<void> {
-	if (!await Dialog.confirm("unsubscribeConfirm_msg")) {
+	if (!(await Dialog.confirm("unsubscribeConfirm_msg"))) {
 		return
 	}
 	const switchAccountTypeData = createSwitchAccountTypeData()
@@ -210,13 +199,14 @@ async function cancelSubscription(dialog: Dialog, currentSubscriptionInfo: Curre
 	}
 }
 
-function getUpOrDowngradeMessage(targetSubscription: SubscriptionType, currentSubscriptionInfo: CurrentSubscriptionInfo): string {
+async function getUpOrDowngradeMessage(targetSubscription: SubscriptionType, currentSubscriptionInfo: CurrentSubscriptionInfo): Promise<string> {
+	const priceAndConfigProvider = await PriceAndConfigProvider.getInitializedInstance(null)
 	// we can only switch from a non-business plan to a business plan and not vice verse
 	// a business customer may not have booked the business feature and be forced to book it even if downgrading: e.g. Teams -> PremiumBusiness
 	// switch to free is not allowed here.
 	let msg = ""
 
-	if (isDowngrade(targetSubscription, currentSubscriptionInfo.subscriptionType)) {
+	if (isSubscriptionDowngrade(targetSubscription, currentSubscriptionInfo.subscriptionType)) {
 		msg = lang.get(
 			targetSubscription === SubscriptionType.Premium || targetSubscription === SubscriptionType.PremiumBusiness
 				? "downgradeToPremium_msg"
@@ -239,10 +229,10 @@ function getUpOrDowngradeMessage(targetSubscription: SubscriptionType, currentSu
 		) {
 			msg += " " + lang.get("businessIncluded_msg")
 		}
-
+		const subscriptionConfig = priceAndConfigProvider.getSubscriptionConfig(targetSubscription)
 		if (
-			isDowngradeAliasesNeeded(targetSubscription, currentSubscriptionInfo.currentTotalAliases, currentSubscriptionInfo.includedAliases) ||
-			isDowngradeStorageNeeded(targetSubscription, currentSubscriptionInfo.currentTotalAliases, currentSubscriptionInfo.includedStorage)
+			isDowngradeAliasesNeeded(subscriptionConfig, currentSubscriptionInfo.currentTotalAliases, currentSubscriptionInfo.includedAliases) ||
+			isDowngradeStorageNeeded(subscriptionConfig, currentSubscriptionInfo.currentTotalAliases, currentSubscriptionInfo.includedStorage)
 		) {
 			msg = msg + "\n\n" + lang.get("upgradeProNoReduction_msg")
 		}
@@ -252,22 +242,24 @@ function getUpOrDowngradeMessage(targetSubscription: SubscriptionType, currentSu
 }
 
 async function checkNeededUpgrades(targetSubscription: SubscriptionType, currentSubscriptionInfo: CurrentSubscriptionInfo): Promise<void> {
-	if (isUpgradeAliasesNeeded(targetSubscription, currentSubscriptionInfo.currentTotalAliases)) {
-		await buyAliases(subscriptions[targetSubscription].orderNbrOfAliases)
+	const priceAndConfigProvider = await PriceAndConfigProvider.getInitializedInstance(null)
+	const targetSubscriptionConfig = priceAndConfigProvider.getSubscriptionConfig(targetSubscription)
+	if (isUpgradeAliasesNeeded(targetSubscriptionConfig, currentSubscriptionInfo.currentTotalAliases)) {
+		await buyAliases(targetSubscriptionConfig.orderNbrOfAliases)
 	}
-	if (isUpgradeStorageNeeded(targetSubscription, currentSubscriptionInfo.currentTotalStorage)) {
-		await buyStorage(subscriptions[targetSubscription].orderStorageGb)
+	if (isUpgradeStorageNeeded(targetSubscriptionConfig, currentSubscriptionInfo.currentTotalStorage)) {
+		await buyStorage(targetSubscriptionConfig.orderStorageGb)
 	}
-	if (isUpgradeSharingNeeded(targetSubscription, currentSubscriptionInfo.currentlySharingOrdered)) {
+	if (isUpgradeSharingNeeded(targetSubscriptionConfig, currentSubscriptionInfo.currentlySharingOrdered)) {
 		await buySharing(true)
 	}
-	if (isUpgradeBusinessNeeded(targetSubscription, currentSubscriptionInfo.currentlyBusinessOrdered)) {
+	if (isUpgradeBusinessNeeded(targetSubscriptionConfig, currentSubscriptionInfo.currentlyBusinessOrdered)) {
 		await buyBusiness(true)
 	}
-	if (isUpgradeWhitelabelNeeded(targetSubscription, currentSubscriptionInfo.currentlyWhitelabelOrdered)) {
+	if (isUpgradeWhitelabelNeeded(targetSubscriptionConfig, currentSubscriptionInfo.currentlyWhitelabelOrdered)) {
 		await buyWhitelabel(true)
 	}
-	if (isDowngrade(targetSubscription, currentSubscriptionInfo.subscriptionType)) {
+	if (isSubscriptionDowngrade(targetSubscription, currentSubscriptionInfo.subscriptionType)) {
 		await cancelAllAdditionalFeatures(targetSubscription, currentSubscriptionInfo)
 	}
 }
@@ -277,7 +269,8 @@ async function switchSubscription(targetSubscription: SubscriptionType, dialog: 
 		return
 	}
 
-	const ok = await Dialog.confirm(() => getUpOrDowngradeMessage(targetSubscription, currentSubscriptionInfo))
+	const message = await getUpOrDowngradeMessage(targetSubscription, currentSubscriptionInfo)
+	const ok = await Dialog.confirm(() => message)
 	if (!ok) {
 		return
 	}
@@ -293,20 +286,27 @@ async function switchSubscription(targetSubscription: SubscriptionType, dialog: 
  */
 async function cancelAllAdditionalFeatures(targetSubscription: SubscriptionType, currentSubscriptionInfo: CurrentSubscriptionInfo): Promise<boolean> {
 	let failed = false
-	if (isDowngradeAliasesNeeded(targetSubscription, currentSubscriptionInfo.currentTotalAliases, currentSubscriptionInfo.includedAliases)) {
-		failed = await buyAliases(subscriptions[targetSubscription].orderNbrOfAliases)
+	let targetSubscriptionConfig
+	try {
+		targetSubscriptionConfig = (await PriceAndConfigProvider.getInitializedInstance(null)).getSubscriptionConfig(targetSubscription)
+	} catch (e) {
+		console.log("failed to get subscription configs:", e)
+		return true
 	}
-	if (isDowngradeStorageNeeded(targetSubscription, currentSubscriptionInfo.currentTotalStorage, currentSubscriptionInfo.includedStorage)) {
-		failed = failed || await buyStorage(subscriptions[targetSubscription].orderStorageGb)
+	if (isDowngradeAliasesNeeded(targetSubscriptionConfig, currentSubscriptionInfo.currentTotalAliases, currentSubscriptionInfo.includedAliases)) {
+		failed = await buyAliases(targetSubscriptionConfig.orderNbrOfAliases)
 	}
-	if (isDowngradeSharingNeeded(targetSubscription, currentSubscriptionInfo.currentlySharingOrdered)) {
-		failed = failed || await buySharing(false)
+	if (isDowngradeStorageNeeded(targetSubscriptionConfig, currentSubscriptionInfo.currentTotalStorage, currentSubscriptionInfo.includedStorage)) {
+		failed = failed || (await buyStorage(targetSubscriptionConfig.orderStorageGb))
 	}
-	if (isDowngradeBusinessNeeded(targetSubscription, currentSubscriptionInfo.currentlyBusinessOrdered)) {
-		failed = failed || await buyBusiness(false)
+	if (isDowngradeSharingNeeded(targetSubscriptionConfig, currentSubscriptionInfo.currentlySharingOrdered)) {
+		failed = failed || (await buySharing(false))
 	}
-	if (isDowngradeWhitelabelNeeded(targetSubscription, currentSubscriptionInfo.currentlyWhitelabelOrdered)) {
-		failed = failed || await buyWhitelabel(false)
+	if (isDowngradeBusinessNeeded(targetSubscriptionConfig, currentSubscriptionInfo.currentlyBusinessOrdered)) {
+		failed = failed || (await buyBusiness(false))
+	}
+	if (isDowngradeWhitelabelNeeded(targetSubscriptionConfig, currentSubscriptionInfo.currentlyWhitelabelOrdered)) {
+		failed = failed || (await buyWhitelabel(false))
 	}
 	return failed
 }

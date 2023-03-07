@@ -1,23 +1,34 @@
-import m, {Children, Component, Vnode} from "mithril"
-import {ButtonColor, ButtonN, ButtonType} from "../base/ButtonN"
-import {BootIcons} from "../base/icons/BootIcons"
-import {LogoutUrl} from "../Header.js"
-import {isNewMailActionAvailable, showSupportDialog, showUpgradeDialog, writeInviteMail} from "./NavFunctions"
-import {isDesktop, isIOSApp} from "../../api/common/Env"
-import {logins} from "../../api/main/LoginController"
-import {navButtonRoutes} from "../../misc/RouteChange"
-import {getSafeAreaInsetLeft} from "../HtmlUtils"
-import {Icons} from "../base/icons/Icons"
-import {AriaLandmarks, landmarkAttrs} from "../AriaUtils"
-import {attachDropdown} from "../base/DropdownN"
-import {keyManager} from "../../misc/KeyManager"
+import m, { Children, Component, Vnode } from "mithril"
+import { Button, ButtonColor, ButtonType } from "../base/Button.js"
+import { BootIcons } from "../base/icons/BootIcons"
+import { LogoutUrl } from "../Header.js"
+import { isNewMailActionAvailable, showSupportDialog, showUpgradeDialog, writeInviteMail } from "./NavFunctions"
+import { isIOSApp } from "../../api/common/Env"
+import { navButtonRoutes } from "../../misc/RouteChange"
+import { getSafeAreaInsetLeft } from "../HtmlUtils"
+import { Icons } from "../base/icons/Icons"
+import { AriaLandmarks, landmarkAttrs } from "../AriaUtils"
+import { createDropdown } from "../base/Dropdown.js"
+import { keyManager } from "../../misc/KeyManager"
+import { CounterBadge } from "../base/CounterBadge.js"
+import { px } from "../size.js"
+import { theme } from "../theme.js"
+import { showNewsDialog } from "../../misc/news/NewsDialog.js"
+import { LoginController } from "../../api/main/LoginController.js"
+import { NewsModel } from "../../misc/news/NewsModel.js"
+import { DesktopSystemFacade } from "../../native/common/generatedipc/DesktopSystemFacade.js"
 
-type Attrs = {
-	openNewWindow(): unknown
+export interface DrawerMenuAttrs {
+	logins: LoginController
+	newsModel: NewsModel
+	desktopSystemFacade: DesktopSystemFacade | null
 }
 
-export class DrawerMenu implements Component<Attrs> {
-	view(vnode: Vnode<Attrs>): Children {
+export class DrawerMenu implements Component<DrawerMenuAttrs> {
+	view(vnode: Vnode<DrawerMenuAttrs>): Children {
+		const { logins, newsModel, desktopSystemFacade } = vnode.attrs
+		const liveNewsCount = newsModel.liveNewsIds.length
+
 		return m(
 			"drawer-menu" + landmarkAttrs(AriaLandmarks.Contentinfo, "drawer menu"),
 			{
@@ -27,90 +38,107 @@ export class DrawerMenu implements Component<Attrs> {
 			},
 			m(".flex.col.height-100p.items-center.pt.pb", [
 				m(".flex-grow"),
-				logins.isGlobalAdminUserLoggedIn() && logins.getUserController().isPremiumAccount()
-					? m(ButtonN, {
-						icon: () => Icons.Gift,
-						label: "buyGiftCard_label",
-						click: () => {
-							m.route.set("/settings/subscription")
-							import("../../subscription/giftcards/PurchaseGiftCardDialog").then(({showPurchaseGiftCardDialog}) => {
-								return showPurchaseGiftCardDialog()
-							})
-						},
-						type: ButtonType.ActionLarge,
-						colors: ButtonColor.DrawerNav,
-					})
+				logins.isUserLoggedIn()
+					? m(".news-button", [
+							m(Button, {
+								icon: () => Icons.Bulb,
+								label: "news_label",
+								click: () => showNewsDialog(newsModel),
+								type: ButtonType.ActionLarge,
+								colors: ButtonColor.DrawerNav,
+							}),
+							liveNewsCount > 0
+								? m(CounterBadge, {
+										count: liveNewsCount,
+										position: {
+											top: px(0),
+											right: px(3),
+										},
+										color: "white",
+										background: theme.list_accent_fg,
+								  })
+								: null,
+					  ])
 					: null,
-				isDesktop()
-					? m(ButtonN, {
-						icon: () => Icons.NewWindow,
-						label: "openNewWindow_action",
-						click: () => {
-							vnode.attrs.openNewWindow()
-						},
-						type: ButtonType.ActionLarge,
-						colors: ButtonColor.DrawerNav,
-					})
+				logins.isGlobalAdminUserLoggedIn() && logins.getUserController().isPremiumAccount()
+					? m(Button, {
+							icon: () => Icons.Gift,
+							label: "buyGiftCard_label",
+							click: () => {
+								m.route.set("/settings/subscription")
+								import("../../subscription/giftcards/PurchaseGiftCardDialog").then(({ showPurchaseGiftCardDialog }) => {
+									return showPurchaseGiftCardDialog()
+								})
+							},
+							type: ButtonType.ActionLarge,
+							colors: ButtonColor.DrawerNav,
+					  })
+					: null,
+				desktopSystemFacade
+					? m(Button, {
+							icon: () => Icons.NewWindow,
+							label: "openNewWindow_action",
+							click: () => {
+								desktopSystemFacade.openNewWindow()
+							},
+							type: ButtonType.ActionLarge,
+							colors: ButtonColor.DrawerNav,
+					  })
 					: null,
 				!isIOSApp() && logins.isUserLoggedIn() && logins.getUserController().isFreeAccount()
-					? m(ButtonN, {
-						icon: () => BootIcons.Premium,
-						label: "upgradePremium_label",
-						click: () => showUpgradeDialog(),
-						type: ButtonType.ActionLarge,
-						colors: ButtonColor.DrawerNav,
-					})
+					? m(Button, {
+							icon: () => BootIcons.Premium,
+							label: "upgradePremium_label",
+							click: () => showUpgradeDialog(),
+							type: ButtonType.ActionLarge,
+							colors: ButtonColor.DrawerNav,
+					  })
 					: null,
-				m(
-					ButtonN,
-					attachDropdown(
-						{
-                            mainButtonAttrs: {
-                                label: "showHelp_action",
-                                icon: () => BootIcons.Help,
-                                type: ButtonType.ActionLarge,
-                                click: () => keyManager.openF1Help(),
-                                noBubble: true,
-                                colors: ButtonColor.DrawerNav,
-                            },
-                            childAttrs: () => [
-                                {
-                                    label: "supportMenu_label",
-                                    click: () => showSupportDialog(),
-                                    type: ButtonType.Dropdown,
-                                    colors: ButtonColor.DrawerNav,
-                                },
-                                {
-                                    label: "keyboardShortcuts_title",
-                                    click: () => keyManager.openF1Help(true),
-                                    type: ButtonType.Dropdown,
-                                    colors: ButtonColor.DrawerNav,
-                                },
-                            ],
-                            showDropdown: () => logins.isUserLoggedIn() && logins.getUserController().isPremiumAccount(),
-                            width: 300
-                        },
-					),
-				),
+				m(Button, {
+					label: "showHelp_action",
+					icon: () => BootIcons.Help,
+					type: ButtonType.ActionLarge,
+					click: (e, dom) => {
+						if (logins.isUserLoggedIn() && logins.getUserController().isPremiumAccount()) {
+							createDropdown({
+								width: 300,
+								lazyButtons: () => [
+									{
+										label: "supportMenu_label",
+										click: () => showSupportDialog(),
+									},
+									{
+										label: "keyboardShortcuts_title",
+										click: () => keyManager.openF1Help(true),
+									},
+								],
+							})(e, dom)
+						} else {
+							keyManager.openF1Help()
+						}
+					},
+					noBubble: true,
+					colors: ButtonColor.DrawerNav,
+				}),
 				isNewMailActionAvailable() && logins.getUserController().isGlobalAdmin()
-					? m(ButtonN, {
-						icon: () => BootIcons.Share,
-						label: "invite_alt",
-						click: () => writeInviteMail(),
-						type: ButtonType.ActionLarge,
-						colors: ButtonColor.DrawerNav,
-					})
+					? m(Button, {
+							icon: () => BootIcons.Share,
+							label: "invite_alt",
+							click: () => writeInviteMail(),
+							type: ButtonType.ActionLarge,
+							colors: ButtonColor.DrawerNav,
+					  })
 					: null,
 				logins.isInternalUserLoggedIn()
-					? m(ButtonN, {
-						icon: () => BootIcons.Settings,
-						label: "settings_label",
-						click: () => m.route.set(navButtonRoutes.settingsUrl),
-						type: ButtonType.ActionLarge,
-						colors: ButtonColor.DrawerNav,
-					})
+					? m(Button, {
+							icon: () => BootIcons.Settings,
+							label: "settings_label",
+							click: () => m.route.set(navButtonRoutes.settingsUrl),
+							type: ButtonType.ActionLarge,
+							colors: ButtonColor.DrawerNav,
+					  })
 					: null,
-				m(ButtonN, {
+				m(Button, {
 					icon: () => BootIcons.Logout,
 					label: "logout_label",
 					click: () => m.route.set(LogoutUrl),

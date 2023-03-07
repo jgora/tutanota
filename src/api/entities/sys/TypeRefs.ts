@@ -446,6 +446,22 @@ export type Bucket = {
 
 	bucketPermissions: Id;
 }
+export const BucketKeyTypeRef: TypeRef<BucketKey> = new TypeRef("sys", "BucketKey")
+
+export function createBucketKey(values?: Partial<BucketKey>): BucketKey {
+	return Object.assign(create(typeModels.BucketKey, BucketKeyTypeRef), values)
+}
+
+export type BucketKey = {
+	_type: TypeRef<BucketKey>;
+
+	_id: Id;
+	groupEncBucketKey: null | Uint8Array;
+	pubEncBucketKey: null | Uint8Array;
+
+	bucketEncSessionKeys: InstanceSessionKey[];
+	keyGroup:  null | Id;
+}
 export const BucketPermissionTypeRef: TypeRef<BucketPermission> = new TypeRef("sys", "BucketPermission")
 
 export function createBucketPermission(values?: Partial<BucketPermission>): BucketPermission {
@@ -665,26 +681,28 @@ export type CreditCard = {
 	expirationYear: string;
 	number: string;
 }
-export const CustomDomainCheckDataTypeRef: TypeRef<CustomDomainCheckData> = new TypeRef("sys", "CustomDomainCheckData")
+export const CustomDomainCheckGetInTypeRef: TypeRef<CustomDomainCheckGetIn> = new TypeRef("sys", "CustomDomainCheckGetIn")
 
-export function createCustomDomainCheckData(values?: Partial<CustomDomainCheckData>): CustomDomainCheckData {
-	return Object.assign(create(typeModels.CustomDomainCheckData, CustomDomainCheckDataTypeRef), values)
+export function createCustomDomainCheckGetIn(values?: Partial<CustomDomainCheckGetIn>): CustomDomainCheckGetIn {
+	return Object.assign(create(typeModels.CustomDomainCheckGetIn, CustomDomainCheckGetInTypeRef), values)
 }
 
-export type CustomDomainCheckData = {
-	_type: TypeRef<CustomDomainCheckData>;
+export type CustomDomainCheckGetIn = {
+	_type: TypeRef<CustomDomainCheckGetIn>;
 
 	_format: NumberString;
 	domain: string;
-}
-export const CustomDomainCheckReturnTypeRef: TypeRef<CustomDomainCheckReturn> = new TypeRef("sys", "CustomDomainCheckReturn")
 
-export function createCustomDomainCheckReturn(values?: Partial<CustomDomainCheckReturn>): CustomDomainCheckReturn {
-	return Object.assign(create(typeModels.CustomDomainCheckReturn, CustomDomainCheckReturnTypeRef), values)
+	customer:  null | Id;
+}
+export const CustomDomainCheckGetOutTypeRef: TypeRef<CustomDomainCheckGetOut> = new TypeRef("sys", "CustomDomainCheckGetOut")
+
+export function createCustomDomainCheckGetOut(values?: Partial<CustomDomainCheckGetOut>): CustomDomainCheckGetOut {
+	return Object.assign(create(typeModels.CustomDomainCheckGetOut, CustomDomainCheckGetOutTypeRef), values)
 }
 
-export type CustomDomainCheckReturn = {
-	_type: TypeRef<CustomDomainCheckReturn>;
+export type CustomDomainCheckGetOut = {
+	_type: TypeRef<CustomDomainCheckGetOut>;
 
 	_format: NumberString;
 	checkResult: NumberString;
@@ -759,6 +777,49 @@ export type Customer = {
 	whitelabelChildren:  null | WhitelabelChildrenRef;
 	whitelabelParent:  null | WhitelabelParent;
 }
+export const CustomerAccountTerminationPostInTypeRef: TypeRef<CustomerAccountTerminationPostIn> = new TypeRef("sys", "CustomerAccountTerminationPostIn")
+
+export function createCustomerAccountTerminationPostIn(values?: Partial<CustomerAccountTerminationPostIn>): CustomerAccountTerminationPostIn {
+	return Object.assign(create(typeModels.CustomerAccountTerminationPostIn, CustomerAccountTerminationPostInTypeRef), values)
+}
+
+export type CustomerAccountTerminationPostIn = {
+	_type: TypeRef<CustomerAccountTerminationPostIn>;
+
+	_format: NumberString;
+	terminationDate: null | Date;
+}
+export const CustomerAccountTerminationPostOutTypeRef: TypeRef<CustomerAccountTerminationPostOut> = new TypeRef("sys", "CustomerAccountTerminationPostOut")
+
+export function createCustomerAccountTerminationPostOut(values?: Partial<CustomerAccountTerminationPostOut>): CustomerAccountTerminationPostOut {
+	return Object.assign(create(typeModels.CustomerAccountTerminationPostOut, CustomerAccountTerminationPostOutTypeRef), values)
+}
+
+export type CustomerAccountTerminationPostOut = {
+	_type: TypeRef<CustomerAccountTerminationPostOut>;
+
+	_format: NumberString;
+
+	terminationRequest: IdTuple;
+}
+export const CustomerAccountTerminationRequestTypeRef: TypeRef<CustomerAccountTerminationRequest> = new TypeRef("sys", "CustomerAccountTerminationRequest")
+
+export function createCustomerAccountTerminationRequest(values?: Partial<CustomerAccountTerminationRequest>): CustomerAccountTerminationRequest {
+	return Object.assign(create(typeModels.CustomerAccountTerminationRequest, CustomerAccountTerminationRequestTypeRef), values)
+}
+
+export type CustomerAccountTerminationRequest = {
+	_type: TypeRef<CustomerAccountTerminationRequest>;
+
+	_format: NumberString;
+	_id: IdTuple;
+	_ownerGroup: null | Id;
+	_permissions: Id;
+	terminationDate: Date;
+	terminationRequestDate: Date;
+
+	customer: Id;
+}
 export const CustomerDataTypeRef: TypeRef<CustomerData> = new TypeRef("sys", "CustomerData")
 
 export function createCustomerData(values?: Partial<CustomerData>): CustomerData {
@@ -822,6 +883,7 @@ export type CustomerInfo = {
 	domainInfos: DomainInfo[];
 	giftCards:  null | GiftCardsRef;
 	takeoverCustomer:  null | Id;
+	terminationRequest:  null | IdTuple;
 }
 export const CustomerInfoReturnTypeRef: TypeRef<CustomerInfoReturn> = new TypeRef("sys", "CustomerInfoReturn")
 
@@ -850,6 +912,7 @@ export type CustomerProperties = {
 	_permissions: Id;
 	externalUserWelcomeMessage: string;
 	lastUpgradeReminder: null | Date;
+	usageDataOptedOut: boolean;
 
 	bigLogo:  null | File;
 	notificationMailTemplates: NotificationMailTemplate[];
@@ -1364,6 +1427,22 @@ export type GroupRoot = {
 	externalUserAreaGroupInfos:  null | UserAreaGroups;
 	externalUserReferences: Id;
 }
+export const InstanceSessionKeyTypeRef: TypeRef<InstanceSessionKey> = new TypeRef("sys", "InstanceSessionKey")
+
+export function createInstanceSessionKey(values?: Partial<InstanceSessionKey>): InstanceSessionKey {
+	return Object.assign(create(typeModels.InstanceSessionKey, InstanceSessionKeyTypeRef), values)
+}
+
+export type InstanceSessionKey = {
+	_type: TypeRef<InstanceSessionKey>;
+
+	_id: Id;
+	instanceId: Id;
+	instanceList: Id;
+	symEncSessionKey: Uint8Array;
+
+	typeInfo: TypeInfo;
+}
 export const InvoiceTypeRef: TypeRef<Invoice> = new TypeRef("sys", "Invoice")
 
 export function createInvoice(values?: Partial<Invoice>): Invoice {
@@ -1541,29 +1620,18 @@ export type MailAddressAliasServiceReturn = {
 	totalAliases: NumberString;
 	usedAliases: NumberString;
 }
-export const MailAddressAvailabilityDataTypeRef: TypeRef<MailAddressAvailabilityData> = new TypeRef("sys", "MailAddressAvailabilityData")
+export const MailAddressAvailabilityTypeRef: TypeRef<MailAddressAvailability> = new TypeRef("sys", "MailAddressAvailability")
 
-export function createMailAddressAvailabilityData(values?: Partial<MailAddressAvailabilityData>): MailAddressAvailabilityData {
-	return Object.assign(create(typeModels.MailAddressAvailabilityData, MailAddressAvailabilityDataTypeRef), values)
+export function createMailAddressAvailability(values?: Partial<MailAddressAvailability>): MailAddressAvailability {
+	return Object.assign(create(typeModels.MailAddressAvailability, MailAddressAvailabilityTypeRef), values)
 }
 
-export type MailAddressAvailabilityData = {
-	_type: TypeRef<MailAddressAvailabilityData>;
+export type MailAddressAvailability = {
+	_type: TypeRef<MailAddressAvailability>;
 
-	_format: NumberString;
-	mailAddress: string;
-}
-export const MailAddressAvailabilityReturnTypeRef: TypeRef<MailAddressAvailabilityReturn> = new TypeRef("sys", "MailAddressAvailabilityReturn")
-
-export function createMailAddressAvailabilityReturn(values?: Partial<MailAddressAvailabilityReturn>): MailAddressAvailabilityReturn {
-	return Object.assign(create(typeModels.MailAddressAvailabilityReturn, MailAddressAvailabilityReturnTypeRef), values)
-}
-
-export type MailAddressAvailabilityReturn = {
-	_type: TypeRef<MailAddressAvailabilityReturn>;
-
-	_format: NumberString;
+	_id: Id;
 	available: boolean;
+	mailAddress: string;
 }
 export const MailAddressToGroupTypeRef: TypeRef<MailAddressToGroup> = new TypeRef("sys", "MailAddressToGroup")
 
@@ -1631,6 +1699,32 @@ export type MissedNotification = {
 
 	alarmNotifications: AlarmNotification[];
 	notificationInfos: NotificationInfo[];
+}
+export const MultipleMailAddressAvailabilityDataTypeRef: TypeRef<MultipleMailAddressAvailabilityData> = new TypeRef("sys", "MultipleMailAddressAvailabilityData")
+
+export function createMultipleMailAddressAvailabilityData(values?: Partial<MultipleMailAddressAvailabilityData>): MultipleMailAddressAvailabilityData {
+	return Object.assign(create(typeModels.MultipleMailAddressAvailabilityData, MultipleMailAddressAvailabilityDataTypeRef), values)
+}
+
+export type MultipleMailAddressAvailabilityData = {
+	_type: TypeRef<MultipleMailAddressAvailabilityData>;
+
+	_format: NumberString;
+
+	mailAddresses: StringWrapper[];
+}
+export const MultipleMailAddressAvailabilityReturnTypeRef: TypeRef<MultipleMailAddressAvailabilityReturn> = new TypeRef("sys", "MultipleMailAddressAvailabilityReturn")
+
+export function createMultipleMailAddressAvailabilityReturn(values?: Partial<MultipleMailAddressAvailabilityReturn>): MultipleMailAddressAvailabilityReturn {
+	return Object.assign(create(typeModels.MultipleMailAddressAvailabilityReturn, MultipleMailAddressAvailabilityReturnTypeRef), values)
+}
+
+export type MultipleMailAddressAvailabilityReturn = {
+	_type: TypeRef<MultipleMailAddressAvailabilityReturn>;
+
+	_format: NumberString;
+
+	availabilities: MailAddressAvailability[];
 }
 export const NotificationInfoTypeRef: TypeRef<NotificationInfo> = new TypeRef("sys", "NotificationInfo")
 
@@ -1964,7 +2058,6 @@ export type PriceServiceData = {
 	_type: TypeRef<PriceServiceData>;
 
 	_format: NumberString;
-	campaign: null | string;
 	date: null | Date;
 
 	priceRequest:  null | PriceRequestData;
@@ -2527,7 +2620,6 @@ export type SwitchAccountTypeData = {
 
 	_format: NumberString;
 	accountType: NumberString;
-	campaign: null | string;
 	date: null | Date;
 	subscriptionType: NumberString;
 }
@@ -2668,6 +2760,19 @@ export type UpdatePermissionKeyData = {
 	bucketPermission: IdTuple;
 	permission: IdTuple;
 }
+export const UpdateSessionKeysPostInTypeRef: TypeRef<UpdateSessionKeysPostIn> = new TypeRef("sys", "UpdateSessionKeysPostIn")
+
+export function createUpdateSessionKeysPostIn(values?: Partial<UpdateSessionKeysPostIn>): UpdateSessionKeysPostIn {
+	return Object.assign(create(typeModels.UpdateSessionKeysPostIn, UpdateSessionKeysPostInTypeRef), values)
+}
+
+export type UpdateSessionKeysPostIn = {
+	_type: TypeRef<UpdateSessionKeysPostIn>;
+
+	_format: NumberString;
+
+	ownerEncSessionKeys: InstanceSessionKey[];
+}
 export const UpgradePriceServiceDataTypeRef: TypeRef<UpgradePriceServiceData> = new TypeRef("sys", "UpgradePriceServiceData")
 
 export function createUpgradePriceServiceData(values?: Partial<UpgradePriceServiceData>): UpgradePriceServiceData {
@@ -2699,105 +2804,6 @@ export type UpgradePriceServiceReturn = {
 	proPrices: PlanPrices;
 	teamsBusinessPrices: PlanPrices;
 	teamsPrices: PlanPrices;
-}
-export const UsageTestAssignmentTypeRef: TypeRef<UsageTestAssignment> = new TypeRef("sys", "UsageTestAssignment")
-
-export function createUsageTestAssignment(values?: Partial<UsageTestAssignment>): UsageTestAssignment {
-	return Object.assign(create(typeModels.UsageTestAssignment, UsageTestAssignmentTypeRef), values)
-}
-
-export type UsageTestAssignment = {
-	_type: TypeRef<UsageTestAssignment>;
-
-	_id: Id;
-	name: string;
-	state: NumberString;
-	testId: Id;
-	variant: null | NumberString;
-
-	stages: UsageTestStage[];
-}
-export const UsageTestAssignmentInTypeRef: TypeRef<UsageTestAssignmentIn> = new TypeRef("sys", "UsageTestAssignmentIn")
-
-export function createUsageTestAssignmentIn(values?: Partial<UsageTestAssignmentIn>): UsageTestAssignmentIn {
-	return Object.assign(create(typeModels.UsageTestAssignmentIn, UsageTestAssignmentInTypeRef), values)
-}
-
-export type UsageTestAssignmentIn = {
-	_type: TypeRef<UsageTestAssignmentIn>;
-
-	_format: NumberString;
-	testDeviceId: null | Id;
-}
-export const UsageTestAssignmentOutTypeRef: TypeRef<UsageTestAssignmentOut> = new TypeRef("sys", "UsageTestAssignmentOut")
-
-export function createUsageTestAssignmentOut(values?: Partial<UsageTestAssignmentOut>): UsageTestAssignmentOut {
-	return Object.assign(create(typeModels.UsageTestAssignmentOut, UsageTestAssignmentOutTypeRef), values)
-}
-
-export type UsageTestAssignmentOut = {
-	_type: TypeRef<UsageTestAssignmentOut>;
-
-	_format: NumberString;
-	testDeviceId: Id;
-
-	assignments: UsageTestAssignment[];
-}
-export const UsageTestMetricConfigTypeRef: TypeRef<UsageTestMetricConfig> = new TypeRef("sys", "UsageTestMetricConfig")
-
-export function createUsageTestMetricConfig(values?: Partial<UsageTestMetricConfig>): UsageTestMetricConfig {
-	return Object.assign(create(typeModels.UsageTestMetricConfig, UsageTestMetricConfigTypeRef), values)
-}
-
-export type UsageTestMetricConfig = {
-	_type: TypeRef<UsageTestMetricConfig>;
-
-	_id: Id;
-	name: string;
-	type: NumberString;
-}
-export const UsageTestMetricDataTypeRef: TypeRef<UsageTestMetricData> = new TypeRef("sys", "UsageTestMetricData")
-
-export function createUsageTestMetricData(values?: Partial<UsageTestMetricData>): UsageTestMetricData {
-	return Object.assign(create(typeModels.UsageTestMetricData, UsageTestMetricDataTypeRef), values)
-}
-
-export type UsageTestMetricData = {
-	_type: TypeRef<UsageTestMetricData>;
-
-	_id: Id;
-	name: string;
-	value: string;
-}
-export const UsageTestParticipationInTypeRef: TypeRef<UsageTestParticipationIn> = new TypeRef("sys", "UsageTestParticipationIn")
-
-export function createUsageTestParticipationIn(values?: Partial<UsageTestParticipationIn>): UsageTestParticipationIn {
-	return Object.assign(create(typeModels.UsageTestParticipationIn, UsageTestParticipationInTypeRef), values)
-}
-
-export type UsageTestParticipationIn = {
-	_type: TypeRef<UsageTestParticipationIn>;
-
-	_format: NumberString;
-	stage: NumberString;
-	testDeviceId: Id;
-	testId: Id;
-
-	metrics: UsageTestMetricData[];
-}
-export const UsageTestStageTypeRef: TypeRef<UsageTestStage> = new TypeRef("sys", "UsageTestStage")
-
-export function createUsageTestStage(values?: Partial<UsageTestStage>): UsageTestStage {
-	return Object.assign(create(typeModels.UsageTestStage, UsageTestStageTypeRef), values)
-}
-
-export type UsageTestStage = {
-	_type: TypeRef<UsageTestStage>;
-
-	_id: Id;
-	name: string;
-
-	metrics: UsageTestMetricConfig[];
 }
 export const UserTypeRef: TypeRef<User> = new TypeRef("sys", "User")
 

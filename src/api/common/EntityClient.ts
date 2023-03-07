@@ -1,12 +1,13 @@
-import type {EntityRestInterface} from "../worker/rest/EntityRestClient"
-import type {RootInstance} from "../entities/sys/TypeRefs.js"
-import {RootInstanceTypeRef} from "../entities/sys/TypeRefs.js"
-import {CUSTOM_MIN_ID, firstBiggerThanSecond, GENERATED_MIN_ID, getElementId, getLetId, RANGE_ITEM_LIMIT} from "./utils/EntityUtils"
-import {Type, ValueType} from "./EntityConstants"
-import {last, TypeRef} from "@tutao/tutanota-utils"
-import { resolveTypeReference} from "./EntityFunctions"
-import type {ElementEntity, ListElementEntity, SomeEntity} from "./EntityTypes"
-import {downcast} from "@tutao/tutanota-utils";
+import type { EntityRestInterface } from "../worker/rest/EntityRestClient"
+import type { RootInstance } from "../entities/sys/TypeRefs.js"
+import { RootInstanceTypeRef } from "../entities/sys/TypeRefs.js"
+import { CUSTOM_MIN_ID, firstBiggerThanSecond, GENERATED_MIN_ID, getElementId, getLetId, RANGE_ITEM_LIMIT } from "./utils/EntityUtils"
+import { Type, ValueType } from "./EntityConstants"
+import { last, TypeRef } from "@tutao/tutanota-utils"
+import { resolveTypeReference } from "./EntityFunctions"
+import type { ElementEntity, ListElementEntity, SomeEntity } from "./EntityTypes"
+import { downcast } from "@tutao/tutanota-utils"
+import { EntityRestClientSetupOptions } from "../worker/rest/EntityRestClient"
 
 export class EntityClient {
 	_target: EntityRestInterface
@@ -15,12 +16,11 @@ export class EntityClient {
 		this._target = target
 	}
 
-	load<T extends SomeEntity>(typeRef: TypeRef<T>, id: PropertyType<T, "_id">, query?: Dict, extraHeaders?: Dict): Promise<T> {
-		return this._target.load(typeRef, id, query, extraHeaders)
+	load<T extends SomeEntity>(typeRef: TypeRef<T>, id: PropertyType<T, "_id">, query?: Dict, extraHeaders?: Dict, ownerKey?: Aes128Key): Promise<T> {
+		return this._target.load(typeRef, id, query, extraHeaders, ownerKey)
 	}
 
 	async loadAll<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id, start?: Id): Promise<T[]> {
-
 		const typeModel = await resolveTypeReference(typeRef)
 
 		if (!start) {
@@ -50,14 +50,11 @@ export class EntityClient {
 		const typeModel = await resolveTypeReference(typeRef)
 		if (typeModel.type !== Type.ListElement) throw new Error("only ListElement types are permitted")
 		const loadedEntities = await this._target.loadRange<T>(typeRef, listId, start, rangeItemLimit, true)
-		const filteredEntities = loadedEntities.filter(entity => firstBiggerThanSecond(getElementId(entity), end, typeModel))
+		const filteredEntities = loadedEntities.filter((entity) => firstBiggerThanSecond(getElementId(entity), end, typeModel))
 
 		if (filteredEntities.length === rangeItemLimit) {
 			const lastElementId = getElementId(filteredEntities[loadedEntities.length - 1])
-			const {
-				elements: remainingEntities,
-				loadedCompletely
-			} = await this.loadReverseRangeBetween<T>(typeRef, listId, lastElementId, end, rangeItemLimit)
+			const { elements: remainingEntities, loadedCompletely } = await this.loadReverseRangeBetween<T>(typeRef, listId, lastElementId, end, rangeItemLimit)
 			return {
 				elements: filteredEntities.concat(remainingEntities),
 				loadedCompletely,
@@ -81,16 +78,16 @@ export class EntityClient {
 		return this._target.loadMultiple(typeRef, listId, elementIds)
 	}
 
-	setup<T extends SomeEntity>(listId: Id | null, instance: T, extraHeaders?: Dict): Promise<Id> {
-		return this._target.setup(listId, instance, extraHeaders)
+	setup<T extends SomeEntity>(listId: Id | null, instance: T, extraHeaders?: Dict, options?: EntityRestClientSetupOptions): Promise<Id> {
+		return this._target.setup(listId, instance, extraHeaders, options)
 	}
 
 	setupMultipleEntities<T extends SomeEntity>(listId: Id | null, instances: Array<T>): Promise<Array<Id>> {
 		return this._target.setupMultiple(listId, instances)
 	}
 
-	update<T extends SomeEntity>(instance: T): Promise<void> {
-		return this._target.update(instance)
+	update<T extends SomeEntity>(instance: T, ownerKey?: Aes128Key): Promise<void> {
+		return this._target.update(instance, ownerKey)
 	}
 
 	erase<T extends SomeEntity>(instance: T): Promise<void> {

@@ -1,20 +1,24 @@
-import {DomainDnsStatus} from "../DomainDnsStatus"
-import m, {ChildArray, Children, Vnode, VnodeDOM} from "mithril"
-import {assertEnumValue, CustomDomainCheckResult, DnsRecordType, DnsRecordValidation, getAsEnumValue} from "../../api/common/TutanotaConstants"
-import {InfoLink, lang, TranslationKey} from "../../misc/LanguageViewModel"
-import type {AddDomainData} from "./AddDomainWizard"
-import {createDnsRecordTableN} from "./AddDomainWizard"
-import {Dialog} from "../../gui/base/Dialog"
-import type {WizardPageAttrs} from "../../gui/base/WizardDialogN"
-import {emitWizardEvent, WizardEventType, WizardPageN} from "../../gui/base/WizardDialogN"
-import {ButtonN, ButtonType} from "../../gui/base/ButtonN"
-import type {DnsRecord} from "../../api/entities/sys/TypeRefs.js"
-import {BootIcons} from "../../gui/base/icons/BootIcons"
-import {assertMainOrNode} from "../../api/common/Env"
-import {downcast} from "@tutao/tutanota-utils"
+import { DomainDnsStatus } from "../DomainDnsStatus"
+import m, { Children, Vnode, VnodeDOM } from "mithril"
+import { assertEnumValue, CustomDomainCheckResult, DnsRecordType, DnsRecordValidation } from "../../api/common/TutanotaConstants"
+import { InfoLink, lang, TranslationKey } from "../../misc/LanguageViewModel"
+import type { AddDomainData, ValidatedDnSRecord } from "./AddDomainWizard"
+import { Dialog } from "../../gui/base/Dialog"
+import type { WizardPageAttrs } from "../../gui/base/WizardDialog.js"
+import { emitWizardEvent, WizardEventType, WizardPageN } from "../../gui/base/WizardDialog.js"
+import { Button, ButtonType } from "../../gui/base/Button.js"
+import type { DnsRecord } from "../../api/entities/sys/TypeRefs.js"
+import { BootIcons } from "../../gui/base/icons/BootIcons"
+import { assertMainOrNode } from "../../api/common/Env"
+import { downcast } from "@tutao/tutanota-utils"
+import { ButtonSize } from "../../gui/base/ButtonSize.js"
+import { IconButtonAttrs } from "../../gui/base/IconButton.js"
+import { ColumnWidth, Table } from "../../gui/base/Table.js"
+import { DnsRecordTable } from "./DnsRecordTable.js"
 
 assertMainOrNode()
 
+/** Wizard page which can verify DNS records for custom email domain. */
 export class VerifyDnsRecordsPage implements WizardPageN<AddDomainData> {
 	oncreate(vnode: VnodeDOM<WizardPageAttrs<AddDomainData>>) {
 		const data = vnode.attrs.data
@@ -30,36 +34,36 @@ export class VerifyDnsRecordsPage implements WizardPageN<AddDomainData> {
 			m("p", lang.get("verifyDNSRecords_msg")),
 			a.data.domainStatus.status.isLoaded()
 				? m("", [
-					renderCheckResult(a.data.domainStatus),
-					m(
-						".flex-center.full-width.pt-l.mb-l",
+						renderCheckResult(a.data.domainStatus),
 						m(
-							"",
-							{
-								style: {
-									width: "260px",
+							".flex-center.full-width.pt-l.mb-l",
+							m(
+								"",
+								{
+									style: {
+										width: "260px",
+									},
 								},
-							},
-							m(ButtonN, {
-								type: ButtonType.Login,
-								label: "finish_action",
-								// We check if all DNS records are set correctly and let the user confirm before leaving if not
-								click: () => this._finishDialog(a.data, downcast<VnodeDOM>(vnode)?.dom as (HTMLElement | null) ?? null),
+								m(Button, {
+									type: ButtonType.Login,
+									label: "finish_action",
+									// We check if all DNS records are set correctly and let the user confirm before leaving if not
+									click: () => this._finishDialog(a.data, (downcast<VnodeDOM>(vnode)?.dom as HTMLElement | null) ?? null),
+								}),
+							),
+						),
+				  ])
+				: m("", [
+						lang.get("loadingDNSRecords_msg"),
+						m(
+							".flex-center.full-width.pt-l.mb-l",
+							m(Button, {
+								type: ButtonType.Secondary,
+								label: "refresh_action",
+								click: () => _updateDnsStatus(a.data.domainStatus),
 							}),
 						),
-					),
-				])
-				: m("", [
-					lang.get("loadingDNSRecords_msg"),
-					m(
-						".flex-center.full-width.pt-l.mb-l",
-						m(ButtonN, {
-							type: ButtonType.Secondary,
-							label: "refresh_action",
-							click: () => _updateDnsStatus(a.data.domainStatus),
-						}),
-					),
-				]),
+				  ]),
 		]
 	}
 
@@ -105,13 +109,38 @@ function _getDisplayableRecordValue(record: DnsRecord): string {
 	return record.value
 }
 
+export function createDnsRecordTableN(records: ValidatedDnSRecord[], refreshButtonAttrs: IconButtonAttrs | null): Children {
+	return m(Table, {
+		columnHeading: ["type_label", "dnsRecordHostOrName_label", "dnsRecordValueOrPointsTo_label"],
+		addButtonAttrs: refreshButtonAttrs,
+		columnWidths: [ColumnWidth.Small, ColumnWidth.Small, ColumnWidth.Largest],
+		showActionButtonColumn: true,
+		lines: records.map((r) => {
+			return {
+				cells: () => [
+					{
+						main: DnsRecordTable[r.record.type as DnsRecordType],
+					},
+					{
+						main: r.record.subdomain ? r.record.subdomain : "@",
+					},
+					{
+						main: r.record.value,
+						info: r.helpInfo,
+					},
+				],
+			}
+		}),
+	})
+}
+
 export function renderCheckResult(domainStatus: DomainDnsStatus, hideRefreshButton: boolean = false): Children {
-	const checkReturn = domainStatus.getLoadedCustomDomainCheckReturn()
-	const {requiredRecords, missingRecords, invalidRecords} = checkReturn
+	const checkReturn = domainStatus.getLoadedCustomDomainCheckGetOut()
+	const { requiredRecords, missingRecords, invalidRecords } = checkReturn
 	const checkResult = assertEnumValue(CustomDomainCheckResult, checkReturn.checkResult)
 
 	if (checkResult === CustomDomainCheckResult.CUSTOM_DOMAIN_CHECK_RESULT_OK) {
-		const validatedRecords = requiredRecords.map(record => {
+		const validatedRecords = requiredRecords.map((record) => {
 			const displayableRecordValue = _getDisplayableRecordValue(record)
 
 			const helpInfo: string[] = []
@@ -141,21 +170,24 @@ export function renderCheckResult(domainStatus: DomainDnsStatus, hideRefreshButt
 			validatedRecord.value = displayableRecordValue
 			return {
 				record: validatedRecord,
-				helpInfo
+				helpInfo,
 			}
 		})
-		const refreshButtonAttrs = hideRefreshButton
-			? null
-			: {
-				label: "refresh_action",
-				icon: () => BootIcons.Progress,
-				click: () => _updateDnsStatus(domainStatus),
-			} as const
 		return [
 			m(".mt-m.mb-s", lang.get("setDnsRecords_msg")),
-			createDnsRecordTableN(validatedRecords, refreshButtonAttrs),
+			createDnsRecordTableN(
+				validatedRecords,
+				hideRefreshButton
+					? null
+					: {
+							title: "refresh_action",
+							icon: BootIcons.Progress,
+							size: ButtonSize.Compact,
+							click: () => _updateDnsStatus(domainStatus),
+					  },
+			),
 			m("span.small.mt-m", lang.get("moreInfo_msg") + " "),
-			m("span.small", m(`a[href=${InfoLink.DomainInfo}][target=_blank]`, InfoLink.DomainInfo))
+			m("span.small", m(`a[href=${InfoLink.DomainInfo}][target=_blank]`, InfoLink.DomainInfo)),
 		]
 	} else {
 		const errorMessageMap: Record<CustomDomainCheckResult, TranslationKey> = {
@@ -169,7 +201,7 @@ export function renderCheckResult(domainStatus: DomainDnsStatus, hideRefreshButt
 }
 
 function findDnsRecordInList(record: DnsRecord, recordList: Array<DnsRecord>): Array<DnsRecord> {
-	return recordList.filter(r => r.type === record.type && r.subdomain === record.subdomain)
+	return recordList.filter((r) => r.type === record.type && r.subdomain === record.subdomain)
 }
 
 export class VerifyDnsRecordsPageAttrs implements WizardPageAttrs<AddDomainData> {

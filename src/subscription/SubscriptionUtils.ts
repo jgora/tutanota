@@ -1,34 +1,13 @@
-import {Component} from "mithril"
-import type {TranslationKey} from "../misc/LanguageViewModel"
-import {AccountType, BookingItemFeatureType, Const} from "../api/common/TutanotaConstants"
-import {getCurrentCount} from "./PriceUtils"
-import {PreconditionFailedError} from "../api/common/error/RestError"
-import type {PlanPrices} from "../api/entities/sys/TypeRefs.js"
-import type {Customer} from "../api/entities/sys/TypeRefs.js"
-import type {CustomerInfo} from "../api/entities/sys/TypeRefs.js"
-import type {Booking} from "../api/entities/sys/TypeRefs.js"
-import {createBookingServiceData} from "../api/entities/sys/TypeRefs.js"
-import {HttpMethod} from "../api/common/EntityFunctions"
-import {Dialog} from "../gui/base/Dialog"
-import {ProgrammingError} from "../api/common/error/ProgrammingError"
-import {ofClass} from "@tutao/tutanota-utils"
-import Stream from "mithril/stream";
-import {locator} from "../api/main/MainLocator"
-import {BookingService} from "../api/entities/sys/Services"
-
-export type SubscriptionOptions = {
-	businessUse: Stream<boolean>
-	paymentInterval: Stream<number>
-}
-
-export const enum SubscriptionType {
-	Free = "Free",
-	Premium = "Premium",
-	PremiumBusiness = "PremiumBusiness",
-	Teams = "Teams",
-	TeamsBusiness = "TeamsBusiness",
-	Pro = "Pro",
-}
+import type { TranslationKey } from "../misc/LanguageViewModel"
+import { AccountType, BookingItemFeatureType, Const, getClientType } from "../api/common/TutanotaConstants"
+import { PreconditionFailedError } from "../api/common/error/RestError"
+import type { Customer, CustomerInfo } from "../api/entities/sys/TypeRefs.js"
+import { Booking, createBookingServiceData, createPaymentDataServiceGetData } from "../api/entities/sys/TypeRefs.js"
+import { Dialog } from "../gui/base/Dialog"
+import { LazyLoaded, ofClass } from "@tutao/tutanota-utils"
+import { locator } from "../api/main/MainLocator"
+import { BookingService, PaymentDataService } from "../api/entities/sys/Services"
+import { SubscriptionConfig } from "./FeatureListProvider"
 
 export const enum UpgradeType {
 	Signup = "Signup",
@@ -38,221 +17,12 @@ export const enum UpgradeType {
 	Switch = "Switch", // switching in paid account
 }
 
-export type SubscriptionConfig = {
-	nbrOfAliases: number
-	orderNbrOfAliases: number
-	storageGb: number
-	orderStorageGb: number
-	sharing: boolean
-	business: boolean
-	whitelabel: boolean
-}
-
-export const subscriptions: Record<SubscriptionType, SubscriptionConfig> = {
-
-	[SubscriptionType.Free]: {
-		nbrOfAliases: 0,
-		orderNbrOfAliases: 0,
-		storageGb: 1,
-		orderStorageGb: 0,
-		sharing: false,
-		business: false,
-		whitelabel: false,
-	},
-
-	[SubscriptionType.Premium]: {
-		nbrOfAliases: 5,
-		orderNbrOfAliases: 0,
-		storageGb: 1,
-		orderStorageGb: 0,
-		sharing: false,
-		business: false,
-		whitelabel: false,
-	},
-
-	[SubscriptionType.PremiumBusiness]: {
-		nbrOfAliases: 5,
-		orderNbrOfAliases: 0,
-		storageGb: 1,
-		orderStorageGb: 0,
-		sharing: false,
-		business: true,
-		whitelabel: false,
-	},
-
-	[SubscriptionType.Teams]: {
-		nbrOfAliases: 5,
-		orderNbrOfAliases: 0,
-		storageGb: 10,
-		orderStorageGb: 10,
-		sharing: true,
-		business: false,
-		whitelabel: false,
-	},
-
-	[SubscriptionType.TeamsBusiness]: {
-		nbrOfAliases: 5,
-		orderNbrOfAliases: 0,
-		storageGb: 10,
-		orderStorageGb: 10,
-		sharing: true,
-		business: true,
-		whitelabel: false,
-	},
-
-	[SubscriptionType.Pro]: {
-		nbrOfAliases: 20,
-		orderNbrOfAliases: 20,
-		storageGb: 10,
-		orderStorageGb: 10,
-		sharing: true,
-		business: true,
-		whitelabel: true,
-	},
-}
-
-
-const descendingSubscriptionOrder = [
-	SubscriptionType.Pro,
-	SubscriptionType.TeamsBusiness,
-	SubscriptionType.Teams,
-	SubscriptionType.PremiumBusiness,
-	SubscriptionType.Premium,
-]
-
-/**
- * Returns true if the targetSubscription plan is considered to be a lower (~ cheaper) subscription plan
- * Is based on the order of business and non-business subscriptions as defined in descendingSubscriptionOrder
- */
-export function isDowngrade(targetSubscription: SubscriptionType, currentSubscription: SubscriptionType): boolean {
-	return descendingSubscriptionOrder.indexOf(targetSubscription) > descendingSubscriptionOrder.indexOf(currentSubscription)
-}
-
-export type SubscriptionActionButtons = {
-	Free: Component
-	Premium: Component
-	PremiumBusiness: Component
-	Teams: Component
-	TeamsBusiness: Component
-	Pro: Component
-}
-
-export function getActionButtonBySubscription(actionButtons: SubscriptionActionButtons, subscription: SubscriptionType): Component {
-	switch (subscription) {
-		case SubscriptionType.Free:
-			return actionButtons.Free
-
-		case SubscriptionType.Premium:
-			return actionButtons.Premium
-
-		case SubscriptionType.PremiumBusiness:
-			return actionButtons.PremiumBusiness
-
-		case SubscriptionType.Teams:
-			return actionButtons.Teams
-
-		case SubscriptionType.TeamsBusiness:
-			return actionButtons.TeamsBusiness
-
-		case SubscriptionType.Pro:
-			return actionButtons.Pro
-
-		default:
-			throw new ProgrammingError("Plan is not valid")
-	}
-}
-
-export type SubscriptionPlanPrices = {
-	Premium: PlanPrices
-	PremiumBusiness: PlanPrices
-	Teams: PlanPrices
-	TeamsBusiness: PlanPrices
-	Pro: PlanPrices
-}
-export type SubscriptionData = {
-	options: SubscriptionOptions
-	planPrices: SubscriptionPlanPrices
-}
-
-export const enum UpgradePriceType {
-	PlanReferencePrice = "0",
-	PlanActualPrice = "1",
-	PlanNextYearsPrice = "2",
-	AdditionalUserPrice = "3",
-	ContactFormPrice = "4",
-}
-
-export function getPlanPrices(prices: SubscriptionPlanPrices, subscription: SubscriptionType): PlanPrices | null {
-	switch (subscription) {
-		case SubscriptionType.Free:
-			return null
-
-		case SubscriptionType.Premium:
-			return prices.Premium
-
-		case SubscriptionType.PremiumBusiness:
-			return prices.PremiumBusiness
-
-		case SubscriptionType.Teams:
-			return prices.Teams
-
-		case SubscriptionType.TeamsBusiness:
-			return prices.TeamsBusiness
-
-		case SubscriptionType.Pro:
-			return prices.Pro
-
-		default:
-			throw new ProgrammingError("Plan is not valid")
-	}
-}
-
-/**
- * @returns the corresponding subscription for business customer (Premium -> PremiumBusiness etc.)
- */
-export function getBusinessUsageSubscriptionType(subscription: SubscriptionType): SubscriptionType {
-
-	switch (subscription) {
-		case SubscriptionType.Free:
-			throw new ProgrammingError("there is no business counterpart for free")
-
-		case SubscriptionType.Premium:
-			return SubscriptionType.PremiumBusiness
-
-		case SubscriptionType.Teams:
-			return SubscriptionType.TeamsBusiness
-
-		default:
-			return subscription
-	}
-}
-
-/**
- * @returns the name to show to the user for the current subscription
- * We return 'Premium'/'Teams' for both types private and business and individually append 'business' to it
- */
-export function getDisplayNameOfSubscriptionType(subscription: SubscriptionType): string {
-	switch (subscription) {
-		case SubscriptionType.PremiumBusiness:
-			return "Premium"
-
-		case SubscriptionType.Premium:
-			return "Premium"
-
-		case SubscriptionType.TeamsBusiness:
-			return "Teams"
-
-		case SubscriptionType.Teams:
-			return "Teams"
-
-		case SubscriptionType.Free:
-			return "Free"
-
-		case SubscriptionType.Pro:
-			return "Pro"
-
-		default:
-			return "Premium"
+export function getCurrentCount(featureType: BookingItemFeatureType, booking: Booking | null): number {
+	if (booking) {
+		let bookingItem = booking.items.find((item) => item.featureType === featureType)
+		return bookingItem ? Number(bookingItem.currentCount) : 0
+	} else {
+		return 0
 	}
 }
 
@@ -307,39 +77,6 @@ export function getIncludedAliases(customerInfo: CustomerInfo): number {
 	return Math.max(Number(customerInfo.includedEmailAliases), Number(customerInfo.promotionEmailAliases))
 }
 
-export function isBusinessSubscription(subscription: SubscriptionType): boolean {
-	switch (subscription) {
-		case SubscriptionType.PremiumBusiness:
-		case SubscriptionType.TeamsBusiness:
-		case SubscriptionType.Pro:
-			return true
-
-		default:
-			return false
-	}
-}
-
-export function getSubscriptionType(lastBooking: Booking | null, customer: Customer, customerInfo: CustomerInfo): SubscriptionType {
-
-	if (customer.type !== AccountType.PREMIUM) {
-		return SubscriptionType.Free
-	}
-
-	const currentSubscription = {
-		nbrOfAliases: getTotalAliases(customer, customerInfo, lastBooking),
-		orderNbrOfAliases: getTotalAliases(customer, customerInfo, lastBooking),
-		// dummy value
-		storageGb: getTotalStorageCapacity(customer, customerInfo, lastBooking),
-		orderStorageGb: getTotalStorageCapacity(customer, customerInfo, lastBooking),
-		// dummy value
-		sharing: isSharingActive(lastBooking),
-		business: isBusinessFeatureActive(lastBooking),
-		whitelabel: isWhitelabelActive(lastBooking),
-	}
-	const foundPlan = descendingSubscriptionOrder.find(plan => hasAllFeaturesInPlan(currentSubscription, subscriptions[plan]))
-	return foundPlan || SubscriptionType.Premium
-}
-
 export function hasAllFeaturesInPlan(currentSubscription: SubscriptionConfig, planSubscription: SubscriptionConfig): boolean {
 	return !(
 		currentSubscription.nbrOfAliases < planSubscription.nbrOfAliases ||
@@ -350,8 +87,24 @@ export function hasAllFeaturesInPlan(currentSubscription: SubscriptionConfig, pl
 	)
 }
 
+export type PaymentErrorCode =
+	| "paypal.change"
+	| "paypal.confirm_again"
+	| "paypal.other_source"
+	| "card.contact_bank"
+	| "card.insufficient_funds"
+	| "card.expired_card"
+	| "card.change"
+	| "card.3ds2_needed"
+	| "card.3ds2_pending"
+	| "card.3ds2_failed"
+	| "card.cvv_invalid"
+	| "card.number_invalid"
+	| "card.date_invalid"
+
 export function getPreconditionFailedPaymentMsg(data: string | null): TranslationKey {
-	switch (data) {
+	// the type is mostly there to keep multiple locations that switch over these in sync
+	switch (data as PaymentErrorCode) {
 		case "paypal.change":
 			return "payChangeError_msg"
 
@@ -416,10 +169,11 @@ export function bookItem(featureType: BookingItemFeatureType, amount: number): P
 		featureType,
 		date: Const.CURRENT_DATE,
 	})
-	return locator.serviceExecutor.post(BookingService, bookingData)
+	return locator.serviceExecutor
+		.post(BookingService, bookingData)
 		.then(() => false)
 		.catch(
-			ofClass(PreconditionFailedError, error => {
+			ofClass(PreconditionFailedError, (error) => {
 				// error handling for cancelling a feature.
 				switch (error.data) {
 					case BookingFailureReason.BALANCE_INSUFFICIENT:
@@ -487,4 +241,20 @@ function getBookingItemErrorMsg(feature: BookingItemFeatureType): TranslationKey
 		default:
 			return "unknownError_msg"
 	}
+}
+
+export function getLazyLoadedPayPalUrl(): LazyLoaded<string> {
+	return new LazyLoaded(() => {
+		const clientType = getClientType()
+		return locator.serviceExecutor
+			.get(
+				PaymentDataService,
+				createPaymentDataServiceGetData({
+					clientType,
+				}),
+			)
+			.then((result) => {
+				return result.loginUrl
+			})
+	})
 }

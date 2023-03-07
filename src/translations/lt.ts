@@ -13,8 +13,9 @@ export default {
 		"many"
 	],
 	"created_at": "2015-03-13T10:17:47Z",
-	"updated_at": "2022-06-28T09:22:25Z",
+	"updated_at": "2023-02-23T17:28:47Z",
 	"source_locale": null,
+	"fallback_locale": null,
 	"keys": {
 		"accountSwitchAdditionalPackagesActive_msg": "Prašome išjungti užsakytą talpą ar bet kokį kitą paketą ir išjungti visus kitus el. paštus prieš pakeičiant vartotojo tipą.",
 		"accountSwitchTooManyActiveUsers_msg": "Prieš perjungiant abonemento tipą,  išjungti visus papildomus vartotojus.",

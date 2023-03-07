@@ -1,11 +1,10 @@
 import fs from "fs"
 import path from "path"
-import {app} from "electron"
-import {execSync} from "child_process"
-import {last} from "@tutao/tutanota-utils"
-import {neverNull} from "@tutao/tutanota-utils"
-import {Logger, replaceNativeLogger} from "../api/common/Logger"
-import {log, rebindDesktopLog} from "./DesktopLog"
+import { app } from "electron"
+import { execSync } from "child_process"
+import { last, neverNull } from "@tutao/tutanota-utils"
+import { Logger, replaceNativeLogger } from "../api/common/Logger"
+import { log, rebindDesktopLog } from "./DesktopLog"
 
 const logger = new Logger()
 replaceNativeLogger(global, logger, true)
@@ -35,17 +34,17 @@ process.on("exit", () => {
 		console.error("could not write log file: ", e.message)
 	}
 })
+
+const oldInfo = console.info
 const oldLog = console.log
 const oldError = console.error
 const oldWarn = console.warn
 const oldTrace = console.trace
 
+;(console as any).info = (...args: any[]) => oldInfo(`[${new Date().toISOString()}]`, ...args)
 ;(console as any).log = (...args: any[]) => oldLog(`[${new Date().toISOString()}]`, ...args)
-
 ;(console as any).error = (...args: any[]) => oldError(`[${new Date().toISOString()}]`, ...args)
-
 ;(console as any).warn = (...args: any[]) => oldWarn(`[${new Date().toISOString()}]`, ...args)
-
 ;(console as any).trace = (...args: any[]) => oldTrace(`[${new Date().toISOString()}]`, ...args)
 
 if (process.platform === "win32") {
@@ -65,9 +64,9 @@ if (process.platform === "win32") {
 	}
 }
 
-global.btoa = str => Buffer.from(str, "binary").toString("base64")
+global.btoa = (str) => Buffer.from(str, "binary").toString("base64")
 
-global.atob = b64 => Buffer.from(b64, "base64").toString("binary")
+global.atob = (b64) => Buffer.from(b64, "base64").toString("binary")
 
 export function mp() {
 	log.debug("the monkey has been patched")

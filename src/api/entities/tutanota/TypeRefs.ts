@@ -2,6 +2,7 @@ import {create} from "../../common/utils/EntityUtils.js"
 import {TypeRef} from "@tutao/tutanota-utils"
 import {typeModels} from "./TypeModels.js"
 import {Blob} from '../sys/TypeRefs.js'
+import {BucketKey} from '../sys/TypeRefs.js'
 import {BlobReferenceTokenWrapper} from '../sys/TypeRefs.js'
 
 export const AttachmentKeyDataTypeRef: TypeRef<AttachmentKeyData> = new TypeRef("tutanota", "AttachmentKeyData")
@@ -32,6 +33,19 @@ export type Birthday = {
 	day: NumberString;
 	month: NumberString;
 	year: null | NumberString;
+}
+export const BodyTypeRef: TypeRef<Body> = new TypeRef("tutanota", "Body")
+
+export function createBody(values?: Partial<Body>): Body {
+	return Object.assign(create(typeModels.Body, BodyTypeRef), values)
+}
+
+export type Body = {
+	_type: TypeRef<Body>;
+
+	_id: Id;
+	compressedText: null | string;
+	text: null | string;
 }
 export const CalendarDeleteDataTypeRef: TypeRef<CalendarDeleteData> = new TypeRef("tutanota", "CalendarDeleteData")
 
@@ -476,8 +490,9 @@ export type CreateMailFolderData = {
 	_format: NumberString;
 	folderName: string;
 	ownerEncSessionKey: Uint8Array;
+	ownerGroup: null | Id;
 
-	parentFolder: IdTuple;
+	parentFolder:  null | IdTuple;
 }
 export const CreateMailFolderReturnTypeRef: TypeRef<CreateMailFolderReturn> = new TypeRef("tutanota", "CreateMailFolderReturn")
 
@@ -1032,6 +1047,19 @@ export type GroupSettings = {
 
 	group: Id;
 }
+export const HeaderTypeRef: TypeRef<Header> = new TypeRef("tutanota", "Header")
+
+export function createHeader(values?: Partial<Header>): Header {
+	return Object.assign(create(typeModels.Header, HeaderTypeRef), values)
+}
+
+export type Header = {
+	_type: TypeRef<Header>;
+
+	_id: Id;
+	compressedHeaders: null | string;
+	headers: null | string;
+}
 export const ImapFolderTypeRef: TypeRef<ImapFolder> = new TypeRef("tutanota", "ImapFolder")
 
 export function createImapFolder(values?: Partial<ImapFolder>): ImapFolder {
@@ -1184,14 +1212,12 @@ export type Mail = {
 	_type: TypeRef<Mail>;
 	_errors: Object;
 
-	_area: NumberString;
 	_format: NumberString;
 	_id: IdTuple;
-	_owner: Id;
 	_ownerEncSessionKey: null | Uint8Array;
 	_ownerGroup: null | Id;
 	_permissions: Id;
-	authStatus: NumberString;
+	authStatus: null | NumberString;
 	confidential: boolean;
 	differentEnvelopeSender: null | string;
 	listUnsubscribe: boolean;
@@ -1199,21 +1225,23 @@ export type Mail = {
 	movedTime: null | Date;
 	phishingStatus: NumberString;
 	receivedDate: Date;
+	recipientCount: NumberString;
 	replyType: NumberString;
-	sentDate: Date;
+	sentDate: null | Date;
 	state: NumberString;
 	subject: string;
-	trashed: boolean;
 	unread: boolean;
 
 	attachments: IdTuple[];
 	bccRecipients: MailAddress[];
-	body: Id;
-	bodyBlob:  null | Blob;
+	body:  null | Id;
+	bucketKey:  null | BucketKey;
 	ccRecipients: MailAddress[];
 	conversationEntry: IdTuple;
+	firstRecipient:  null | MailAddress;
 	headers:  null | Id;
-	headersBlob:  null | Blob;
+	mailDetails:  null | IdTuple;
+	mailDetailsDraft:  null | IdTuple;
 	replyTos: EncryptedMailAddress[];
 	restrictions:  null | MailRestriction;
 	sender: MailAddress;
@@ -1233,6 +1261,19 @@ export type MailAddress = {
 	name: string;
 
 	contact:  null | IdTuple;
+}
+export const MailAddressPropertiesTypeRef: TypeRef<MailAddressProperties> = new TypeRef("tutanota", "MailAddressProperties")
+
+export function createMailAddressProperties(values?: Partial<MailAddressProperties>): MailAddressProperties {
+	return Object.assign(create(typeModels.MailAddressProperties, MailAddressPropertiesTypeRef), values)
+}
+
+export type MailAddressProperties = {
+	_type: TypeRef<MailAddressProperties>;
+
+	_id: Id;
+	mailAddress: string;
+	senderName: string;
 }
 export const MailBodyTypeRef: TypeRef<MailBody> = new TypeRef("tutanota", "MailBody")
 
@@ -1272,11 +1313,79 @@ export type MailBox = {
 	lastInfoDate: Date;
 	symEncShareBucketKey: null | Uint8Array;
 
+	folders:  null | MailFolderRef;
+	mailDetailsDrafts:  null | MailDetailsDraftsRef;
 	mails: Id;
 	receivedAttachments: Id;
 	sentAttachments: Id;
 	spamResults:  null | SpamResults;
-	systemFolders:  null | MailFolderRef;
+}
+export const MailDetailsTypeRef: TypeRef<MailDetails> = new TypeRef("tutanota", "MailDetails")
+
+export function createMailDetails(values?: Partial<MailDetails>): MailDetails {
+	return Object.assign(create(typeModels.MailDetails, MailDetailsTypeRef), values)
+}
+
+export type MailDetails = {
+	_type: TypeRef<MailDetails>;
+
+	_id: Id;
+	authStatus: NumberString;
+	sentDate: Date;
+
+	body: Body;
+	headers:  null | Header;
+	recipients: Recipients;
+	replyTos: EncryptedMailAddress[];
+}
+export const MailDetailsBlobTypeRef: TypeRef<MailDetailsBlob> = new TypeRef("tutanota", "MailDetailsBlob")
+
+export function createMailDetailsBlob(values?: Partial<MailDetailsBlob>): MailDetailsBlob {
+	return Object.assign(create(typeModels.MailDetailsBlob, MailDetailsBlobTypeRef), values)
+}
+
+export type MailDetailsBlob = {
+	_type: TypeRef<MailDetailsBlob>;
+	_errors: Object;
+
+	_format: NumberString;
+	_id: IdTuple;
+	_ownerEncSessionKey: null | Uint8Array;
+	_ownerGroup: null | Id;
+	_permissions: Id;
+
+	details: MailDetails;
+}
+export const MailDetailsDraftTypeRef: TypeRef<MailDetailsDraft> = new TypeRef("tutanota", "MailDetailsDraft")
+
+export function createMailDetailsDraft(values?: Partial<MailDetailsDraft>): MailDetailsDraft {
+	return Object.assign(create(typeModels.MailDetailsDraft, MailDetailsDraftTypeRef), values)
+}
+
+export type MailDetailsDraft = {
+	_type: TypeRef<MailDetailsDraft>;
+	_errors: Object;
+
+	_format: NumberString;
+	_id: IdTuple;
+	_ownerEncSessionKey: null | Uint8Array;
+	_ownerGroup: null | Id;
+	_permissions: Id;
+
+	details: MailDetails;
+}
+export const MailDetailsDraftsRefTypeRef: TypeRef<MailDetailsDraftsRef> = new TypeRef("tutanota", "MailDetailsDraftsRef")
+
+export function createMailDetailsDraftsRef(values?: Partial<MailDetailsDraftsRef>): MailDetailsDraftsRef {
+	return Object.assign(create(typeModels.MailDetailsDraftsRef, MailDetailsDraftsRefTypeRef), values)
+}
+
+export type MailDetailsDraftsRef = {
+	_type: TypeRef<MailDetailsDraftsRef>;
+
+	_id: Id;
+
+	list: Id;
 }
 export const MailFolderTypeRef: TypeRef<MailFolder> = new TypeRef("tutanota", "MailFolder")
 
@@ -1386,6 +1495,8 @@ export type MailboxProperties = {
 	_ownerGroup: null | Id;
 	_permissions: Id;
 	reportMovedMails: NumberString;
+
+	mailAddressProperties: MailAddressProperties[];
 }
 export const MailboxServerPropertiesTypeRef: TypeRef<MailboxServerProperties> = new TypeRef("tutanota", "MailboxServerProperties")
 
@@ -1432,6 +1543,44 @@ export type NewDraftAttachment = {
 
 	fileData:  null | Id;
 	referenceTokens: BlobReferenceTokenWrapper[];
+}
+export const NewsIdTypeRef: TypeRef<NewsId> = new TypeRef("tutanota", "NewsId")
+
+export function createNewsId(values?: Partial<NewsId>): NewsId {
+	return Object.assign(create(typeModels.NewsId, NewsIdTypeRef), values)
+}
+
+export type NewsId = {
+	_type: TypeRef<NewsId>;
+
+	_id: Id;
+	newsItemId: Id;
+	newsItemName: string;
+}
+export const NewsInTypeRef: TypeRef<NewsIn> = new TypeRef("tutanota", "NewsIn")
+
+export function createNewsIn(values?: Partial<NewsIn>): NewsIn {
+	return Object.assign(create(typeModels.NewsIn, NewsInTypeRef), values)
+}
+
+export type NewsIn = {
+	_type: TypeRef<NewsIn>;
+
+	_format: NumberString;
+	newsItemId: null | Id;
+}
+export const NewsOutTypeRef: TypeRef<NewsOut> = new TypeRef("tutanota", "NewsOut")
+
+export function createNewsOut(values?: Partial<NewsOut>): NewsOut {
+	return Object.assign(create(typeModels.NewsOut, NewsOutTypeRef), values)
+}
+
+export type NewsOut = {
+	_type: TypeRef<NewsOut>;
+
+	_format: NumberString;
+
+	newsItemIds: NewsId[];
 }
 export const NotificationMailTypeRef: TypeRef<NotificationMail> = new TypeRef("tutanota", "NotificationMail")
 
@@ -1633,6 +1782,21 @@ export type ReceiveInfoServiceData = {
 	_format: NumberString;
 	language: string;
 }
+export const RecipientsTypeRef: TypeRef<Recipients> = new TypeRef("tutanota", "Recipients")
+
+export function createRecipients(values?: Partial<Recipients>): Recipients {
+	return Object.assign(create(typeModels.Recipients, RecipientsTypeRef), values)
+}
+
+export type Recipients = {
+	_type: TypeRef<Recipients>;
+
+	_id: Id;
+
+	bccRecipients: MailAddress[];
+	ccRecipients: MailAddress[];
+	toRecipients: MailAddress[];
+}
 export const RemoteImapSyncInfoTypeRef: TypeRef<RemoteImapSyncInfo> = new TypeRef("tutanota", "RemoteImapSyncInfo")
 
 export function createRemoteImapSyncInfo(values?: Partial<RemoteImapSyncInfo>): RemoteImapSyncInfo {
@@ -1817,6 +1981,20 @@ export type TutanotaProperties = {
 	inboxRules: InboxRule[];
 	lastPushedMail:  null | IdTuple;
 }
+export const UpdateMailFolderDataTypeRef: TypeRef<UpdateMailFolderData> = new TypeRef("tutanota", "UpdateMailFolderData")
+
+export function createUpdateMailFolderData(values?: Partial<UpdateMailFolderData>): UpdateMailFolderData {
+	return Object.assign(create(typeModels.UpdateMailFolderData, UpdateMailFolderDataTypeRef), values)
+}
+
+export type UpdateMailFolderData = {
+	_type: TypeRef<UpdateMailFolderData>;
+
+	_format: NumberString;
+
+	folder: IdTuple;
+	newParent:  null | IdTuple;
+}
 export const UserAccountCreateDataTypeRef: TypeRef<UserAccountCreateData> = new TypeRef("tutanota", "UserAccountCreateData")
 
 export function createUserAccountCreateData(values?: Partial<UserAccountCreateData>): UserAccountCreateData {
@@ -1925,6 +2103,7 @@ export type UserSettingsGroupRoot = {
 	_permissions: Id;
 	startOfTheWeek: NumberString;
 	timeFormat: NumberString;
+	usageDataOptedIn: null | boolean;
 
 	groupSettings: GroupSettings[];
 }

@@ -6,29 +6,31 @@ import {
 	InsufficientStorageError,
 	InvalidSoftwareVersionError,
 	NotAuthenticatedError,
+	RequestTimeoutError,
 	ServiceUnavailableError,
 	SessionExpiredError,
 } from "../api/common/error/RestError"
-import {Dialog} from "../gui/base/Dialog"
-import {lang, TranslationKey} from "./LanguageViewModel"
-import {assertMainOrNode, isDesktop, isOfflineStorageAvailable} from "../api/common/Env"
-import {neverNull, noOp} from "@tutao/tutanota-utils"
-import {logins} from "../api/main/LoginController"
-import {OutOfSyncError} from "../api/common/error/OutOfSyncError"
-import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
-import {IndexingNotSupportedError} from "../api/common/error/IndexingNotSupportedError"
-import {windowFacade} from "./WindowFacade"
-import {locator} from "../api/main/MainLocator"
-import {QuotaExceededError} from "../api/common/error/QuotaExceededError"
-import {UserError} from "../api/main/UserError"
-import {showMoreStorageNeededOrderDialog} from "./SubscriptionDialogs"
-import {showSnackBar} from "../gui/base/SnackBar"
-import {Credentials} from "./credentials/Credentials"
-import {promptForFeedbackAndSend, showErrorDialogNotLoggedIn} from "./ErrorReporter"
-import {CancelledError} from "../api/common/error/CancelledError"
-import {getLoginErrorMessage} from "./LoginUtils"
-import {isOfflineError} from "../api/common/utils/ErrorCheckUtils.js"
-import {SessionType} from "../api/common/SessionType.js"
+import { Dialog } from "../gui/base/Dialog"
+import { lang } from "./LanguageViewModel"
+import { assertMainOrNode, isDesktop, isOfflineStorageAvailable } from "../api/common/Env"
+import { neverNull, noOp } from "@tutao/tutanota-utils"
+import { logins } from "../api/main/LoginController"
+import { OutOfSyncError } from "../api/common/error/OutOfSyncError"
+import { showProgressDialog } from "../gui/dialogs/ProgressDialog"
+import { IndexingNotSupportedError } from "../api/common/error/IndexingNotSupportedError"
+import { windowFacade } from "./WindowFacade"
+import { locator } from "../api/main/MainLocator"
+import { QuotaExceededError } from "../api/common/error/QuotaExceededError"
+import { UserError } from "../api/main/UserError"
+import { showMoreStorageNeededOrderDialog } from "./SubscriptionDialogs"
+import { showSnackBar } from "../gui/base/SnackBar"
+import { Credentials } from "./credentials/Credentials"
+import { promptForFeedbackAndSend, showErrorDialogNotLoggedIn } from "./ErrorReporter"
+import { CancelledError } from "../api/common/error/CancelledError"
+import { getLoginErrorMessage } from "./LoginUtils"
+import { isOfflineError } from "../api/common/utils/ErrorCheckUtils.js"
+import { SessionType } from "../api/common/SessionType.js"
+import { OfflineDbClosedError } from "../api/common/error/OfflineDbClosedError.js"
 
 assertMainOrNode()
 
@@ -38,6 +40,7 @@ let invalidSoftwareVersionActive = false
 let loginDialogActive = false
 let isLoggingOut = false
 let serviceUnavailableDialogActive = false
+let requestTimeoutDialogActive = false
 let shownQuotaError = false
 let showingImportError = false
 const ignoredMessages = ["webkitExitFullScreen", "googletag", "avast_submit"]
@@ -49,9 +52,16 @@ export async function handleUncaughtErrorImpl(e: Error) {
 	}
 
 	// This is from the s.js and it shouldn't change. Unfortunately it is a plain Error.
-	if (e.message.includes("(SystemJS https://github.com/systemjs/systemjs/blob/master/docs/errors.md#")) {
+	if (
+		e.message.includes("(SystemJS https://github.com/systemjs/systemjs/blob/master/docs/errors.md#") ||
+		e.message.includes("(SystemJS https://git.io/JvFET#3)") // points to the above url
+	) {
 		handleImportError()
 		return
+	}
+
+	if (e instanceof UserError) {
+		return showUserError(e)
 	}
 
 	if (isOfflineError(e)) {
@@ -67,27 +77,24 @@ export async function handleUncaughtErrorImpl(e: Error) {
 		e instanceof AccessDeactivatedError ||
 		e instanceof AccessExpiredError
 	) {
-		// If we session is closed (e.g. password is changed) we log user out forcefully so we reload the page
-		logoutIfNoPasswordPrompt()
+		// If the session is closed (e.g. password is changed) we log user out forcefully so we reload the page
+		if (logins.isUserLoggedIn()) {
+			logoutIfNoPasswordPrompt()
+		}
 	} else if (e instanceof SessionExpiredError) {
 		reloginForExpiredSession()
 	} else if (e instanceof OutOfSyncError) {
 		const isOffline = isOfflineStorageAvailable() && logins.isUserLoggedIn() && logins.getUserController().sessionType === SessionType.Persistent
 
-		await Dialog.message("outOfSync_label", lang.get(
-			isOffline
-				? "dataExpiredOfflineDb_msg"
-				: "dataExpired_msg"
-		))
+		await Dialog.message("outOfSync_label", lang.get(isOffline ? "dataExpiredOfflineDb_msg" : "dataExpired_msg"))
 
-		const {userId} = logins.getUserController()
+		const { userId } = logins.getUserController()
 		if (isDesktop()) {
-			await locator.interWindowEventBus?.send("localDataOutOfSync", {userId})
-			await locator.offlineDbFacade?.deleteDatabaseForUser(userId)
+			await locator.interWindowEventSender?.localUserDataInvalidated(userId)
+			await locator.sqlCipherFacade?.deleteDb(userId)
 		}
 		await logins.logout(false)
-		await windowFacade.reload({noAutoLogin: true})
-
+		await windowFacade.reload({ noAutoLogin: true })
 	} else if (e instanceof InsufficientStorageError) {
 		if (logins.getUserController().isGlobalAdmin()) {
 			showMoreStorageNeededOrderDialog(logins, "insufficientStorageAdmin_msg")
@@ -103,6 +110,13 @@ export async function handleUncaughtErrorImpl(e: Error) {
 				serviceUnavailableDialogActive = false
 			})
 		}
+	} else if (e instanceof RequestTimeoutError) {
+		if (!requestTimeoutDialogActive) {
+			requestTimeoutDialogActive = true
+			Dialog.message("requestTimeout_msg").then(() => {
+				requestTimeoutDialogActive = false
+			})
+		}
 	} else if (e instanceof IndexingNotSupportedError) {
 		console.log("Indexing not supported", e)
 		locator.search.indexingSupported = false
@@ -111,27 +125,26 @@ export async function handleUncaughtErrorImpl(e: Error) {
 			shownQuotaError = true
 			Dialog.message("storageQuotaExceeded_msg")
 		}
+	} else if (e instanceof OfflineDbClosedError) {
+		if (!loginDialogActive) {
+			throw e
+		}
 	} else if (ignoredError(e)) {
 		// ignore, this is not our code
 	} else {
 		if (!unknownErrorDialogActive) {
 			unknownErrorDialogActive = true
 
-			// only logged in users can report errors
+			// only logged in users can report errors because we send mail for that.
 			if (logins.isUserLoggedIn()) {
-				const errorInfo = Object.assign({stack: null}, e)
-				promptForFeedbackAndSend(errorInfo)
-					.then(({ignored}) => {
-						unknownErrorDialogActive = false
-						if (ignored) {
-							ignoredMessages.push(e.message)
-						}
-					})
+				const { ignored } = await promptForFeedbackAndSend(e)
+				unknownErrorDialogActive = false
+				if (ignored) {
+					ignoredMessages.push(e.message)
+				}
 			} else {
 				console.log("Unknown error", e)
-				const errorInfo = Object.assign({stack: null}, e)
-				showErrorDialogNotLoggedIn(errorInfo)
-					.then(() => unknownErrorDialogActive = false)
+				showErrorDialogNotLoggedIn(e).then(() => (unknownErrorDialogActive = false))
 			}
 		}
 	}
@@ -144,12 +157,11 @@ function showOfflineMessage() {
 			message: "serverNotReachable_msg",
 			button: {
 				label: "ok_action",
-				click: () => {
-				}
+				click: () => {},
 			},
 			onClose: () => {
 				notConnectedDialogActive = false
-			}
+			},
 		})
 	}
 }
@@ -177,12 +189,14 @@ export async function reloginForExpiredSession() {
 				try {
 					credentials = await logins.createSession(neverNull(logins.getUserController().userGroupInfo.mailAddress), pw, sessionType)
 				} catch (e) {
-					if (e instanceof CancelledError ||
+					if (
+						e instanceof CancelledError ||
 						e instanceof AccessBlockedError ||
 						e instanceof NotAuthenticatedError ||
 						e instanceof AccessDeactivatedError ||
 						e instanceof ConnectionError
 					) {
+						const { getLoginErrorMessage } = await import("../misc/LoginUtils.js")
 						return lang.getMaybeLazy(getLoginErrorMessage(e, false))
 					} else {
 						throw e
@@ -193,9 +207,10 @@ export async function reloginForExpiredSession() {
 				}
 				// Fetch old credentials to preserve database key if it's there
 				const oldCredentials = await locator.credentialsProvider.getCredentialsByUserId(userId)
-				await locator.credentialsProvider.deleteByUserId(userId, {deleteOfflineDb: false})
+				await locator.sqlCipherFacade?.closeDb()
+				await locator.credentialsProvider.deleteByUserId(userId, { deleteOfflineDb: false })
 				if (sessionType === SessionType.Persistent) {
-					await locator.credentialsProvider.store({credentials: credentials, databaseKey: oldCredentials?.databaseKey})
+					await locator.credentialsProvider.store({ credentials: credentials, databaseKey: oldCredentials?.databaseKey })
 				}
 				loginDialogActive = false
 				dialog.close()
@@ -206,13 +221,13 @@ export async function reloginForExpiredSession() {
 				action() {
 					windowFacade.reload({})
 				},
-			}
+			},
 		})
 	}
 }
 
 function ignoredError(e: Error): boolean {
-	return e.message != null && ignoredMessages.some(s => e.message.includes(s))
+	return e.message != null && ignoredMessages.some((s) => e.message.includes(s))
 }
 
 /**
@@ -231,16 +246,19 @@ function handleImportError() {
 	showingImportError = true
 	const message =
 		"There was an error while loading part of the app. It might be that you are offline, running an outdated version, or your browser is blocking the request."
-	Dialog.choice(() => message, [
-		{
-			text: "close_alt",
-			value: false,
-		},
-		{
-			text: "reloadPage_action",
-			value: true,
-		},
-	]).then(reload => {
+	Dialog.choice(
+		() => message,
+		[
+			{
+				text: "close_alt",
+				value: false,
+			},
+			{
+				text: "reloadPage_action",
+				value: true,
+			},
+		],
+	).then((reload) => {
 		showingImportError = false
 
 		if (reload) {

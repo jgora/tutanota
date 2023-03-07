@@ -1,46 +1,44 @@
-import m, {Children, Vnode, VnodeDOM} from "mithril"
+import m, { Children, Vnode, VnodeDOM } from "mithril"
 import stream from "mithril/stream"
-import {mapNullable, neverNull, noOp, ofClass} from "@tutao/tutanota-utils"
-import type {WizardPageAttrs, WizardPageN} from "../../gui/base/WizardDialogN"
-import {createWizardDialog, emitWizardEvent, WizardEventType, wizardPageWrapper} from "../../gui/base/WizardDialogN"
-import {LoginController, logins} from "../../api/main/LoginController"
-import type {NewAccountData} from "../UpgradeSubscriptionWizard"
-import {loadUpgradePrices} from "../UpgradeSubscriptionWizard"
-import {Dialog} from "../../gui/base/Dialog"
-import {LoginForm} from "../../login/LoginForm"
-import {CredentialsSelector} from "../../login/CredentialsSelector"
-import {showProgressDialog} from "../../gui/dialogs/ProgressDialog"
-import {ButtonN, ButtonType} from "../../gui/base/ButtonN"
-import {SignupForm} from "../SignupForm"
-import {UserError} from "../../api/main/UserError"
-import {showUserError} from "../../misc/ErrorHandlerImpl"
-import type {AccountingInfo, GiftCardRedeemGetReturn} from "../../api/entities/sys/TypeRefs.js"
-import {AccountingInfoTypeRef, CustomerInfoTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import {locator} from "../../api/main/MainLocator"
-import {getTokenFromUrl, renderAcceptGiftCardTermsCheckbox, renderGiftCardSvg} from "./GiftCardUtils"
-import {CancelledError} from "../../api/common/error/CancelledError"
-import {lang} from "../../misc/LanguageViewModel"
-import {getLoginErrorMessage, handleExpectedLoginError} from "../../misc/LoginUtils"
-import {RecoverCodeField} from "../../settings/RecoverCodeDialog"
-import {HabReminderImage} from "../../gui/base/icons/Icons"
-import {PaymentMethodType} from "../../api/common/TutanotaConstants"
-import type {SubscriptionData, SubscriptionOptions, SubscriptionPlanPrices} from "../SubscriptionUtils"
-import {SubscriptionType, UpgradePriceType} from "../SubscriptionUtils"
-import {formatPrice, getPaymentMethodName, getSubscriptionPrice} from "../PriceUtils"
-import {TextFieldN} from "../../gui/base/TextFieldN"
-import {elementIdPart, isSameId} from "../../api/common/utils/EntityUtils"
-import type {CredentialsInfo, ICredentialsProvider} from "../../misc/credentials/CredentialsProvider"
-import {SessionType} from "../../api/common/SessionType.js";
-import {NotAuthorizedError, NotFoundError} from "../../api/common/error/RestError.js"
-import {GiftCardFacade} from "../../api/worker/facades/GiftCardFacade.js"
-import {EntityClient} from "../../api/common/EntityClient.js"
-import {Country, getByAbbreviation} from "../../api/common/CountryList.js"
-import {renderCountryDropdown} from "../../gui/base/GuiUtils.js"
-
+import { mapNullable, neverNull, noOp, ofClass } from "@tutao/tutanota-utils"
+import type { WizardPageAttrs, WizardPageN } from "../../gui/base/WizardDialog.js"
+import { createWizardDialog, emitWizardEvent, WizardEventType, wizardPageWrapper } from "../../gui/base/WizardDialog.js"
+import { LoginController, logins } from "../../api/main/LoginController"
+import type { NewAccountData } from "../UpgradeSubscriptionWizard"
+import { Dialog } from "../../gui/base/Dialog"
+import { LoginForm } from "../../login/LoginForm"
+import { CredentialsSelector } from "../../login/CredentialsSelector"
+import { showProgressDialog } from "../../gui/dialogs/ProgressDialog"
+import { Button, ButtonType } from "../../gui/base/Button.js"
+import { SignupForm } from "../SignupForm"
+import { UserError } from "../../api/main/UserError"
+import { showUserError } from "../../misc/ErrorHandlerImpl"
+import type { AccountingInfo, GiftCardRedeemGetReturn } from "../../api/entities/sys/TypeRefs.js"
+import { AccountingInfoTypeRef, CustomerInfoTypeRef } from "../../api/entities/sys/TypeRefs.js"
+import { locator } from "../../api/main/MainLocator"
+import { getTokenFromUrl, renderAcceptGiftCardTermsCheckbox, renderGiftCardSvg } from "./GiftCardUtils"
+import { CancelledError } from "../../api/common/error/CancelledError"
+import { lang } from "../../misc/LanguageViewModel"
+import { getLoginErrorMessage, handleExpectedLoginError } from "../../misc/LoginUtils"
+import { RecoverCodeField } from "../../settings/login/RecoverCodeDialog.js"
+import { HabReminderImage } from "../../gui/base/icons/Icons"
+import { PaymentMethodType } from "../../api/common/TutanotaConstants"
+import { formatPrice, getPaymentMethodName, PriceAndConfigProvider, PaymentInterval } from "../PriceUtils"
+import { TextField } from "../../gui/base/TextField.js"
+import { elementIdPart, isSameId } from "../../api/common/utils/EntityUtils"
+import type { CredentialsInfo } from "../../misc/credentials/CredentialsProvider.js"
+import { CredentialsProvider } from "../../misc/credentials/CredentialsProvider.js"
+import { SessionType } from "../../api/common/SessionType.js"
+import { NotAuthorizedError, NotFoundError } from "../../api/common/error/RestError.js"
+import { GiftCardFacade } from "../../api/worker/facades/lazy/GiftCardFacade.js"
+import { EntityClient } from "../../api/common/EntityClient.js"
+import { Country, getByAbbreviation } from "../../api/common/CountryList.js"
+import { renderCountryDropdown } from "../../gui/base/GuiUtils.js"
+import { SubscriptionType, UpgradePriceType } from "../FeatureListProvider"
 
 const enum GetCredentialsMethod {
 	Login,
-	Signup
+	Signup,
 }
 
 class RedeemGiftCardModel {
@@ -55,15 +53,14 @@ class RedeemGiftCardModel {
 		private readonly config: {
 			giftCardInfo: GiftCardRedeemGetReturn
 			key: string
-			premiumPrice: number,
+			premiumPrice: number
 			storedCredentials: ReadonlyArray<CredentialsInfo>
 		},
 		private readonly giftCardFacade: GiftCardFacade,
-		private readonly credentialsProvider: ICredentialsProvider,
+		private readonly credentialsProvider: CredentialsProvider,
 		private readonly logins: LoginController,
 		private readonly entityClient: EntityClient,
-	) {
-	}
+	) {}
 
 	get giftCardInfo(): GiftCardRedeemGetReturn {
 		return this.config.giftCardInfo
@@ -86,8 +83,7 @@ class RedeemGiftCardModel {
 	}
 
 	get paymentMethod(): PaymentMethodType {
-		return this.accountingInfo?.paymentMethod as PaymentMethodType | null
-			?? PaymentMethodType.AccountBalance
+		return (this.accountingInfo?.paymentMethod as PaymentMethodType | null) ?? PaymentMethodType.AccountBalance
 	}
 
 	get storedCredentials(): ReadonlyArray<CredentialsInfo> {
@@ -108,7 +104,6 @@ class RedeemGiftCardModel {
 				await this.postLogin()
 			}
 		}
-
 	}
 
 	async loginWithFormCredentials(mailAddress: string, password: string) {
@@ -127,13 +122,32 @@ class RedeemGiftCardModel {
 				this.newAccountData = newAccountData
 			}
 
-			const {mailAddress, password} = neverNull(newAccountData || this.newAccountData)
+			const { mailAddress, password } = neverNull(newAccountData || this.newAccountData)
 
 			this.mailAddress = mailAddress
 
 			await this.logins.createSession(mailAddress, password, SessionType.Temporary)
 			await this.postLogin()
 		}
+	}
+
+	async redeemGiftCard(country: Country | null): Promise<void> {
+		if (country == null) {
+			throw new UserError("invoiceCountryInfoBusiness_msg")
+		}
+
+		return this.giftCardFacade
+			.redeemGiftCard(this.giftCardId, this.key, country?.a ?? null)
+			.catch(
+				ofClass(NotFoundError, () => {
+					throw new UserError("invalidGiftCard_msg")
+				}),
+			)
+			.catch(
+				ofClass(NotAuthorizedError, (e) => {
+					throw new UserError(() => e.message)
+				}),
+			)
 	}
 
 	private async postLogin(): Promise<void> {
@@ -149,25 +163,6 @@ class RedeemGiftCardModel {
 			throw new UserError("onlyPrivateAccountFeature_msg")
 		}
 	}
-
-	async redeemGiftCard(country: Country | null): Promise<void> {
-		if (country == null) {
-			throw new UserError("invoiceCountryInfoBusiness_msg")
-		}
-
-		return this.giftCardFacade
-				   .redeemGiftCard(this.giftCardId, this.key, country?.a ?? null)
-				   .catch(
-					   ofClass(NotFoundError, () => {
-						   throw new UserError("invalidGiftCard_msg")
-					   }),
-				   )
-				   .catch(
-					   ofClass(NotAuthorizedError, e => {
-						   throw new UserError(() => e.message)
-					   }),
-				   )
-	}
 }
 
 type GiftCardRedeemAttrs = WizardPageAttrs<RedeemGiftCardModel>
@@ -177,7 +172,7 @@ type GiftCardRedeemAttrs = WizardPageAttrs<RedeemGiftCardModel>
  */
 
 class GiftCardWelcomePage implements WizardPageN<RedeemGiftCardModel> {
-	private dom!: HTMLElement;
+	private dom!: HTMLElement
 
 	oncreate(vnodeDOM: VnodeDOM<GiftCardRedeemAttrs>) {
 		this.dom = vnodeDOM.dom as HTMLElement
@@ -194,44 +189,44 @@ class GiftCardWelcomePage implements WizardPageN<RedeemGiftCardModel> {
 		}
 
 		return [
-			m(".flex-center.full-width.pt-l",
-				m("",
+			m(
+				".flex-center.full-width.pt-l",
+				m(
+					"",
 					{
 						style: {
 							width: "480px",
-						}
+						},
 					},
-					m(".pt-l",
-						renderGiftCardSvg(
-							parseFloat(a.data.giftCardInfo.value),
-							null,
-							a.data.message,
-						),
-					),
+					m(".pt-l", renderGiftCardSvg(parseFloat(a.data.giftCardInfo.value), null, a.data.message)),
 				),
 			),
-			m(".flex-center.full-width.pt-l",
-				m("",
+			m(
+				".flex-center.full-width.pt-l",
+				m(
+					"",
 					{
 						style: {
 							width: "260px",
 						},
 					},
-					m(ButtonN, {
+					m(Button, {
 						label: "existingAccount_label",
 						click: () => nextPage(GetCredentialsMethod.Login),
 						type: ButtonType.Login,
 					}),
 				),
 			),
-			m(".flex-center.full-width.pt-l.pb-m",
-				m("",
+			m(
+				".flex-center.full-width.pt-l.pb-m",
+				m(
+					"",
 					{
 						style: {
 							width: "260px",
 						},
 					},
-					m(ButtonN, {
+					m(Button, {
 						label: "register_label",
 						click: () => nextPage(GetCredentialsMethod.Signup),
 						type: ButtonType.Login,
@@ -277,10 +272,7 @@ class GiftCardCredentialsPage implements WizardPageN<RedeemGiftCardModel> {
 		return [
 			m(
 				".flex-grow.flex-center.scroll",
-				m(".flex-grow-shrink-auto.max-width-s.pt.plr-l", [
-					this.renderLoginForm(model),
-					this.renderCredentialsSelector(model),
-				]),
+				m(".flex-grow-shrink-auto.max-width-s.pt.plr-l", [this.renderLoginForm(model), this.renderCredentialsSelector(model)]),
 			),
 		]
 	}
@@ -317,7 +309,7 @@ class GiftCardCredentialsPage implements WizardPageN<RedeemGiftCardModel> {
 
 		return m(CredentialsSelector, {
 			credentials: model.storedCredentials,
-			onCredentialsSelected: async encryptedCredentials => {
+			onCredentialsSelected: async (encryptedCredentials) => {
 				try {
 					await showProgressDialog("pleaseWait_msg", model.loginWithStoredCredentials(encryptedCredentials))
 					emitWizardEvent(this.domElement, WizardEventType.SHOWNEXTPAGE)
@@ -336,21 +328,22 @@ class GiftCardCredentialsPage implements WizardPageN<RedeemGiftCardModel> {
 	private renderSignupPage(model: RedeemGiftCardModel): Children {
 		return m(SignupForm, {
 			// After having an account created we log them in to be in the same state as if they had selected an existing account
-			newSignupHandler: newAccountData => {
+			newSignupHandler: (newAccountData) => {
 				showProgressDialog(
 					"pleaseWait_msg",
-					model.handleNewSignup(newAccountData)
-						 .then(() => {
-							 emitWizardEvent(this.domElement, WizardEventType.SHOWNEXTPAGE)
-							 m.redraw()
-						 })
-						 .catch(e => {
-							 // TODO when would login fail here and how does it get handled? can we attempt to login again?
-							 Dialog.message("giftCardLoginError_msg")
-							 m.route.set("/login", {
-								 noAutoLogin: true,
-							 })
-						 })
+					model
+						.handleNewSignup(newAccountData)
+						.then(() => {
+							emitWizardEvent(this.domElement, WizardEventType.SHOWNEXTPAGE)
+							m.redraw()
+						})
+						.catch((e) => {
+							// TODO when would login fail here and how does it get handled? can we attempt to login again?
+							Dialog.message("giftCardLoginError_msg")
+							m.route.set("/login", {
+								noAutoLogin: true,
+							})
+						}),
 				)
 			},
 			readonly: model.newAccountData != null,
@@ -366,9 +359,9 @@ class RedeemGiftCardPage implements WizardPageN<RedeemGiftCardModel> {
 	private confirmed = false
 	private showCountryDropdown: boolean
 	private country: Country | null
-	private dom!: HTMLElement;
+	private dom!: HTMLElement
 
-	constructor({attrs}: Vnode<GiftCardRedeemAttrs>) {
+	constructor({ attrs }: Vnode<GiftCardRedeemAttrs>) {
 		// we expect that the accounting info is actually available by now,
 		// but we optional chain because invoiceCountry is nullable anyway
 		this.country = mapNullable(attrs.data.accountingInfo?.invoiceCountry, getByAbbreviation)
@@ -386,18 +379,18 @@ class RedeemGiftCardPage implements WizardPageN<RedeemGiftCardModel> {
 		const isFree = logins.getUserController().isFreeAccount()
 
 		return m("", [
-			mapNullable(
-				model.newAccountData?.recoverCode, code => m(".pt-l.plr-l",
+			mapNullable(model.newAccountData?.recoverCode, (code) =>
+				m(
+					".pt-l.plr-l",
 					m(RecoverCodeField, {
 						showMessage: true,
 						recoverCode: code,
 					}),
-				)
+				),
 			),
-			isFree
-				? this.renderInfoForFreeAccounts(model)
-				: this.renderInfoForPaidAccounts(model),
-			m(".flex-center.full-width.pt-l",
+			isFree ? this.renderInfoForFreeAccounts(model) : this.renderInfoForPaidAccounts(model),
+			m(
+				".flex-center.full-width.pt-l",
 				m(
 					"",
 					{
@@ -408,16 +401,17 @@ class RedeemGiftCardPage implements WizardPageN<RedeemGiftCardModel> {
 					[
 						this.showCountryDropdown
 							? renderCountryDropdown({
-								selectedCountry: this.country,
-								onSelectionChanged: country => this.country = country,
-								helpLabel: () => lang.get("invoiceCountryInfoConsumer_msg")
-							})
+									selectedCountry: this.country,
+									onSelectionChanged: (country) => (this.country = country),
+									helpLabel: () => lang.get("invoiceCountryInfoConsumer_msg"),
+							  })
 							: null,
-						renderAcceptGiftCardTermsCheckbox(this.confirmed, confirmed => this.confirmed = confirmed),
-					]
+						renderAcceptGiftCardTermsCheckbox(this.confirmed, (confirmed) => (this.confirmed = confirmed)),
+					],
 				),
 			),
-			m(".flex-center.full-width.pt-s.pb",
+			m(
+				".flex-center.full-width.pt-s.pb",
 				m(
 					"",
 					{
@@ -425,7 +419,7 @@ class RedeemGiftCardPage implements WizardPageN<RedeemGiftCardModel> {
 							width: "260px",
 						},
 					},
-					m(ButtonN, {
+					m(Button, {
 						label: "redeem_label",
 						click: () => {
 							if (!this.confirmed) {
@@ -433,10 +427,11 @@ class RedeemGiftCardPage implements WizardPageN<RedeemGiftCardModel> {
 								return
 							}
 
-							model.redeemGiftCard(this.country)
-								 .then(() => emitWizardEvent(this.dom, WizardEventType.CLOSEDIALOG))
-								 .catch(ofClass(UserError, showUserError))
-								 .catch(ofClass(CancelledError, noOp))
+							model
+								.redeemGiftCard(this.country)
+								.then(() => emitWizardEvent(this.dom, WizardEventType.CLOSEDIALOG))
+								.catch(ofClass(UserError, showUserError))
+								.catch(ofClass(CancelledError, noOp))
 						},
 						type: ButtonType.Login,
 					}),
@@ -447,7 +442,8 @@ class RedeemGiftCardPage implements WizardPageN<RedeemGiftCardModel> {
 
 	private renderInfoForFreeAccounts(model: RedeemGiftCardModel): Children {
 		return [
-			m(".pt-l.plr-l",
+			m(
+				".pt-l.plr-l",
 				`${lang.get("giftCardUpgradeNotify_msg", {
 					"{price}": formatPrice(model.premiumPrice, true),
 					"{credit}": formatPrice(Number(model.giftCardInfo.value) - model.premiumPrice, true),
@@ -456,28 +452,29 @@ class RedeemGiftCardPage implements WizardPageN<RedeemGiftCardModel> {
 			m(".center.h4.pt", lang.get("upgradeConfirm_msg")),
 			m(".flex-space-around.flex-wrap", [
 				m(".flex-grow-shrink-half.plr-l", [
-					m(TextFieldN, {
+					m(TextField, {
 						label: "subscription_label",
 						value: "Premium",
 						disabled: true,
 					}),
-					m(TextFieldN, {
+					m(TextField, {
 						label: "paymentInterval_label",
 						value: lang.get("pricing.yearly_label"),
 						disabled: true,
 					}),
-					m(TextFieldN, {
+					m(TextField, {
 						label: "price_label",
 						value: formatPrice(Number(model.premiumPrice), true) + " " + lang.get("pricing.perYear_label"),
 						disabled: true,
 					}),
-					m(TextFieldN, {
+					m(TextField, {
 						label: "paymentMethod_label",
 						value: getPaymentMethodName(model.paymentMethod),
 						disabled: true,
 					}),
 				]),
-				m(".flex-grow-shrink-half.plr-l.flex-center.items-end",
+				m(
+					".flex-grow-shrink-half.plr-l.flex-center.items-end",
 					m("img[src=" + HabReminderImage + "].pt.bg-white.border-radius", {
 						style: {
 							width: "200px",
@@ -490,12 +487,14 @@ class RedeemGiftCardPage implements WizardPageN<RedeemGiftCardModel> {
 
 	private renderInfoForPaidAccounts(model: RedeemGiftCardModel): Children {
 		return [
-			m(".pt-l.plr-l.flex-center",
+			m(
+				".pt-l.plr-l.flex-center",
 				`${lang.get("giftCardCreditNotify_msg", {
 					"{credit}": formatPrice(Number(model.giftCardInfo.value), true),
 				})} ${lang.get("creditUsageOptions_msg")}`,
 			),
-			m(".flex-grow-shrink-half.plr-l.flex-center.items-end",
+			m(
+				".flex-grow-shrink-half.plr-l.flex-center.items-end",
 				m("img[src=" + HabReminderImage + "].pt.bg-white.border-radius", {
 					style: {
 						width: "200px",
@@ -507,7 +506,6 @@ class RedeemGiftCardPage implements WizardPageN<RedeemGiftCardModel> {
 }
 
 export async function loadRedeemGiftCardWizard(hashFromUrl: string): Promise<Dialog> {
-
 	const model = await loadModel(hashFromUrl)
 
 	const wizardPages = [
@@ -534,44 +532,24 @@ export async function loadRedeemGiftCardWizard(hashFromUrl: string): Promise<Dia
 		}),
 	]
 	return createWizardDialog(model, wizardPages, async () => {
-		const urlParams =
-			!!model.mailAddress
-				? {loginWith: model.mailAddress, noAutoLogin: true}
-				: {}
+		const urlParams = model.mailAddress ? { loginWith: model.mailAddress, noAutoLogin: true } : {}
 		m.route.set("/login", urlParams)
 	}).dialog
 }
 
 async function loadModel(hashFromUrl: string): Promise<RedeemGiftCardModel> {
-
-	const {id, key} = await getTokenFromUrl(hashFromUrl)
+	const { id, key } = await getTokenFromUrl(hashFromUrl)
 	const giftCardInfo = await locator.giftCardFacade.getGiftCardInfo(id, key)
-	const prices = await loadUpgradePrices(null)
-
-	const priceData: SubscriptionPlanPrices = {
-		Premium: prices.premiumPrices,
-		PremiumBusiness: prices.premiumBusinessPrices,
-		Teams: prices.teamsPrices,
-		TeamsBusiness: prices.teamsBusinessPrices,
-		Pro: prices.proPrices,
-	}
-
-	const subscriptionData: SubscriptionData = {
-		options: {
-			businessUse: () => false,
-			paymentInterval: () => 12,
-		} as SubscriptionOptions,
-		planPrices: priceData,
-	}
 
 	const storedCredentials = await locator.credentialsProvider.getInternalCredentialsInfos()
+	const pricesDataProvider = await PriceAndConfigProvider.getInitializedInstance(null)
 
 	return new RedeemGiftCardModel(
 		{
 			giftCardInfo,
 			key,
-			premiumPrice: getSubscriptionPrice(subscriptionData, SubscriptionType.Premium, UpgradePriceType.PlanActualPrice),
-			storedCredentials
+			premiumPrice: pricesDataProvider.getSubscriptionPrice(PaymentInterval.Yearly, SubscriptionType.Premium, UpgradePriceType.PlanActualPrice),
+			storedCredentials,
 		},
 		locator.giftCardFacade,
 		locator.credentialsProvider,

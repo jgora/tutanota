@@ -1,9 +1,9 @@
-import {TypeRef} from "./TypeRef.js"
+import { TypeRef } from "./TypeRef.js"
 
 export interface ErrorInfo {
 	readonly name: string | null
 	readonly message: string | null
-	readonly stack: string | null
+	readonly stack?: string | null
 }
 
 export type lazy<T> = () => T
@@ -31,11 +31,10 @@ export function defer<T>(): DeferredObject<T> {
 
 export function deferWithHandler<T, U>(handler: (arg0: T) => U): DeferredObjectWithHandler<T, U> {
 	const deferred = {} as DeferredObjectWithHandler<T, U>
-	deferred.promise = new Promise(
-		(resolve, reject) => {
-			deferred.resolve = resolve
-			deferred.reject = reject
-		}).then(handler)
+	deferred.promise = new Promise((resolve, reject) => {
+		deferred.resolve = resolve
+		deferred.reject = reject
+	}).then(handler)
 	return deferred
 }
 
@@ -73,14 +72,10 @@ export async function asyncFindAndMap<T, R>(
 /**
  * Calls an executor function for slices of nbrOfElementsInGroup items of the given array until the executor function returns false.
  */
-export function executeInGroups<T>(
-	array: T[],
-	nbrOfElementsInGroup: number,
-	executor: (items: T[]) => Promise<boolean>,
-): Promise<void> {
+export function executeInGroups<T>(array: T[], nbrOfElementsInGroup: number, executor: (items: T[]) => Promise<boolean>): Promise<void> {
 	if (array.length > 0) {
 		let nextSlice = Math.min(array.length, nbrOfElementsInGroup)
-		return executor(array.slice(0, nextSlice)).then(doContinue => {
+		return executor(array.slice(0, nextSlice)).then((doContinue) => {
 			if (doContinue) {
 				return executeInGroups(array.slice(nextSlice), nbrOfElementsInGroup, executor)
 			}
@@ -94,12 +89,29 @@ export function neverNull<T>(object: T): NonNullable<T> {
 	return object as any
 }
 
-export function assertNotNull<T>(object: T | null | undefined, message: string = "null"): T {
-	if (object == null) {
+/**
+ * returns its argument if it is not null, throws otherwise.
+ * @param value the value to check
+ * @param message optional error message
+ */
+export function assertNotNull<T>(value: T | null | undefined, message: string = "null"): T {
+	if (value == null) {
 		throw new Error("AssertNotNull failed : " + message)
 	}
 
-	return object
+	return value
+}
+
+/**
+ * assertion function that only returns if the argument is non-null
+ * (acts as a type guard)
+ * @param value the value to check
+ * @param message optional error message
+ */
+export function assertNonNull<T>(value: T | null | undefined, message: string = "null"): asserts value is T {
+	if (value == null) {
+		throw new Error("AssertNonNull failed: " + message)
+	}
 }
 
 export function isNotNull<T>(t: T | null | undefined): t is T {
@@ -120,7 +132,7 @@ export function clone<T>(instance: T): T {
 	if (instance instanceof Uint8Array) {
 		return downcast<T>(instance.slice())
 	} else if (instance instanceof Array) {
-		return downcast<T>(instance.map(i => clone(i)))
+		return downcast<T>(instance.map((i) => clone(i)))
 	} else if (instance instanceof Date) {
 		return new Date(instance.getTime()) as any
 	} else if (instance instanceof TypeRef) {
@@ -159,6 +171,23 @@ export function lazyMemoized<T>(source: () => T): () => T {
 	}
 }
 
+export type Callback<T> = (arg: T) => void
+
+/**
+ * accept a function taking exactly one argument and returning nothing and return a version of it
+ * that will call the original function on the first call and ignore any further calls.
+ * @param fn a function taking one argument and returning nothing
+ */
+export function makeSingleUse<T>(fn: Callback<T>): Callback<T> {
+	let called = false
+	return (arg) => {
+		if (!called) {
+			called = true
+			fn(arg)
+		}
+	}
+}
+
 /**
  * Returns a cached version of {@param fn}.
  * Cached function checks that argument is the same (with ===) and if it is then it returns the cached result.
@@ -169,7 +198,7 @@ export function memoized<T, R>(fn: (arg0: T) => R): (arg0: T) => R {
 	let lastArg: T
 	let lastResult: R
 	let didCache = false
-	return arg => {
+	return (arg) => {
 		if (!didCache || arg !== lastArg) {
 			lastArg = arg
 			didCache = true
@@ -190,8 +219,7 @@ export function identity<T>(t: T): T {
 /**
  * Function which does nothing.
  */
-export function noOp() {
-}
+export function noOp() {}
 
 /**
  * Return a function, which executed {@param toThrottle} only after it is not invoked for {@param timeout} ms.
@@ -338,9 +366,9 @@ const hasOwn = {}.hasOwnProperty
 export function getChangedProps(objA: any, objB: any): Array<string> {
 	if (objA == null || objB == null || objA === objB) return []
 	return Object.keys(objA)
-				 .filter(k => Object.keys(objB).includes(k))
-				 .filter(k => ![null, undefined].includes(objA[k]) || ![null, undefined].includes(objB[k]))
-				 .filter(k => !deepEqual(objA[k], objB[k]))
+		.filter((k) => Object.keys(objB).includes(k))
+		.filter((k) => ![null, undefined].includes(objA[k]) || ![null, undefined].includes(objB[k]))
+		.filter((k) => !deepEqual(objA[k], objB[k]))
 }
 
 /**
@@ -454,3 +482,14 @@ export function mapNullable<T, U>(val: T | null | undefined, action: (arg0: T) =
 
 /** Helper to take instead of `typeof setTimeout` which is hellish to reproduce */
 export type TimeoutSetter = (fn: () => unknown, arg1: number) => ReturnType<typeof setTimeout>
+
+export function mapObject<K extends string | number | symbol, V, R>(mapper: (arg0: V) => R, obj: Record<K, V>): Record<K, R> {
+	const newObj = {} as Record<K, R>
+
+	for (const key of Object.keys(obj)) {
+		const typedKey = key as K
+		newObj[typedKey] = mapper(obj[typedKey])
+	}
+
+	return newObj
+}

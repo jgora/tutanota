@@ -1,11 +1,10 @@
-import {assertMainOrNodeBoot} from "../api/common/Env"
+import { assertMainOrNodeBoot } from "../api/common/Env"
 
 assertMainOrNodeBoot()
 
 export const enum BrowserType {
 	CHROME = "Chrome",
 	FIREFOX = "Firefox",
-	PALEMOON = "PaleMoon",
 	EDGE = "Edge",
 	SAFARI = "Safari",
 	ANDROID = "Android",

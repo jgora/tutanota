@@ -1,13 +1,43 @@
-import type {BookingItemFeatureType} from "../api/common/TutanotaConstants"
-import {PaymentMethodType} from "../api/common/TutanotaConstants"
-import {lang} from "../misc/LanguageViewModel"
-import {neverNull} from "@tutao/tutanota-utils"
-import type {AccountingInfo} from "../api/entities/sys/TypeRefs.js"
-import type {PriceData} from "../api/entities/sys/TypeRefs.js"
-import type {PriceItemData} from "../api/entities/sys/TypeRefs.js"
-import type {Booking} from "../api/entities/sys/TypeRefs.js"
-import type {SubscriptionData, SubscriptionType} from "./SubscriptionUtils"
-import {getPlanPrices, UpgradePriceType} from "./SubscriptionUtils"
+import type { BookingItemFeatureType } from "../api/common/TutanotaConstants"
+import { AccountType, Const, PaymentMethodType } from "../api/common/TutanotaConstants"
+import { lang } from "../misc/LanguageViewModel"
+import { assertNotNull, neverNull } from "@tutao/tutanota-utils"
+import type { AccountingInfo, Booking, PriceData, PriceItemData } from "../api/entities/sys/TypeRefs.js"
+import { createUpgradePriceServiceData, Customer, CustomerInfo, UpgradePriceServiceReturn } from "../api/entities/sys/TypeRefs.js"
+import { SubscriptionConfig, SubscriptionPlanPrices, SubscriptionType, UpgradePriceType, WebsitePlanPrices } from "./FeatureListProvider"
+import { locator } from "../api/main/MainLocator"
+import { UpgradePriceService } from "../api/entities/sys/Services"
+import {
+	getTotalAliases,
+	getTotalStorageCapacity,
+	hasAllFeaturesInPlan,
+	isBusinessFeatureActive,
+	isSharingActive,
+	isWhitelabelActive,
+} from "./SubscriptionUtils"
+import { IServiceExecutor } from "../api/common/ServiceRequest"
+import { ConnectionError } from "../api/common/error/RestError"
+import { ProgrammingError } from "../api/common/error/ProgrammingError.js"
+
+export const enum PaymentInterval {
+	Monthly = 1,
+	Yearly = 12,
+}
+
+export function asPaymentInterval(paymentInterval: string | number): PaymentInterval {
+	if (typeof paymentInterval === "string") {
+		paymentInterval = Number(paymentInterval)
+	}
+	switch (paymentInterval) {
+		// additional cast to make this robust against changes to the PaymentInterval enum.
+		case Number(PaymentInterval.Monthly):
+			return PaymentInterval.Monthly
+		case Number(PaymentInterval.Yearly):
+			return PaymentInterval.Yearly
+		default:
+			throw new ProgrammingError(`invalid payment interval: ${paymentInterval}`)
+	}
+}
 
 export function getPaymentMethodName(paymentMethod: PaymentMethodType): string {
 	if (paymentMethod === PaymentMethodType.Invoice) {
@@ -36,7 +66,7 @@ export function getPaymentMethodInfoText(accountingInfo: AccountingInfo): string
 }
 
 export function formatPriceDataWithInfo(priceData: PriceData): string {
-	return formatPriceWithInfo(Number(priceData.price), Number(priceData.paymentInterval), priceData.taxIncluded)
+	return formatPriceWithInfo(Number(priceData.price), asPaymentInterval(priceData.paymentInterval), priceData.taxIncluded)
 }
 
 // Used on website, keep it in sync
@@ -52,58 +82,16 @@ export function formatPrice(value: number, includeCurrency: boolean): string {
 }
 
 /**
- * Return actual price for given subscription data. In case of yearly subscription, the yearly value is returned, and monthly otherwise.
- */
-export function getSubscriptionPrice(data: SubscriptionData, subscription: SubscriptionType, type: UpgradePriceType): number {
-	const prices = getPlanPrices(data.planPrices, subscription)
-
-	if (prices) {
-		let monthlyPriceString
-		let monthsFactor = data.options.paymentInterval() === 12 ? 10 : 1
-		let discount = 0
-
-		if (type === UpgradePriceType.PlanReferencePrice) {
-			monthlyPriceString = prices.monthlyReferencePrice
-
-			if (data.options.paymentInterval() === 12) {
-				monthsFactor = 12
-			}
-		} else if (type === UpgradePriceType.PlanActualPrice) {
-			monthlyPriceString = prices.monthlyPrice
-
-			if (data.options.paymentInterval() === 12) {
-				discount = Number(prices.firstYearDiscount)
-			}
-		} else if (type === UpgradePriceType.PlanNextYearsPrice) {
-			monthlyPriceString = prices.monthlyPrice
-		} else if (type === UpgradePriceType.AdditionalUserPrice) {
-			monthlyPriceString = prices.additionalUserPriceMonthly
-		} else if (type === UpgradePriceType.ContactFormPrice) {
-			monthlyPriceString = prices.contactFormPriceMonthly
-		}
-
-		return Number(monthlyPriceString) * monthsFactor - discount
-	} else {
-		// Free plan
-		return 0
-	}
-}
-
-/**
  * Formats the monthly price of the subscription (even for yearly subscriptions).
  */
-export function formatMonthlyPrice(subscriptionPrice: number, paymentInterval: number): string {
-	const monthlyPrice = isYearlyPayment(paymentInterval) ? subscriptionPrice / 12 : subscriptionPrice
+export function formatMonthlyPrice(subscriptionPrice: number, paymentInterval: PaymentInterval): string {
+	const monthlyPrice = paymentInterval === PaymentInterval.Yearly ? subscriptionPrice / Number(PaymentInterval.Yearly) : subscriptionPrice
 	return formatPrice(monthlyPrice, true)
 }
 
-export function isYearlyPayment(periods: number): boolean {
-	return periods === 12
-}
-
-export function formatPriceWithInfo(price: number, paymentInterval: number, taxIncluded: boolean): string {
+export function formatPriceWithInfo(price: number, paymentInterval: PaymentInterval, taxIncluded: boolean): string {
 	const netOrGross = taxIncluded ? lang.get("gross_label") : lang.get("net_label")
-	const yearlyOrMonthly = isYearlyPayment(paymentInterval) ? lang.get("pricing.perYear_label") : lang.get("pricing.perMonth_label")
+	const yearlyOrMonthly = paymentInterval === PaymentInterval.Yearly ? lang.get("pricing.perYear_label") : lang.get("pricing.perMonth_label")
 	const formattedPrice = formatPrice(price, true)
 	return `${formattedPrice} ${yearlyOrMonthly} (${netOrGross})`
 }
@@ -112,7 +100,7 @@ export function formatPriceWithInfo(price: number, paymentInterval: number, taxI
  * Provides the price item from the given priceData for the given featureType. Returns null if no such item is available.
  */
 export function getPriceItem(priceData: PriceData | null, featureType: NumberString): PriceItemData | null {
-	return priceData?.items.find(item => item.featureType === featureType) ?? null
+	return priceData?.items.find((item) => item.featureType === featureType) ?? null
 }
 
 export function getCountFromPriceData(priceData: PriceData | null, featureType: BookingItemFeatureType): number {
@@ -134,11 +122,133 @@ export function getPriceFromPriceData(priceData: PriceData | null, featureType: 
 	}
 }
 
-export function getCurrentCount(featureType: BookingItemFeatureType, booking: Booking | null): number {
-	if (booking) {
-		let bookingItem = booking.items.find(item => item.featureType === featureType)
-		return bookingItem ? Number(bookingItem.currentCount) : 0
-	} else {
-		return 0
+const SUBSCRIPTION_CONFIG_RESOURCE_URL = "https://tutanota.com/resources/data/subscriptions.json"
+
+export class PriceAndConfigProvider {
+	private upgradePriceData: UpgradePriceServiceReturn | null = null
+	private planPrices: SubscriptionPlanPrices | null = null
+
+	private possibleSubscriptionList: { [K in SubscriptionType]: SubscriptionConfig } | null = null
+
+	private constructor() {}
+
+	private async init(registrationDataId: string | null, serviceExecutor: IServiceExecutor): Promise<void> {
+		const data = createUpgradePriceServiceData({
+			date: Const.CURRENT_DATE,
+			campaign: registrationDataId,
+		})
+		this.upgradePriceData = await serviceExecutor.get(UpgradePriceService, data)
+		this.planPrices = {
+			Premium: this.upgradePriceData.premiumPrices,
+			PremiumBusiness: this.upgradePriceData.premiumBusinessPrices,
+			Teams: this.upgradePriceData.teamsPrices,
+			TeamsBusiness: this.upgradePriceData.teamsBusinessPrices,
+			Pro: this.upgradePriceData.proPrices,
+		}
+
+		if ("undefined" === typeof fetch) return
+		try {
+			this.possibleSubscriptionList = await (await fetch(SUBSCRIPTION_CONFIG_RESOURCE_URL)).json()
+		} catch (e) {
+			console.log("failed to fetch subscription list:", e)
+			throw new ConnectionError("failed to fetch subscription list")
+		}
 	}
+
+	static async getInitializedInstance(
+		registrationDataId: string | null,
+		serviceExecutor: IServiceExecutor = locator.serviceExecutor,
+	): Promise<PriceAndConfigProvider> {
+		const priceDataProvider = new PriceAndConfigProvider()
+		await priceDataProvider.init(registrationDataId, serviceExecutor)
+		return priceDataProvider
+	}
+
+	getSubscriptionPrice(paymentInterval: PaymentInterval, subscription: SubscriptionType, type: UpgradePriceType): number {
+		if (subscription === SubscriptionType.Free) return 0
+		return paymentInterval === PaymentInterval.Yearly
+			? this.getYearlySubscriptionPrice(subscription, type)
+			: this.getMonthlySubscriptionPrice(subscription, type)
+	}
+
+	getRawPricingData(): UpgradePriceServiceReturn {
+		return assertNotNull(this.upgradePriceData)
+	}
+
+	getSubscriptionConfig(targetSubscription: SubscriptionType): SubscriptionConfig {
+		return assertNotNull(this.possibleSubscriptionList)[targetSubscription]
+	}
+
+	getSubscriptionType(lastBooking: Booking | null, customer: Customer, customerInfo: CustomerInfo): SubscriptionType {
+		if (customer.type !== AccountType.PREMIUM) {
+			return SubscriptionType.Free
+		}
+
+		const currentSubscription = {
+			nbrOfAliases: getTotalAliases(customer, customerInfo, lastBooking),
+			orderNbrOfAliases: getTotalAliases(customer, customerInfo, lastBooking),
+			// dummy value
+			storageGb: getTotalStorageCapacity(customer, customerInfo, lastBooking),
+			orderStorageGb: getTotalStorageCapacity(customer, customerInfo, lastBooking),
+			// dummy value
+			sharing: isSharingActive(lastBooking),
+			business: isBusinessFeatureActive(lastBooking),
+			whitelabel: isWhitelabelActive(lastBooking),
+		}
+		const foundPlan = descendingSubscriptionOrder().find((plan) => hasAllFeaturesInPlan(currentSubscription, this.getSubscriptionConfig(plan)))
+		return foundPlan || SubscriptionType.Premium
+	}
+
+	private getYearlySubscriptionPrice(subscription: SubscriptionType, upgrade: UpgradePriceType): number {
+		const prices = this.getPlanPrices(subscription)
+		const monthlyPrice = getPriceForUpgradeType(upgrade, prices)
+		const monthsFactor = upgrade === UpgradePriceType.PlanReferencePrice ? Number(PaymentInterval.Yearly) : 10
+		const discount = upgrade === UpgradePriceType.PlanActualPrice ? Number(prices.firstYearDiscount) : 0
+		return monthlyPrice * monthsFactor - discount
+	}
+
+	private getMonthlySubscriptionPrice(subscription: SubscriptionType, upgrade: UpgradePriceType): number {
+		const prices = this.getPlanPrices(subscription)
+		return getPriceForUpgradeType(upgrade, prices)
+	}
+
+	private getPlanPrices(subscription: SubscriptionType): WebsitePlanPrices {
+		if (subscription === SubscriptionType.Free) {
+			return {
+				additionalUserPriceMonthly: "0",
+				contactFormPriceMonthly: "0",
+				firstYearDiscount: "0",
+				monthlyPrice: "0",
+				monthlyReferencePrice: "0",
+			}
+		}
+		return assertNotNull(this.planPrices)[subscription]
+	}
+}
+
+function getPriceForUpgradeType(upgrade: UpgradePriceType, prices: WebsitePlanPrices): number {
+	switch (upgrade) {
+		case UpgradePriceType.PlanReferencePrice:
+			return Number(prices.monthlyReferencePrice)
+		case UpgradePriceType.PlanActualPrice:
+		case UpgradePriceType.PlanNextYearsPrice:
+			return Number(prices.monthlyPrice)
+		case UpgradePriceType.AdditionalUserPrice:
+			return Number(prices.additionalUserPriceMonthly)
+		case UpgradePriceType.ContactFormPrice:
+			return Number(prices.contactFormPriceMonthly)
+	}
+}
+
+function descendingSubscriptionOrder(): Array<SubscriptionType> {
+	return [SubscriptionType.Pro, SubscriptionType.TeamsBusiness, SubscriptionType.Teams, SubscriptionType.PremiumBusiness, SubscriptionType.Premium]
+}
+
+/**
+ * Returns true if the targetSubscription plan is considered to be a lower (~ cheaper) subscription plan
+ * Is based on the order of business and non-business subscriptions as defined in descendingSubscriptionOrder
+ */
+export function isSubscriptionDowngrade(targetSubscription: SubscriptionType, currentSubscription: SubscriptionType): boolean {
+	const order = descendingSubscriptionOrder()
+	return order.indexOf(targetSubscription) > order.indexOf(currentSubscription)
 }

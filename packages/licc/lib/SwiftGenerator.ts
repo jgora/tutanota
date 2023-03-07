@@ -1,9 +1,18 @@
-import {FacadeDefinition, getArgs, LangGenerator, MethodDefinition, minusculize, RenderedType, StructDefinition, TypeRefDefinition} from "./common.js"
-import {Accumulator} from "./Accumulator.js"
-import {ParsedType, parseType} from "./Parser.js"
+import {
+	EnumDefinition,
+	FacadeDefinition,
+	getArgs,
+	LangGenerator,
+	MethodDefinition,
+	minusculize,
+	RenderedType,
+	StructDefinition,
+	TypeRefDefinition,
+} from "./common.js"
+import { Accumulator } from "./Accumulator.js"
+import { ParsedType, parseType } from "./Parser.js"
 
 export class SwiftGenerator implements LangGenerator {
-
 	handleStructDefinition(definition: StructDefinition): string {
 		const acc = new Accumulator()
 		this.generateDocComment(acc, definition.doc)
@@ -46,9 +55,7 @@ export class SwiftGenerator implements LangGenerator {
 		const lastArg = args[args.length - 1]
 		for (const argument of args) {
 			const renderedArgument = typeNameSwift(argument.type)
-			const argLine =
-				`_ ${argument.name}: ${renderedArgument.name}` +
-				((argument === lastArg) ? "" : ",")
+			const argLine = `_ ${argument.name}: ${renderedArgument.name}` + (argument === lastArg ? "" : ",")
 			argGenerator.line(argLine)
 		}
 		const renderedReturn = typeNameSwift(methodDefinition.ret)
@@ -74,7 +81,7 @@ export class SwiftGenerator implements LangGenerator {
 			const arg = getArgs(methodName, method)
 			const decodedArgs = []
 			for (let i = 0; i < arg.length; i++) {
-				const {name: argName, type} = arg[i]
+				const { name: argName, type } = arg[i]
 				const renderedArgType = typeNameSwift(type)
 				decodedArgs.push([argName, renderedArgType] as const)
 			}
@@ -109,41 +116,43 @@ export class SwiftGenerator implements LangGenerator {
 	}
 
 	generateGlobalDispatcher(name: string, facadeNames: Array<string>): string {
-		const acc = new Accumulator()
-		acc.line(`public class ${name} {`)
-		const methodAcc = acc.indent()
-
-		for (let facadeName of facadeNames) {
-			methodAcc.line(`private let ${minusculize(facadeName)}: ${facadeName}ReceiveDispatcher`)
-		}
-		methodAcc.line()
-		methodAcc.line(`init(`)
-		const lastFacadeName = facadeNames[facadeNames.length - 1]
-		for (let facadeName of facadeNames) {
-			const comma = facadeName === lastFacadeName ? "" : ","
-			methodAcc.indent().line(`${minusculize(facadeName)} : ${facadeName}${comma}`)
-		}
-		methodAcc.line(`) {`)
-		for (let facadeName of facadeNames) {
-			methodAcc.indent().line(`self.${minusculize(facadeName)} = ${facadeName}ReceiveDispatcher(facade: ${minusculize(facadeName)})`)
-		}
-		methodAcc.line(`}`)
-		methodAcc.line()
-
-		methodAcc.line(`func dispatch(facadeName: String, methodName: String, args: Array<String>) async throws -> String {`)
-		const switchAcc = methodAcc.indent()
-		switchAcc.line(`switch facadeName {`)
-		const caseAcc = switchAcc.indent()
-		for (let facadeName of facadeNames) {
-			caseAcc.line(`case "${facadeName}":`)
-			caseAcc.indent().line(`return try await self.${minusculize(facadeName)}.dispatch(method: methodName, arg: args)`)
-		}
-		caseAcc.line(`default:`)
-		caseAcc.indent().line(`fatalError("licc messed up! " + facadeName)`)
-		switchAcc.line(`}`)
-		methodAcc.line(`}`)
-		acc.line(`}`)
-		return acc.finish()
+		return new Accumulator()
+			.line(`public class ${name} {`)
+			.indented((acc) =>
+				acc
+					.lines(facadeNames.map((facadeName) => `private let ${minusculize(facadeName)}: ${facadeName}ReceiveDispatcher`))
+					.line()
+					.line(`init(`)
+					.indented((acc) =>
+						acc.lines(
+							facadeNames.map((name) => `${minusculize(name)} : ${name}`),
+							{ suffix: ",", trailing: false },
+						),
+					)
+					.line(`) {`)
+					.indented((acc) =>
+						acc.lines(facadeNames.map((name) => `self.${minusculize(name)} = ${name}ReceiveDispatcher(facade: ${minusculize(name)})`)),
+					)
+					.line(`}`)
+					.line()
+					.line(`func dispatch(facadeName: String, methodName: String, args: Array<String>) async throws -> String {`)
+					.indented((acc) =>
+						acc
+							.line(`switch facadeName {`)
+							.indented((acc) => {
+								for (let facadeName of facadeNames) {
+									acc.line(`case "${facadeName}":`)
+										.indent()
+										.line(`return try await self.${minusculize(facadeName)}.dispatch(method: methodName, arg: args)`)
+								}
+								acc.line(`default:`).indent().line(`fatalError("licc messed up! " + facadeName)`)
+							})
+							.line(`}`),
+					)
+					.line(`}`),
+			)
+			.line(`}`)
+			.finish()
 	}
 
 	generateSendDispatcher(definition: FacadeDefinition): string {
@@ -172,7 +181,9 @@ export class SwiftGenerator implements LangGenerator {
 			methodBodyAcc.line(`let encodedFacadeName = toJson("${definition.name}")`)
 			methodBodyAcc.line(`let encodedMethodName = toJson("${methodName}")`)
 			if (methodDefinition.ret !== "void") {
-				methodBodyAcc.line(`let returnValue = try await self.transport.sendRequest(requestType: "ipc",  args: [encodedFacadeName, encodedMethodName] + args)`)
+				methodBodyAcc.line(
+					`let returnValue = try await self.transport.sendRequest(requestType: "ipc",  args: [encodedFacadeName, encodedMethodName] + args)`,
+				)
 				methodBodyAcc.line(`return try! JSONDecoder().decode(${typeNameSwift(methodDefinition.ret).name}.self, from: returnValue.data(using: .utf8)!)`)
 			} else {
 				methodBodyAcc.line(`let _ = try await self.transport.sendRequest(requestType: "ipc",  args: [encodedFacadeName, encodedMethodName] + args)`)
@@ -188,7 +199,7 @@ export class SwiftGenerator implements LangGenerator {
 
 	generateExtraFiles(): Record<string, string> {
 		return {
-			"NativeInterface": SwiftGenerator.generateNativeInterface()
+			NativeInterface: SwiftGenerator.generateNativeInterface(),
 		}
 	}
 
@@ -208,6 +219,15 @@ export class SwiftGenerator implements LangGenerator {
 	generateTypeRef(outDir: string, definitionPath: string, definition: TypeRefDefinition): string | null {
 		return null
 	}
+
+	generateEnum({ name, values, doc }: EnumDefinition): string {
+		return new Accumulator()
+			.do((acc) => this.generateDocComment(acc, doc))
+			.line(`public enum ${name}: Int {`)
+			.indented((acc) => acc.lines(values.map((value, index) => `case ${value} = ${index}`)))
+			.line("}")
+			.finish()
+	}
 }
 
 function typeNameSwift(name: string): RenderedType {
@@ -216,30 +236,30 @@ function typeNameSwift(name: string): RenderedType {
 }
 
 function renderSwiftType(parsed: ParsedType): RenderedType {
-	const {baseName, nullable} = parsed
+	const { baseName, nullable } = parsed
 	switch (baseName) {
 		case "List":
 			const renderedListInner = renderSwiftType(parsed.generics[0])
-			return {externals: renderedListInner.externals, name: maybeNullable(`[${renderedListInner.name}]`, nullable)}
+			return { externals: renderedListInner.externals, name: maybeNullable(`[${renderedListInner.name}]`, nullable) }
 		case "Map":
 			const renderedKey = renderSwiftType(parsed.generics[0])
 			const renderedValue = renderSwiftType(parsed.generics[1])
 			return {
 				externals: [...renderedKey.externals, ...renderedValue.externals],
-				name: maybeNullable(`[${renderedKey.name} : ${renderedValue.name}]`, nullable)
+				name: maybeNullable(`[${renderedKey.name} : ${renderedValue.name}]`, nullable),
 			}
 		case "string":
-			return {externals: [], name: maybeNullable("String", nullable)}
+			return { externals: [], name: maybeNullable("String", nullable) }
 		case "boolean":
-			return {externals: [], name: maybeNullable("Bool", nullable)}
+			return { externals: [], name: maybeNullable("Bool", nullable) }
 		case "number":
-			return {externals: [], name: maybeNullable("Int", nullable)}
+			return { externals: [], name: maybeNullable("Int", nullable) }
 		case "bytes":
-			return {externals: [], name: maybeNullable("DataWrapper", nullable)}
+			return { externals: [], name: maybeNullable("DataWrapper", nullable) }
 		case "void":
-			return {externals: [], name: maybeNullable("Void", nullable)}
+			return { externals: [], name: maybeNullable("Void", nullable) }
 		default:
-			return {externals: [baseName], name: maybeNullable(baseName, nullable)}
+			return { externals: [baseName], name: maybeNullable(baseName, nullable) }
 	}
 }
 

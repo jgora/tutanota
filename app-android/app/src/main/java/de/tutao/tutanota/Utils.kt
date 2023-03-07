@@ -3,6 +3,7 @@
 package de.tutao.tutanota
 
 import android.content.Context
+import android.content.res.Resources
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
@@ -35,6 +36,8 @@ data class FileInfo(var name: String, var size: Long)
 fun String.base64ToBytes(): ByteArray {
 	return Base64.decode(this, Base64.NO_WRAP)
 }
+
+fun String.base64ToString(): String = String(this.base64ToBytes())
 
 fun String.base64ToBase64Url(): String {
 	return replace("\\+".toRegex(), "-")
@@ -138,3 +141,7 @@ fun parseColor(color: String): Int {
 
 fun HttpURLConnection.iterateDataAsLines(action: (line: String) -> Unit) =
 		BufferedReader(InputStreamReader(BufferedInputStream(this.inputStream))).forEachLine(action)
+
+fun Int.toPx(): Int = (this * Resources.getSystem().displayMetrics.density).toInt()
+
+fun Int.toDp(): Int = (this / Resources.getSystem().displayMetrics.density).toInt()

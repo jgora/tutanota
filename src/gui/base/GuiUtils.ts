@@ -1,61 +1,36 @@
-import type {Country} from "../../api/common/CountryList"
-import {Countries} from "../../api/common/CountryList"
-import {DropDownSelector} from "./DropDownSelector"
-import type {InfoLink, TranslationKey} from "../../misc/LanguageViewModel"
-import {lang} from "../../misc/LanguageViewModel"
-import type {ButtonAttrs} from "./ButtonN"
-import {ButtonColor, ButtonType} from "./ButtonN"
-import {Icons} from "./icons/Icons"
-import type {DropdownChildAttrs} from "./DropdownN"
-import {attachDropdown} from "./DropdownN"
-import type {$Promisable, lazy, MaybeLazy} from "@tutao/tutanota-utils"
-import {assertNotNull, lazyMemoized, mapLazily, memoized, noOp} from "@tutao/tutanota-utils"
-import {Dialog} from "./Dialog"
-import {logins} from "../../api/main/LoginController"
-import type {AllIcons} from "./Icon"
-import {ProgrammingError} from "../../api/common/error/ProgrammingError"
-import m, {Children} from "mithril";
-import Stream from "mithril/stream";
-import {DropDownSelectorN} from "./DropDownSelectorN.js"
+import type { Country } from "../../api/common/CountryList"
+import { Countries } from "../../api/common/CountryList"
+import type { InfoLink, TranslationKey } from "../../misc/LanguageViewModel"
+import { lang } from "../../misc/LanguageViewModel"
+import type { ButtonAttrs } from "./Button.js"
+import { ButtonColor, ButtonType } from "./Button.js"
+import { Icons } from "./icons/Icons"
+import type { DropdownChildAttrs } from "./Dropdown.js"
+import { createAsyncDropdown } from "./Dropdown.js"
+import type { $Promisable, lazy, MaybeLazy } from "@tutao/tutanota-utils"
+import { assertNotNull, lazyMemoized, mapLazily, noOp, resolveMaybeLazy } from "@tutao/tutanota-utils"
+import { Dialog } from "./Dialog"
+import { logins } from "../../api/main/LoginController"
+import type { AllIcons } from "./Icon"
+import { ProgrammingError } from "../../api/common/error/ProgrammingError"
+import m, { Children } from "mithril"
+import { DropDownSelector } from "./DropDownSelector.js"
+import { IconButtonAttrs } from "./IconButton.js"
 
 export type dropHandler = (dragData: string) => void
 // not all browsers have the actual button as e.currentTarget, but all of them send it as a second argument (see https://github.com/tutao/tutanota/issues/1110)
 export type clickHandler = (event: MouseEvent, dom: HTMLElement) => void
 
-// TODO Use DropDownSelectorN
-export function createCountryDropdown(
-	selectedCountry: Stream<Country | null>,
-	helpLabel?: lazy<string>,
-	label: TranslationKey | lazy<string> = "invoiceCountry_label",
-): DropDownSelector<Country | null> {
-	const countries: Array<{name: string, value: Country | null}> = [
-		...Countries.map(c => ({
-			value: c,
-			name: c.n,
-		})),
-		{
-			value: null,
-			name: lang.get("choose_label"),
-		}
-	]
-	return new DropDownSelector(label, helpLabel ?? null, countries, selectedCountry, 250)
-		.setSelectionChangedHandler(value => {
-			selectedCountry(value)
-		})
-}
-
 // lazy because of global dependencies
-const dropdownCountries = lazyMemoized(() => Countries.map(c => ({value: c, name: c.n})))
+const dropdownCountries = lazyMemoized(() => Countries.map((c) => ({ value: c, name: c.n })))
 
-export function renderCountryDropdown(
-	params: {
-		selectedCountry: Country | null,
-		onSelectionChanged: (country: Country) => void,
-		helpLabel?: lazy<string>,
-		label?: TranslationKey | lazy<string>
-	},
-): Children {
-	return m(DropDownSelectorN, {
+export function renderCountryDropdown(params: {
+	selectedCountry: Country | null
+	onSelectionChanged: (country: Country) => void
+	helpLabel?: lazy<string>
+	label?: TranslationKey | lazy<string>
+}): Children {
+	return m(DropDownSelector, {
 		label: params.label ?? "invoiceCountry_label",
 		helpLabel: params.helpLabel,
 		items: [
@@ -63,10 +38,10 @@ export function renderCountryDropdown(
 			{
 				value: null,
 				name: lang.get("choose_label"),
-			}
+			},
 		],
 		selectedValue: params.selectedCountry,
-		selectionChangedHandler: params.onSelectionChanged
+		selectionChangedHandler: params.onSelectionChanged,
 	})
 }
 
@@ -80,8 +55,16 @@ export function createMoreSecondaryButtonAttrs(
 export function createMoreActionButtonAttrs(
 	lazyChildren: MaybeLazy<$Promisable<ReadonlyArray<DropdownChildAttrs | null>>>,
 	dropdownWidth?: number,
-): ButtonAttrs {
-	return moreButtonAttrsImpl(() => Icons.More, ButtonType.Action, lazyChildren, dropdownWidth)
+): IconButtonAttrs {
+	return {
+		title: "more_label",
+		colors: ButtonColor.Nav,
+		icon: Icons.More,
+		click: createAsyncDropdown({
+			width: dropdownWidth,
+			lazyButtons: async () => resolveMaybeLazy(lazyChildren),
+		}),
+	}
 }
 
 function moreButtonAttrsImpl(
@@ -90,30 +73,16 @@ function moreButtonAttrsImpl(
 	lazyChildren: MaybeLazy<$Promisable<ReadonlyArray<DropdownChildAttrs | null>>>,
 	dropdownWidth?: number,
 ): ButtonAttrs {
-	const button = {
+	return {
 		label: "more_label",
 		colors: ButtonColor.Nav,
-		click: noOp,
 		icon,
 		type,
-	} as const
-	const buttons = mapLazily(lazyChildren, async children => {
-		const resolvedChildren: ReadonlyArray<DropdownChildAttrs | null> = await children
-		return resolvedChildren.map(child => {
-			// If type hasn't been bound on the child it get's set to Dropdown, otherwise we use what is already there
-			if (child == null || typeof child == "string" || "type" in child) {
-				return child
-			} else {
-				return Object.assign(
-					{
-						type: ButtonType.Dropdown,
-					},
-					child,
-				)
-			}
-		})
-	})
-	return attachDropdown({mainButtonAttrs: button, childAttrs: buttons, showDropdown: () => true, width: dropdownWidth})
+		click: createAsyncDropdown({
+			width: dropdownWidth,
+			lazyButtons: async () => resolveMaybeLazy(lazyChildren),
+		}),
+	}
 }
 
 type Confirmation = {
@@ -126,7 +95,7 @@ type Confirmation = {
  * Wrapper around Dialog.confirm
  *
  * call getConfirmation(...).confirmed(() => doStuff()) or getConfirmation(...).cancelled(() => doStuff())
- * to handle confirmation or cancellation
+ * to handle confirmation or termination
  * @param message
  * @param confirmMessage
  * @returns {Confirmation}
@@ -135,7 +104,7 @@ export function getConfirmation(message: TranslationKey | lazy<string>, confirmM
 	const confirmationPromise = Dialog.confirm(message, confirmMessage)
 	const confirmation: Confirmation = {
 		confirmed(action) {
-			confirmationPromise.then(ok => {
+			confirmationPromise.then((ok) => {
 				if (ok) {
 					action()
 				}
@@ -144,7 +113,7 @@ export function getConfirmation(message: TranslationKey | lazy<string>, confirmM
 		},
 
 		cancelled(action) {
-			confirmationPromise.then(ok => {
+			confirmationPromise.then((ok) => {
 				if (!ok) {
 					action()
 				}
@@ -162,22 +131,20 @@ export function getConfirmation(message: TranslationKey | lazy<string>, confirmM
  * @param event
  * @returns {{x: number, y: number}}
  */
-export function getCoordsOfMouseOrTouchEvent(
-	event: MouseEvent | TouchEvent,
-): {
+export function getCoordsOfMouseOrTouchEvent(event: MouseEvent | TouchEvent): {
 	x: number
 	y: number
 } {
 	return event instanceof MouseEvent
 		? {
-			x: event.clientX,
-			y: event.clientY,
-		}
+				x: event.clientX,
+				y: event.clientY,
+		  }
 		: {
-			// Why would touches be empty?
-			x: assertNotNull(event.touches.item(0)).clientX,
-			y: assertNotNull(event.touches.item(0)).clientY,
-		}
+				// Why would touches be empty?
+				x: assertNotNull(event.touches.item(0)).clientX,
+				y: assertNotNull(event.touches.item(0)).clientY,
+		  }
 }
 
 export function makeListSelectionChangedScrollHandler(scrollDom: HTMLElement, entryHeight: number, getSelectedEntryIndex: lazy<number>): () => void {
@@ -229,9 +196,9 @@ export type MousePosAndBounds = {
  * The currentTarget must be a HTMLElement or this throws an error
  * @param mouseEvent
  */
-export function getPosAndBoundsFromMouseEvent({currentTarget, x, y}: MouseEvent): MousePosAndBounds {
+export function getPosAndBoundsFromMouseEvent({ currentTarget, x, y }: MouseEvent): MousePosAndBounds {
 	if (currentTarget instanceof HTMLElement) {
-		const {height, width, left, top} = currentTarget.getBoundingClientRect()
+		const { height, width, left, top } = currentTarget.getBoundingClientRect()
 		return {
 			targetHeight: height,
 			targetWidth: width,

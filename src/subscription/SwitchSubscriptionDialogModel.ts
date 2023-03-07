@@ -1,31 +1,21 @@
-import type {SubscriptionPlanPrices} from "./SubscriptionUtils"
 import {
 	getIncludedAliases,
 	getIncludedStorageCapacity,
 	getNbrOfContactForms,
 	getNbrOfUsers,
-	getSubscriptionType,
 	getTotalAliases,
 	getTotalStorageCapacity,
 	isBusinessFeatureActive,
-	isDowngrade,
 	isSharingActive,
 	isWhitelabelActive,
-	subscriptions,
-	SubscriptionType,
 } from "./SubscriptionUtils"
-import {BookingItemFeatureType} from "../api/common/TutanotaConstants"
-import {neverNull} from "@tutao/tutanota-utils"
-import type {PriceServiceReturn} from "../api/entities/sys/TypeRefs.js"
-import type {PlanPrices} from "../api/entities/sys/TypeRefs.js"
-import {createPlanPrices} from "../api/entities/sys/TypeRefs.js"
-import {getPriceFromPriceData, getPriceItem} from "./PriceUtils"
-import type {AccountingInfo} from "../api/entities/sys/TypeRefs.js"
-import type {Customer} from "../api/entities/sys/TypeRefs.js"
-import type {CustomerInfo} from "../api/entities/sys/TypeRefs.js"
-import type {Booking} from "../api/entities/sys/TypeRefs.js"
-import {promiseMap} from "@tutao/tutanota-utils"
-import type {BookingFacade} from "../api/worker/facades/BookingFacade"
+import { BookingItemFeatureType } from "../api/common/TutanotaConstants"
+import { assertNotNull, neverNull, promiseMap } from "@tutao/tutanota-utils"
+import type { AccountingInfo, Booking, Customer, CustomerInfo, PlanPrices, PriceServiceReturn } from "../api/entities/sys/TypeRefs.js"
+import { createPlanPrices } from "../api/entities/sys/TypeRefs.js"
+import { asPaymentInterval, getPriceFromPriceData, getPriceItem, isSubscriptionDowngrade, PaymentInterval, PriceAndConfigProvider } from "./PriceUtils"
+import type { BookingFacade } from "../api/worker/facades/lazy/BookingFacade.js"
+import { SubscriptionConfig, SubscriptionPlanPrices, SubscriptionType } from "./FeatureListProvider"
 
 type PlanPriceCalc = {
 	monthlyPrice: number
@@ -34,13 +24,14 @@ type PlanPriceCalc = {
 	includedStorage: number
 	readonly targetIsDowngrade: boolean
 	readonly targetSubscription: SubscriptionType
+	readonly targetSubscriptionConfig: SubscriptionConfig
 	readonly paymentIntervalFactor: number
 }
 export type CurrentSubscriptionInfo = {
 	businessUse: boolean
 	nbrOfUsers: number
 	subscriptionType: SubscriptionType
-	paymentInterval: number
+	paymentInterval: PaymentInterval
 	currentTotalStorage: number
 	currentTotalAliases: number
 	orderedContactForms: number
@@ -50,7 +41,7 @@ export type CurrentSubscriptionInfo = {
 	currentlySharingOrdered: boolean
 	currentlyBusinessOrdered: boolean
 }
-type UpgradeDowngradePrices = {
+export type UpgradeDowngradePrices = {
 	addUserPrice: PriceServiceReturn
 	upgrade20AliasesPrice: PriceServiceReturn
 	downgrade5AliasesPrice: PriceServiceReturn
@@ -66,139 +57,82 @@ type UpgradeDowngradePrices = {
 }
 
 export class SwitchSubscriptionDialogModel {
-	readonly _bookingFacade: BookingFacade
-	_customer: Customer
-	_customerInfo: CustomerInfo
-	_accountingInfo: AccountingInfo
-	_lastBooking: Booking
 	currentSubscriptionInfo: CurrentSubscriptionInfo
 
-	constructor(bookingFacade: BookingFacade, customer: Customer, customerInfo: CustomerInfo, accountingInfo: AccountingInfo, lastBooking: Booking) {
-		this._bookingFacade = bookingFacade
-		this._customer = customer
-		this._customerInfo = customerInfo
-		this._accountingInfo = accountingInfo
-		this._lastBooking = lastBooking
+	constructor(
+		private readonly bookingFacade: BookingFacade,
+		private readonly customer: Customer,
+		private readonly customerInfo: CustomerInfo,
+		private readonly accountingInfo: AccountingInfo,
+		private readonly lastBooking: Booking,
+		private readonly priceAndConfigProvider: PriceAndConfigProvider,
+	) {
 		this.currentSubscriptionInfo = this._initCurrentSubscriptionInfo()
 	}
 
 	_initCurrentSubscriptionInfo(): CurrentSubscriptionInfo {
+		const paymentInterval: PaymentInterval = asPaymentInterval(this.accountingInfo.paymentInterval)
 		return {
-			businessUse: !!this._customer.businessUse,
-			subscriptionType: getSubscriptionType(this._lastBooking, this._customer, this._customerInfo),
-			nbrOfUsers: getNbrOfUsers(this._lastBooking),
-			paymentInterval: Number(this._accountingInfo.paymentInterval),
-			currentTotalStorage: getTotalStorageCapacity(this._customer, this._customerInfo, this._lastBooking),
-			currentTotalAliases: getTotalAliases(this._customer, this._customerInfo, this._lastBooking),
-			includedStorage: getIncludedStorageCapacity(this._customerInfo),
-			includedAliases: getIncludedAliases(this._customerInfo),
-			currentlyWhitelabelOrdered: isWhitelabelActive(this._lastBooking),
-			currentlySharingOrdered: isSharingActive(this._lastBooking),
-			currentlyBusinessOrdered: isBusinessFeatureActive(this._lastBooking),
-			orderedContactForms: getNbrOfContactForms(this._lastBooking),
+			businessUse: !!this.customer.businessUse,
+			subscriptionType: this.priceAndConfigProvider.getSubscriptionType(this.lastBooking, this.customer, this.customerInfo),
+			nbrOfUsers: getNbrOfUsers(this.lastBooking),
+			paymentInterval,
+			currentTotalStorage: getTotalStorageCapacity(this.customer, this.customerInfo, this.lastBooking),
+			currentTotalAliases: getTotalAliases(this.customer, this.customerInfo, this.lastBooking),
+			includedStorage: getIncludedStorageCapacity(this.customerInfo),
+			includedAliases: getIncludedAliases(this.customerInfo),
+			currentlyWhitelabelOrdered: isWhitelabelActive(this.lastBooking),
+			currentlySharingOrdered: isSharingActive(this.lastBooking),
+			currentlyBusinessOrdered: isBusinessFeatureActive(this.lastBooking),
+			orderedContactForms: getNbrOfContactForms(this.lastBooking),
 		}
 	}
 
-	_loadUpgradeDowngradePrices(): Promise<UpgradeDowngradePrices> {
-		const getPriceFeatureList = [
-			// the order is important!
-			{
-				type: BookingItemFeatureType.Users,
-				count: 1,
-			},
-			{
-				type: BookingItemFeatureType.Alias,
-				count: 20,
-			},
-			{
-				type: BookingItemFeatureType.Alias,
-				count: 0,
-			},
-			{
-				type: BookingItemFeatureType.Storage,
-				count: 10,
-			},
-			{
-				type: BookingItemFeatureType.Storage,
-				count: 0,
-			},
-			{
-				type: BookingItemFeatureType.Sharing,
-				count: 1,
-			},
-			{
-				type: BookingItemFeatureType.Sharing,
-				count: 0,
-			},
-			{
-				type: BookingItemFeatureType.Business,
-				count: 1,
-			},
-			{
-				type: BookingItemFeatureType.Business,
-				count: 0,
-			},
-			{
-				type: BookingItemFeatureType.Whitelabel,
-				count: 1,
-			},
-			{
-				type: BookingItemFeatureType.Whitelabel,
-				count: 0,
-			},
-			{
-				type: BookingItemFeatureType.ContactForm,
-				count: 1,
-			},
-		]
-		return promiseMap(getPriceFeatureList, getPriceFeature => this._bookingFacade.getPrice(getPriceFeature.type, getPriceFeature.count, false)).then(
-			([
-				 addUserPrice,
-				 upgrade20AliasesPrice,
-				 downgrade5AliasesPrice,
-				 upgrade10GbStoragePrice,
-				 downgrade1GbStoragePrice,
-				 upgradeSharingPrice,
-				 downgradeSharingPrice,
-				 upgradeBusinessPrice,
-				 downgradeBusinessPrice,
-				 upgradeWhitelabelPrice,
-				 downgradeWhitelabelPrice,
-				 contactFormPrice,
-			 ]) => {
-				return {
-					addUserPrice: addUserPrice,
-					upgrade20AliasesPrice: upgrade20AliasesPrice,
-					downgrade5AliasesPrice: downgrade5AliasesPrice,
-					upgrade10GbStoragePrice: upgrade10GbStoragePrice,
-					downgrade1GbStoragePrice: downgrade1GbStoragePrice,
-					upgradeSharingPrice: upgradeSharingPrice,
-					downgradeSharingPrice: downgradeSharingPrice,
-					upgradeBusinessPrice: upgradeBusinessPrice,
-					downgradeBusinessPrice: downgradeBusinessPrice,
-					upgradeWhitelabelPrice: upgradeWhitelabelPrice,
-					downgradeWhitelabelPrice: downgradeWhitelabelPrice,
-					contactFormPrice: contactFormPrice,
-				}
-			},
-		)
+	async loadSwitchSubscriptionPrices(): Promise<SubscriptionPlanPrices> {
+		const upgradeDowngradePrices = await this.fetchUpgradeDowngradePrices()
+		return {
+			Premium: this.getPrice(
+				this.currentSubscriptionInfo,
+				upgradeDowngradePrices,
+				SubscriptionType.Premium,
+				this.priceAndConfigProvider.getSubscriptionConfig(SubscriptionType.Premium),
+			),
+			PremiumBusiness: this.getPrice(
+				this.currentSubscriptionInfo,
+				upgradeDowngradePrices,
+				SubscriptionType.PremiumBusiness,
+				this.priceAndConfigProvider.getSubscriptionConfig(SubscriptionType.PremiumBusiness),
+			),
+			Teams: this.getPrice(
+				this.currentSubscriptionInfo,
+				upgradeDowngradePrices,
+				SubscriptionType.Teams,
+				this.priceAndConfigProvider.getSubscriptionConfig(SubscriptionType.Teams),
+			),
+			TeamsBusiness: this.getPrice(
+				this.currentSubscriptionInfo,
+				upgradeDowngradePrices,
+				SubscriptionType.TeamsBusiness,
+				this.priceAndConfigProvider.getSubscriptionConfig(SubscriptionType.TeamsBusiness),
+			),
+			Pro: this.getPrice(
+				this.currentSubscriptionInfo,
+				upgradeDowngradePrices,
+				SubscriptionType.Pro,
+				this.priceAndConfigProvider.getSubscriptionConfig(SubscriptionType.Pro),
+			),
+		}
 	}
 
-	loadSwitchSubscriptionPrices(): Promise<SubscriptionPlanPrices> {
-		return this._loadUpgradeDowngradePrices().then(upgradeDowngradePrices => {
-			return {
-				Premium: this.getPrice(this.currentSubscriptionInfo, upgradeDowngradePrices, SubscriptionType.Premium),
-				PremiumBusiness: this.getPrice(this.currentSubscriptionInfo, upgradeDowngradePrices, SubscriptionType.PremiumBusiness),
-				Teams: this.getPrice(this.currentSubscriptionInfo, upgradeDowngradePrices, SubscriptionType.Teams),
-				TeamsBusiness: this.getPrice(this.currentSubscriptionInfo, upgradeDowngradePrices, SubscriptionType.TeamsBusiness),
-				Pro: this.getPrice(this.currentSubscriptionInfo, upgradeDowngradePrices, SubscriptionType.Pro),
-			}
-		})
-	}
-
-	getPrice(currentSubscription: CurrentSubscriptionInfo, prices: UpgradeDowngradePrices, targetSubscription: SubscriptionType): PlanPrices {
-		let paymentIntervalFactor = neverNull(prices.addUserPrice.futurePriceNextPeriod).paymentInterval === "12" ? 1 / 10 : 1
-		let monthlyPrice = Number(neverNull(prices.addUserPrice.currentPriceNextPeriod).price)
+	getPrice(
+		currentSubscription: CurrentSubscriptionInfo,
+		prices: UpgradeDowngradePrices,
+		targetSubscription: SubscriptionType,
+		targetSubscriptionConfig: SubscriptionConfig,
+	): PlanPrices {
+		const paymentInterval: PaymentInterval = asPaymentInterval(assertNotNull(prices.addUserPrice.futurePriceNextPeriod).paymentInterval)
+		let paymentIntervalFactor = paymentInterval === PaymentInterval.Yearly ? 0.1 : 1
+		let monthlyPrice = Number(assertNotNull(prices.addUserPrice.currentPriceNextPeriod).price)
 		let contactFormPrice = getMonthlySinglePrice(prices.contactFormPrice, BookingItemFeatureType.ContactForm, paymentIntervalFactor)
 		let singleUserPriceMonthly = getMonthlySinglePrice(prices.addUserPrice, BookingItemFeatureType.Users, paymentIntervalFactor)
 		let currentSharingPerUserMonthly = getMonthlySinglePrice(prices.addUserPrice, BookingItemFeatureType.Sharing, paymentIntervalFactor)
@@ -225,8 +159,9 @@ export class SwitchSubscriptionDialogModel {
 				additionalUserPriceMonthly: singleUserPriceMonthly,
 				includedAliases: 0,
 				includedStorage: 0,
-				targetIsDowngrade: isDowngrade(targetSubscription, currentSubscription.subscriptionType),
+				targetIsDowngrade: isSubscriptionDowngrade(targetSubscription, currentSubscription.subscriptionType),
 				targetSubscription: targetSubscription,
+				targetSubscriptionConfig,
 				paymentIntervalFactor: paymentIntervalFactor,
 			}
 			// upgrade: show the current price plus all features not ordered yet
@@ -278,50 +213,131 @@ export class SwitchSubscriptionDialogModel {
 		return planPrices
 	}
 
-	isBusinessUse(): boolean {
-		return !!this._customer.businessUse
+	private async fetchUpgradeDowngradePrices(): Promise<UpgradeDowngradePrices> {
+		const getPriceFeatureList = [
+			// the order is important!
+			{
+				type: BookingItemFeatureType.Users,
+				count: 1,
+			},
+			{
+				type: BookingItemFeatureType.Alias,
+				count: 20,
+			},
+			{
+				type: BookingItemFeatureType.Alias,
+				count: 0,
+			},
+			{
+				type: BookingItemFeatureType.Storage,
+				count: 10,
+			},
+			{
+				type: BookingItemFeatureType.Storage,
+				count: 0,
+			},
+			{
+				type: BookingItemFeatureType.Sharing,
+				count: 1,
+			},
+			{
+				type: BookingItemFeatureType.Sharing,
+				count: 0,
+			},
+			{
+				type: BookingItemFeatureType.Business,
+				count: 1,
+			},
+			{
+				type: BookingItemFeatureType.Business,
+				count: 0,
+			},
+			{
+				type: BookingItemFeatureType.Whitelabel,
+				count: 1,
+			},
+			{
+				type: BookingItemFeatureType.Whitelabel,
+				count: 0,
+			},
+			{
+				type: BookingItemFeatureType.ContactForm,
+				count: 1,
+			},
+		]
+		return promiseMap(getPriceFeatureList, (getPriceFeature) => this.bookingFacade.getPrice(getPriceFeature.type, getPriceFeature.count, false)).then(
+			([
+				addUserPrice,
+				upgrade20AliasesPrice,
+				downgrade5AliasesPrice,
+				upgrade10GbStoragePrice,
+				downgrade1GbStoragePrice,
+				upgradeSharingPrice,
+				downgradeSharingPrice,
+				upgradeBusinessPrice,
+				downgradeBusinessPrice,
+				upgradeWhitelabelPrice,
+				downgradeWhitelabelPrice,
+				contactFormPrice,
+			]) => {
+				return {
+					addUserPrice: addUserPrice,
+					upgrade20AliasesPrice: upgrade20AliasesPrice,
+					downgrade5AliasesPrice: downgrade5AliasesPrice,
+					upgrade10GbStoragePrice: upgrade10GbStoragePrice,
+					downgrade1GbStoragePrice: downgrade1GbStoragePrice,
+					upgradeSharingPrice: upgradeSharingPrice,
+					downgradeSharingPrice: downgradeSharingPrice,
+					upgradeBusinessPrice: upgradeBusinessPrice,
+					downgradeBusinessPrice: downgradeBusinessPrice,
+					upgradeWhitelabelPrice: upgradeWhitelabelPrice,
+					downgradeWhitelabelPrice: downgradeWhitelabelPrice,
+					contactFormPrice: contactFormPrice,
+				}
+			},
+		)
 	}
 }
 
-export function isUpgradeAliasesNeeded(targetSubscription: SubscriptionType, currentNbrOfAliases: number): boolean {
-	return currentNbrOfAliases < subscriptions[targetSubscription].nbrOfAliases
+export function isUpgradeAliasesNeeded(targetSubscriptionConfig: SubscriptionConfig, currentNbrOfAliases: number): boolean {
+	return currentNbrOfAliases < targetSubscriptionConfig.nbrOfAliases
 }
 
-export function isDowngradeAliasesNeeded(targetSubscription: SubscriptionType, currentNbrOfAliases: number, includedAliases: number): boolean {
+export function isDowngradeAliasesNeeded(targetSubscriptionConfig: SubscriptionConfig, currentNbrOfAliases: number, includedAliases: number): boolean {
 	// only order the target aliases package if it is smaller than the actual number of current aliases and if we have currently ordered more than the included aliases
-	return currentNbrOfAliases > subscriptions[targetSubscription].nbrOfAliases && currentNbrOfAliases > includedAliases
+	return currentNbrOfAliases > targetSubscriptionConfig.nbrOfAliases && currentNbrOfAliases > includedAliases
 }
 
-export function isUpgradeStorageNeeded(targetSubscription: SubscriptionType, currentAmountOfStorage: number): boolean {
-	return currentAmountOfStorage < subscriptions[targetSubscription].storageGb
+export function isUpgradeStorageNeeded(targetSubscriptionConfig: SubscriptionConfig, currentAmountOfStorage: number): boolean {
+	return currentAmountOfStorage < targetSubscriptionConfig.storageGb
 }
 
-export function isDowngradeStorageNeeded(targetSubscription: SubscriptionType, currentAmountOfStorage: number, includedStorage: number): boolean {
-	return currentAmountOfStorage > subscriptions[targetSubscription].storageGb && currentAmountOfStorage > includedStorage
+export function isDowngradeStorageNeeded(targetSubscriptionConfig: SubscriptionConfig, currentAmountOfStorage: number, includedStorage: number): boolean {
+	return currentAmountOfStorage > targetSubscriptionConfig.storageGb && currentAmountOfStorage > includedStorage
 }
 
-export function isUpgradeSharingNeeded(targetSubscription: SubscriptionType, currentlySharingOrdered: boolean): boolean {
-	return !currentlySharingOrdered && subscriptions[targetSubscription].sharing
+export function isUpgradeSharingNeeded(targetSubscriptionConfig: SubscriptionConfig, currentlySharingOrdered: boolean): boolean {
+	return !currentlySharingOrdered && targetSubscriptionConfig.sharing
 }
 
-export function isDowngradeSharingNeeded(targetSubscription: SubscriptionType, currentlySharingOrdered: boolean): boolean {
-	return currentlySharingOrdered && !subscriptions[targetSubscription].sharing
+export function isDowngradeSharingNeeded(targetSubscriptionConfig: SubscriptionConfig, currentlySharingOrdered: boolean): boolean {
+	return currentlySharingOrdered && !targetSubscriptionConfig.sharing
 }
 
-export function isUpgradeBusinessNeeded(targetSubscription: SubscriptionType, currentlyBusinessOrdered: boolean): boolean {
-	return !currentlyBusinessOrdered && subscriptions[targetSubscription].business
+export function isUpgradeBusinessNeeded(targetSubscriptionConfig: SubscriptionConfig, currentlyBusinessOrdered: boolean): boolean {
+	return !currentlyBusinessOrdered && targetSubscriptionConfig.business
 }
 
-export function isDowngradeBusinessNeeded(targetSubscription: SubscriptionType, currentlyBusinessOrdered: boolean): boolean {
-	return currentlyBusinessOrdered && !subscriptions[targetSubscription].business
+export function isDowngradeBusinessNeeded(targetSubscriptionConfig: SubscriptionConfig, currentlyBusinessOrdered: boolean): boolean {
+	return currentlyBusinessOrdered && !targetSubscriptionConfig.business
 }
 
-export function isUpgradeWhitelabelNeeded(targetSubscription: SubscriptionType, currentlyWhitelabelOrdered: boolean): boolean {
-	return !currentlyWhitelabelOrdered && subscriptions[targetSubscription].whitelabel
+export function isUpgradeWhitelabelNeeded(targetSubscriptionConfig: SubscriptionConfig, currentlyWhitelabelOrdered: boolean): boolean {
+	return !currentlyWhitelabelOrdered && targetSubscriptionConfig.whitelabel
 }
 
-export function isDowngradeWhitelabelNeeded(targetSubscription: SubscriptionType, currentlyWhitelabelOrdered: boolean): boolean {
-	return currentlyWhitelabelOrdered && !subscriptions[targetSubscription].whitelabel
+export function isDowngradeWhitelabelNeeded(targetSubscriptionConfig: SubscriptionConfig, currentlyWhitelabelOrdered: boolean): boolean {
+	return currentlyWhitelabelOrdered && !targetSubscriptionConfig.whitelabel
 }
 
 function calcWhitelabelFeature(
@@ -331,13 +347,13 @@ function calcWhitelabelFeature(
 	upgradeWhitelabelPrice: PriceServiceReturn,
 	downgradeWhitelabelPrice: PriceServiceReturn,
 ): void {
-	const {targetSubscription, targetIsDowngrade, paymentIntervalFactor} = planPrices
+	const { targetSubscriptionConfig, targetIsDowngrade, paymentIntervalFactor } = planPrices
 
-	if (isUpgradeWhitelabelNeeded(targetSubscription, currentlyWhitelabelOrdered)) {
+	if (isUpgradeWhitelabelNeeded(targetSubscriptionConfig, currentlyWhitelabelOrdered)) {
 		planPrices.monthlyPrice +=
 			Number(neverNull(upgradeWhitelabelPrice.futurePriceNextPeriod).price) - Number(neverNull(upgradeWhitelabelPrice.currentPriceNextPeriod).price)
 		planPrices.additionalUserPriceMonthly += getMonthlySinglePrice(upgradeWhitelabelPrice, BookingItemFeatureType.Whitelabel, paymentIntervalFactor)
-	} else if (targetIsDowngrade && isDowngradeWhitelabelNeeded(targetSubscription, currentlyWhitelabelOrdered)) {
+	} else if (targetIsDowngrade && isDowngradeWhitelabelNeeded(targetSubscriptionConfig, currentlyWhitelabelOrdered)) {
 		planPrices.monthlyPrice +=
 			Number(neverNull(downgradeWhitelabelPrice.futurePriceNextPeriod).price) - Number(neverNull(downgradeWhitelabelPrice.currentPriceNextPeriod).price)
 	} else {
@@ -352,13 +368,13 @@ function calcSharingFeature(
 	upgradeSharingPrice: PriceServiceReturn,
 	downgradeSharingPrice: PriceServiceReturn,
 ): void {
-	const {targetSubscription, targetIsDowngrade, paymentIntervalFactor} = planPrices
+	const { targetSubscriptionConfig, targetIsDowngrade, paymentIntervalFactor } = planPrices
 
-	if (isUpgradeSharingNeeded(targetSubscription, currentlySharingOrdered)) {
+	if (isUpgradeSharingNeeded(targetSubscriptionConfig, currentlySharingOrdered)) {
 		planPrices.monthlyPrice +=
 			Number(neverNull(upgradeSharingPrice.futurePriceNextPeriod).price) - Number(neverNull(upgradeSharingPrice.currentPriceNextPeriod).price)
 		planPrices.additionalUserPriceMonthly += getMonthlySinglePrice(upgradeSharingPrice, BookingItemFeatureType.Sharing, paymentIntervalFactor)
-	} else if (targetIsDowngrade && isDowngradeSharingNeeded(targetSubscription, currentlySharingOrdered)) {
+	} else if (targetIsDowngrade && isDowngradeSharingNeeded(targetSubscriptionConfig, currentlySharingOrdered)) {
 		planPrices.monthlyPrice +=
 			Number(neverNull(downgradeSharingPrice.futurePriceNextPeriod).price) - Number(neverNull(downgradeSharingPrice.currentPriceNextPeriod).price)
 	} else {
@@ -373,13 +389,13 @@ function calcBusinessFeature(
 	upgradeBusinessPrice: PriceServiceReturn,
 	downgradeBusinessPrice: PriceServiceReturn,
 ): void {
-	const {targetSubscription, targetIsDowngrade, paymentIntervalFactor} = planPrices
+	const { targetSubscriptionConfig, targetIsDowngrade, paymentIntervalFactor } = planPrices
 
-	if (isUpgradeBusinessNeeded(targetSubscription, currentlyBusinessOrdered)) {
+	if (isUpgradeBusinessNeeded(targetSubscriptionConfig, currentlyBusinessOrdered)) {
 		planPrices.monthlyPrice +=
 			Number(neverNull(upgradeBusinessPrice.futurePriceNextPeriod).price) - Number(neverNull(upgradeBusinessPrice.currentPriceNextPeriod).price)
 		planPrices.additionalUserPriceMonthly += getMonthlySinglePrice(upgradeBusinessPrice, BookingItemFeatureType.Business, paymentIntervalFactor)
-	} else if (targetIsDowngrade && isDowngradeBusinessNeeded(targetSubscription, currentlyBusinessOrdered)) {
+	} else if (targetIsDowngrade && isDowngradeBusinessNeeded(targetSubscriptionConfig, currentlyBusinessOrdered)) {
 		planPrices.monthlyPrice +=
 			Number(neverNull(downgradeBusinessPrice.futurePriceNextPeriod).price) - Number(neverNull(downgradeBusinessPrice.currentPriceNextPeriod).price)
 	} else {
@@ -394,17 +410,17 @@ function calcStorage(
 	upgrade10GbStoragePrice: PriceServiceReturn,
 	downgrade1GbStoragePrice: PriceServiceReturn,
 ): void {
-	const {targetSubscription, targetIsDowngrade} = planPrices
+	const { targetIsDowngrade, targetSubscriptionConfig } = planPrices
 
-	if (isUpgradeStorageNeeded(targetSubscription, currentTotalStorage)) {
+	if (isUpgradeStorageNeeded(targetSubscriptionConfig, currentTotalStorage)) {
 		planPrices.monthlyPrice +=
 			Number(neverNull(upgrade10GbStoragePrice.futurePriceNextPeriod).price) - Number(neverNull(upgrade10GbStoragePrice.currentPriceNextPeriod).price)
-	} else if (targetIsDowngrade && isDowngradeStorageNeeded(targetSubscription, currentTotalStorage, includedStorage)) {
+	} else if (targetIsDowngrade && isDowngradeStorageNeeded(targetSubscriptionConfig, currentTotalStorage, includedStorage)) {
 		planPrices.monthlyPrice +=
 			Number(neverNull(downgrade1GbStoragePrice.futurePriceNextPeriod).price) - Number(neverNull(downgrade1GbStoragePrice.currentPriceNextPeriod).price)
 	}
 
-	const targetAmountStorage = subscriptions[targetSubscription].storageGb
+	const targetAmountStorage = targetSubscriptionConfig.storageGb
 	planPrices.includedStorage = !targetIsDowngrade ? Math.max(currentTotalStorage, targetAmountStorage) : targetAmountStorage
 }
 
@@ -415,17 +431,17 @@ function calcAliases(
 	upgrade20AliasesPrice: PriceServiceReturn,
 	downgrade5AliasesPrice: PriceServiceReturn,
 ): void {
-	const {targetSubscription, targetIsDowngrade} = planPrices
+	const { targetSubscriptionConfig, targetIsDowngrade } = planPrices
 
-	if (isUpgradeAliasesNeeded(targetSubscription, currentTotalAliases)) {
+	if (isUpgradeAliasesNeeded(targetSubscriptionConfig, currentTotalAliases)) {
 		planPrices.monthlyPrice +=
 			Number(neverNull(upgrade20AliasesPrice.futurePriceNextPeriod).price) - Number(neverNull(upgrade20AliasesPrice.currentPriceNextPeriod).price)
-	} else if (targetIsDowngrade && isDowngradeAliasesNeeded(targetSubscription, currentTotalAliases, includedAliases)) {
+	} else if (targetIsDowngrade && isDowngradeAliasesNeeded(targetSubscriptionConfig, currentTotalAliases, includedAliases)) {
 		planPrices.monthlyPrice +=
 			Number(neverNull(downgrade5AliasesPrice.futurePriceNextPeriod).price) - Number(neverNull(downgrade5AliasesPrice.currentPriceNextPeriod).price)
 	}
 
-	const targetNbrAliases = subscriptions[targetSubscription].nbrOfAliases
+	const targetNbrAliases = targetSubscriptionConfig.nbrOfAliases
 	planPrices.includedAliases = !targetIsDowngrade ? Math.max(currentTotalAliases, targetNbrAliases) : targetNbrAliases
 }
 

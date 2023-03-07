@@ -1,33 +1,34 @@
-import m, {Children} from "mithril"
-import {AccessExpiredError,} from "../api/common/error/RestError"
-import {assertNotNull, base64ToUint8Array, base64UrlToBase64, noOp} from "@tutao/tutanota-utils"
-import type {TranslationText} from "../misc/LanguageViewModel"
-import {lang} from "../misc/LanguageViewModel"
-import {keyManager, Shortcut} from "../misc/KeyManager"
-import {client} from "../misc/ClientDetector"
-import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
-import {Keys} from "../api/common/TutanotaConstants"
-import {progressIcon} from "../gui/base/Icon"
-import {ButtonN, ButtonType} from "../gui/base/ButtonN"
-import {TextFieldN, TextFieldType as TextFieldType} from "../gui/base/TextFieldN"
-import {CheckboxN} from "../gui/base/CheckboxN"
-import {logins} from "../api/main/LoginController"
-import {MessageBoxN} from "../gui/base/MessageBoxN"
-import {renderPrivacyAndImprintLinks} from "./LoginView"
-import {CurrentView, header} from "../gui/Header.js"
-import {GENERATED_MIN_ID} from "../api/common/utils/EntityUtils"
-import {getLoginErrorMessage, handleExpectedLoginError} from "../misc/LoginUtils"
-import {locator} from "../api/main/MainLocator"
-import type {ICredentialsProvider} from "../misc/credentials/CredentialsProvider"
-import {assertMainOrNode} from "../api/common/Env"
-import type {Credentials} from "../misc/credentials/Credentials"
-import {SessionType} from "../api/common/SessionType.js";
-import {ResumeSessionErrorReason} from "../api/worker/facades/LoginFacade"
+import m, { Children, Vnode } from "mithril"
+import { AccessExpiredError } from "../api/common/error/RestError"
+import { assertNotNull, base64ToUint8Array, base64UrlToBase64, noOp } from "@tutao/tutanota-utils"
+import type { TranslationText } from "../misc/LanguageViewModel"
+import { lang } from "../misc/LanguageViewModel"
+import { keyManager, Shortcut } from "../misc/KeyManager"
+import { client } from "../misc/ClientDetector"
+import { showProgressDialog } from "../gui/dialogs/ProgressDialog"
+import { Keys } from "../api/common/TutanotaConstants"
+import { progressIcon } from "../gui/base/Icon"
+import { Button, ButtonType } from "../gui/base/Button.js"
+import { Autocomplete, TextField, TextFieldType as TextFieldType } from "../gui/base/TextField.js"
+import { Checkbox } from "../gui/base/Checkbox.js"
+import { logins } from "../api/main/LoginController"
+import { MessageBox } from "../gui/base/MessageBox.js"
+import { renderInfoLinks } from "./LoginView"
+import { BaseHeaderAttrs, header } from "../gui/Header.js"
+import { GENERATED_MIN_ID } from "../api/common/utils/EntityUtils"
+import { getLoginErrorMessage, handleExpectedLoginError } from "../misc/LoginUtils"
+import { locator } from "../api/main/MainLocator"
+import type { CredentialsProvider } from "../misc/credentials/CredentialsProvider.js"
+import { assertMainOrNode } from "../api/common/Env"
+import type { Credentials } from "../misc/credentials/Credentials"
+import { SessionType } from "../api/common/SessionType.js"
+import { ResumeSessionErrorReason } from "../api/worker/facades/LoginFacade"
+import { TopLevelAttrs, TopLevelView } from "../TopLevelView.js"
+import { BaseTopLevelView } from "../gui/BaseTopLevelView.js"
 
 assertMainOrNode()
 
-class ExternalLoginViewModel {
-
+export class ExternalLoginViewModel {
 	password: string = ""
 	doSavePassword: boolean = false
 	helpText: TranslationText = "emptyString_msg"
@@ -35,15 +36,12 @@ class ExternalLoginViewModel {
 	autologinInProgress = false
 	showAutoLoginButton = false
 
-	private _urlData: {userId: Id, salt: Uint8Array} | null = null
-	get urlData(): {userId: Id, salt: Uint8Array} {
+	private _urlData: { userId: Id; salt: Uint8Array } | null = null
+	get urlData(): { userId: Id; salt: Uint8Array } {
 		return assertNotNull(this._urlData)
 	}
 
-	constructor(
-		private readonly credentialsProvider: ICredentialsProvider
-	) {
-	}
+	constructor(private readonly credentialsProvider: CredentialsProvider) {}
 
 	formLogin() {
 		if (this.password === "") {
@@ -60,7 +58,7 @@ class ExternalLoginViewModel {
 		const persistentSession = this.doSavePassword
 
 		const sessionType = persistentSession ? SessionType.Persistent : SessionType.Login
-		const {userId, salt} = this.urlData
+		const { userId, salt } = this.urlData
 		const newCredentials = await logins.createExternalSession(userId, password, salt, clientIdentifier, sessionType)
 
 		this.password = ""
@@ -69,7 +67,7 @@ class ExternalLoginViewModel {
 
 		// For external users userId is used instead of email address
 		if (persistentSession) {
-			await this.credentialsProvider.store({credentials: newCredentials})
+			await this.credentialsProvider.store({ credentials: newCredentials })
 		}
 
 		if (storedCredentials) {
@@ -94,7 +92,7 @@ class ExternalLoginViewModel {
 	}
 
 	private async resumeSession(credentials: Credentials): Promise<void> {
-		const result = await logins.resumeSession({credentials, databaseKey: null}, this.urlData.salt, null)
+		const result = await logins.resumeSession({ credentials, databaseKey: null }, this.urlData.salt, null)
 		if (result.type === "error") {
 			switch (result.reason) {
 				case ResumeSessionErrorReason.OfflineNotAvailableForFree:
@@ -142,7 +140,7 @@ class ExternalLoginViewModel {
 
 			this._urlData = {
 				userId: id.substring(0, GENERATED_MIN_ID.length),
-				salt: base64ToUint8Array(base64UrlToBase64(id.substring(GENERATED_MIN_ID.length)))
+				salt: base64ToUint8Array(base64UrlToBase64(id.substring(GENERATED_MIN_ID.length))),
 			}
 
 			const credentials = await this.credentialsProvider.getCredentialsByUserId(this.urlData.userId)
@@ -158,11 +156,20 @@ class ExternalLoginViewModel {
 			m.redraw()
 		}
 	}
+
+	dispose() {
+		this.password = ""
+	}
 }
 
-export class ExternalLoginView implements CurrentView {
+export interface ExternalLoginViewAttrs extends TopLevelAttrs {
+	viewModelFactory: () => ExternalLoginViewModel
+	header: BaseHeaderAttrs
+}
 
-	private readonly viewModel = new ExternalLoginViewModel(locator.credentialsProvider)
+/** Login view for external mailboxes: recipients from other mail servers when the email is password-protected. */
+export class ExternalLoginView extends BaseTopLevelView implements TopLevelView<ExternalLoginViewAttrs> {
+	private readonly viewModel: ExternalLoginViewModel
 	private readonly shortcuts: Array<Shortcut> = [
 		{
 			key: Keys.RETURN,
@@ -173,10 +180,9 @@ export class ExternalLoginView implements CurrentView {
 		},
 	]
 
-	constructor() {
-		this.view = this.view.bind(this)
-		this.oncreate = this.oncreate.bind(this)
-		this.onremove = this.onremove.bind(this)
+	constructor(vnode: Vnode<ExternalLoginViewAttrs>) {
+		super()
+		this.viewModel = vnode.attrs.viewModelFactory()
 	}
 
 	oncreate() {
@@ -185,34 +191,30 @@ export class ExternalLoginView implements CurrentView {
 
 	onremove() {
 		this.viewModel.password = ""
+		this.viewModel.dispose()
 		keyManager.unregisterShortcuts(this.shortcuts)
 	}
 
-	view(): Children {
-		return m(".main-view",
-			[
-				m(header),
-				m(".flex-center.scroll.pt-responsive",
-					m(".flex-grow-shrink-auto.max-width-s.pt.pb.plr-l",
-						this.renderContent()
-					)
-				)
-			]
-		)
+	view({ attrs }: Vnode<ExternalLoginViewAttrs>): Children {
+		return m(".main-view", [
+			m(header, {
+				viewSlider: null,
+				...attrs.header,
+			}),
+			m(".flex-center.scroll.pt-responsive", m(".flex-grow-shrink-auto.max-width-s.pt.pb.plr-l", this.renderContent())),
+		])
 	}
 
 	private renderContent(): Children {
 		if (this.viewModel.autologinInProgress) {
 			return m("p.center", progressIcon())
 		} else if (this.viewModel.errorMessageId) {
-			return m("p.center", m(MessageBoxN, {}, lang.getMaybeLazy(this.viewModel.errorMessageId)))
+			return m("p.center", m(MessageBox, {}, lang.getMaybeLazy(this.viewModel.errorMessageId)))
 		} else {
 			return [
-				this.viewModel.showAutoLoginButton
-					? this.renderAutoLoginButton()
-					: this.renderForm(),
+				this.viewModel.showAutoLoginButton ? this.renderAutoLoginButton() : this.renderForm(),
 				m("p.center.statusTextColor", m("small", lang.getMaybeLazy(this.viewModel.helpText))),
-				renderPrivacyAndImprintLinks(),
+				renderInfoLinks(),
 			]
 		}
 	}
@@ -220,7 +222,7 @@ export class ExternalLoginView implements CurrentView {
 	renderAutoLoginButton(): Children {
 		return m(
 			".pt",
-			m(ButtonN, {
+			m(Button, {
 				label: "showMail_action",
 				click: () => this.viewModel.loginWithStoredCredentials(),
 				type: ButtonType.Login,
@@ -230,31 +232,32 @@ export class ExternalLoginView implements CurrentView {
 
 	renderForm(): Children {
 		return [
-			m(TextFieldN, {
+			m(TextField, {
 				type: TextFieldType.Password,
 				label: "password_label",
 				helpLabel: () => lang.get("enterPresharedPassword_msg"),
 				value: this.viewModel.password,
-				oninput: input => this.viewModel.password = input,
+				autocompleteAs: Autocomplete.currentPassword,
+				oninput: (input) => (this.viewModel.password = input),
 			}),
-			m(CheckboxN, {
+			m(Checkbox, {
 				label: () => lang.get("storePassword_action"),
 				helpLabel: () => lang.get("onlyPrivateComputer_msg"),
 				checked: this.viewModel.doSavePassword,
-				onChecked: checked => this.viewModel.doSavePassword = checked,
+				onChecked: (checked) => (this.viewModel.doSavePassword = checked),
 			}),
 			m(
 				".pt",
-				m(ButtonN, {
+				m(Button, {
 					label: "showMail_action",
 					click: () => this.viewModel.formLogin(),
 					type: ButtonType.Login,
 				}),
-			)
+			),
 		]
 	}
 
-	updateUrl(args: Record<string, any>) {
+	onNewUrl(args: Record<string, any>) {
 		this.viewModel.updateUrl(args)
 	}
 }

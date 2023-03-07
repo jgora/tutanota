@@ -1,27 +1,28 @@
-import m, {Params} from "mithril"
-import {assertMainOrNodeBoot, isApp, isElectronClient, isIOSApp, Mode} from "../api/common/Env"
-import {lang} from "./LanguageViewModel"
-import type {WorkerClient} from "../api/main/WorkerClient"
-import {client} from "./ClientDetector"
-import {logins} from "../api/main/LoginController"
-import type {Indexer} from "../api/worker/search/Indexer"
+import m, { Params } from "mithril"
+import { assertMainOrNodeBoot, isApp, isElectronClient, isIOSApp, Mode } from "../api/common/Env"
+import { lang } from "./LanguageViewModel"
+import { client } from "./ClientDetector"
+import { logins } from "../api/main/LoginController"
+import type { Indexer } from "../api/worker/search/Indexer"
+import { remove } from "@tutao/tutanota-utils"
+import { WebsocketConnectivityModel } from "./WebsocketConnectivityModel.js"
 
 assertMainOrNodeBoot()
 export type KeyboardSizeListener = (keyboardSize: number) => unknown
 export type windowSizeListener = (width: number, height: number) => unknown
 
-class WindowFacade {
+export class WindowFacade {
 	private _windowSizeListeners: windowSizeListener[]
 	resizeTimeout: (AnimationFrameID | null) | (TimeoutID | null)
 	windowCloseConfirmation: boolean
 	private _windowCloseListeners: Set<(e: Event) => unknown>
 	private _historyStateEventListeners: Array<(e: Event) => boolean> = []
-	private _worker: WorkerClient | null = null
 	private _indexerFacade: Indexer | null = null
 	// following two properties are for the iOS
 	private _keyboardSize: number = 0
 	private _keyboardSizeListeners: KeyboardSizeListener[] = []
 	private _ignoreNextPopstate: boolean = false
+	private connectivityModel!: WebsocketConnectivityModel
 
 	constructor() {
 		this._windowSizeListeners = []
@@ -29,12 +30,12 @@ class WindowFacade {
 		this.windowCloseConfirmation = false
 		this._windowCloseListeners = new Set()
 		// load async to reduce size of boot bundle
-		import("../api/main/MainLocator").then(async ({locator}) => {
+		import("../api/main/MainLocator").then(async ({ locator }) => {
 			// We need to wait til the locator has finished initializing before we read from it
 			// because it is happening concurrently
 			await locator.initialized
-			this._worker = locator.worker
 			this._indexerFacade = locator.indexerFacade
+			this.connectivityModel = locator.connectivityModel
 
 			if (env.mode === Mode.App || env.mode === Mode.Desktop || env.mode === Mode.Admin) {
 				this.addPageInBackgroundListener()
@@ -51,11 +52,7 @@ class WindowFacade {
 	}
 
 	removeResizeListener(listener: windowSizeListener) {
-		let index = this._windowSizeListeners.indexOf(listener)
-
-		if (index > -1) {
-			this._windowSizeListeners.splice(index, 1)
-		}
+		remove(this._windowSizeListeners, listener)
 	}
 
 	addWindowCloseListener(listener: () => unknown): (...args: Array<any>) => any {
@@ -71,7 +68,7 @@ class WindowFacade {
 	}
 
 	_notifyCloseListeners(e: Event) {
-		this._windowCloseListeners.forEach(f => f(e))
+		this._windowCloseListeners.forEach((f) => f(e))
 	}
 
 	addKeyboardSizeListener(listener: KeyboardSizeListener) {
@@ -81,11 +78,7 @@ class WindowFacade {
 	}
 
 	removeKeyboardSizeListener(listener: KeyboardSizeListener) {
-		const index = this._keyboardSizeListeners.indexOf(listener)
-
-		if (index > -1) {
-			this._keyboardSizeListeners.splice(index, 1)
-		}
+		remove(this._keyboardSizeListeners, listener)
 	}
 
 	openLink(href: string) {
@@ -97,7 +90,7 @@ class WindowFacade {
 	}
 
 	init() {
-		window.onresize = () => {
+		const onresize = () => {
 			// see https://developer.mozilla.org/en-US/docs/Web/Events/resize
 			if (!this.resizeTimeout) {
 				const cb = () => {
@@ -111,17 +104,21 @@ class WindowFacade {
 				this.resizeTimeout = client.isMobileDevice() ? setTimeout(cb, 66) : requestAnimationFrame(cb)
 			}
 		}
+		window.onresize = onresize
+		// specifially for iOS: rotation through the unsupported orientation (e.g, 90 degrees 3 times) will not trigger the resize and we wouldn't resize
+		// some things so we react to both, it is throttled anyway
+		window.onorientationchange = onresize
 
 		if (window.addEventListener && !isApp()) {
-			window.addEventListener("beforeunload", e => this._beforeUnload(e))
-			window.addEventListener("popstate", e => this._popState(e))
-			window.addEventListener("unload", e => this._onUnload())
+			window.addEventListener("beforeunload", (e) => this._beforeUnload(e))
+			window.addEventListener("popstate", (e) => this._popState(e))
+			window.addEventListener("unload", (e) => this._onUnload())
 		}
 
 		// needed to help the MacOs desktop client to distinguish between Cmd+Arrow to navigate the history
 		// and Cmd+Arrow to navigate a text editor
 		if (env.mode === Mode.Desktop && client.isMacOS && window.addEventListener) {
-			window.addEventListener("keydown", e => {
+			window.addEventListener("keydown", (e) => {
 				if (!e.metaKey || e.key === "Meta") return
 
 				const target = e.target as HTMLElement | null
@@ -184,6 +181,10 @@ class WindowFacade {
 		}
 	}
 
+	removeHistoryEventListener(listener: (e: Event) => boolean): void {
+		remove(this._historyStateEventListeners, listener)
+	}
+
 	/**
 	 * calls the last history event listener that was added
 	 * and reverts the state change if it returns false
@@ -204,6 +205,8 @@ class WindowFacade {
 
 		if (!this._historyStateEventListeners[len - 1](e)) {
 			this._ignoreNextPopstate = true
+			// go 1 page forward in the history
+			// this reverts the state change (if the event was triggered by a back-button press)
 			history.go(1)
 		}
 	}
@@ -228,9 +231,7 @@ class WindowFacade {
 				args.noAutoLogin = true
 			}
 
-			// Convert all values to strings so that native has easier time dealing with it
-			const preparedArgs = Object.fromEntries(Object.entries(args).map(([k, v]) => [k, String(v)]))
-			const {locator} = await import("../api/main/MainLocator")
+			const { locator } = await import("../api/main/MainLocator")
 
 			const stringifiedArgs: Record<string, string> = {}
 			for (const [k, v] of Object.entries(args)) {
@@ -238,7 +239,7 @@ class WindowFacade {
 					stringifiedArgs[k] = String(v)
 				}
 			}
-			locator.commonSystemFacade.reload(stringifiedArgs)
+			await locator.commonSystemFacade.reload(stringifiedArgs)
 		} else {
 			window.location.reload()
 		}
@@ -262,7 +263,7 @@ class WindowFacade {
 					// We used to handle it in the EventBus and reconnect immediately but isIosApp()
 					// check does not work in the worker currently.
 					// Doing this for all apps just to be sure.
-					setTimeout(() => this._worker?.tryReconnectEventBus(false, true), 100)
+					setTimeout(() => this.connectivityModel?.tryReconnect(false, true), 100)
 				}
 			})
 		}

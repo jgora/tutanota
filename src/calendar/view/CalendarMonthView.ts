@@ -1,9 +1,10 @@
-import m, {Children, ClassComponent, Component, Vnode, VnodeDOM} from "mithril"
-import {px, size} from "../../gui/size"
-import {EventTextTimeOption, WeekStart} from "../../api/common/TutanotaConstants"
-import type {CalendarDay, CalendarMonth} from "../date/CalendarUtils"
+import m, { Children, ClassComponent, Component, Vnode, VnodeDOM } from "mithril"
+import { px, size } from "../../gui/size"
+import { EventTextTimeOption, WeekStart } from "../../api/common/TutanotaConstants"
+import type { CalendarDay, CalendarMonth } from "../date/CalendarUtils"
 import {
 	CALENDAR_EVENT_HEIGHT,
+	EventLayoutMode,
 	getAllDayDateForTimezone,
 	getCalendarMonth,
 	getDateIndicator,
@@ -19,28 +20,27 @@ import {
 	layOutEvents,
 	TEMPORARY_EVENT_OPACITY,
 } from "../date/CalendarUtils"
-import {flat, incrementDate, incrementMonth, isSameDay, lastThrow, neverNull, ofClass} from "@tutao/tutanota-utils"
-import {ContinuingCalendarEventBubble} from "./ContinuingCalendarEventBubble"
-import {styles} from "../../gui/styles"
-import {formatMonthWithFullYear} from "../../misc/Formatter"
-import {isAllDayEvent, isAllDayEventByTimes} from "../../api/common/utils/CommonCalendarUtils"
-import {windowFacade} from "../../misc/WindowFacade"
-import {PageView} from "../../gui/base/PageView"
-import type {CalendarEvent} from "../../api/entities/tutanota/TypeRefs.js"
-import {logins} from "../../api/main/LoginController"
-import type {GroupColors} from "./CalendarView"
-import {SELECTED_DATE_INDICATOR_THICKNESS} from "./CalendarView"
-import type {EventDragHandlerCallbacks, MousePos} from "./EventDragHandler"
-import {EventDragHandler} from "./EventDragHandler"
-import {getPosAndBoundsFromMouseEvent} from "../../gui/base/GuiUtils"
-import {UserError} from "../../api/main/UserError"
-import {showUserError} from "../../misc/ErrorHandlerImpl"
-import {theme} from "../../gui/theme"
-import {getDateFromMousePos, renderCalendarSwitchLeftButton, renderCalendarSwitchRightButton} from "./CalendarGuiUtils"
-import type {CalendarEventBubbleClickHandler, EventsOnDays} from "./CalendarViewModel"
-import {CalendarViewType} from "./CalendarViewModel"
-import {Time} from "../../api/common/utils/Time"
-import {client} from "../../misc/ClientDetector"
+import { flat, incrementDate, incrementMonth, isSameDay, lastThrow, neverNull, ofClass } from "@tutao/tutanota-utils"
+import { ContinuingCalendarEventBubble } from "./ContinuingCalendarEventBubble"
+import { styles } from "../../gui/styles"
+import { formatMonthWithFullYear } from "../../misc/Formatter"
+import { isAllDayEvent, isAllDayEventByTimes } from "../../api/common/utils/CommonCalendarUtils"
+import { windowFacade } from "../../misc/WindowFacade"
+import { PageView } from "../../gui/base/PageView"
+import type { CalendarEvent } from "../../api/entities/tutanota/TypeRefs.js"
+import { logins } from "../../api/main/LoginController"
+import type { GroupColors } from "./CalendarView"
+import type { EventDragHandlerCallbacks, MousePos } from "./EventDragHandler"
+import { EventDragHandler } from "./EventDragHandler"
+import { getPosAndBoundsFromMouseEvent } from "../../gui/base/GuiUtils"
+import { UserError } from "../../api/main/UserError"
+import { showUserError } from "../../misc/ErrorHandlerImpl"
+import { theme } from "../../gui/theme"
+import { getDateFromMousePos, renderCalendarSwitchLeftButton, renderCalendarSwitchRightButton, SELECTED_DATE_INDICATOR_THICKNESS } from "./CalendarGuiUtils"
+import type { CalendarEventBubbleClickHandler, EventsOnDays } from "./CalendarViewModel"
+import { CalendarViewType } from "./CalendarViewModel"
+import { Time } from "../../api/common/utils/Time"
+import { client } from "../../misc/ClientDetector"
 
 type CalendarMonthAttrs = {
 	selectedDate: Date
@@ -63,6 +63,7 @@ type SimplePosRect = {
 	right: number
 }
 
+/** height of the day number indicator at the top of the day square */
 const dayHeight = () => (styles.isDesktopLayout() ? 32 : 24)
 
 const spaceBetweenEvents = () => (styles.isDesktopLayout() ? 2 : 1)
@@ -79,7 +80,7 @@ export class CalendarMonthView implements Component<CalendarMonthAttrs>, ClassCo
 	private _dayUnderMouse: Date | null = null
 	private _lastMousePos: MousePos | null = null
 
-	constructor({attrs}: Vnode<CalendarMonthAttrs>) {
+	constructor({ attrs }: Vnode<CalendarMonthAttrs>) {
 		this._resizeListener = m.redraw
 		this._zone = getTimeZone()
 		this._lastWidth = 0
@@ -95,7 +96,7 @@ export class CalendarMonthView implements Component<CalendarMonthAttrs>, ClassCo
 		windowFacade.removeResizeListener(this._resizeListener)
 	}
 
-	view({attrs}: Vnode<CalendarMonthAttrs>): Children {
+	view({ attrs }: Vnode<CalendarMonthAttrs>): Children {
 		const startOfTheWeekOffset = getStartOfTheWeekOffset(attrs.startOfTheWeek)
 		const thisMonth = getCalendarMonth(attrs.selectedDate, startOfTheWeekOffset, false)
 		const previousMonthDate = new Date(attrs.selectedDate)
@@ -119,7 +120,7 @@ export class CalendarMonthView implements Component<CalendarMonthAttrs>, ClassCo
 				key: getFirstDayOfMonth(nextMontDate).getTime(),
 				nodes: this._monthDom ? this._renderCalendar(attrs, nextMonth, thisMonth, nextMontDate, this._zone) : null,
 			},
-			onChangePage: next => attrs.onChangeMonth(next),
+			onChangePage: (next) => attrs.onChangeMonth(next),
 		})
 	}
 
@@ -144,58 +145,61 @@ export class CalendarMonthView implements Component<CalendarMonthAttrs>, ClassCo
 	}
 
 	_renderCalendar(attrs: CalendarMonthAttrs, month: CalendarMonth, currentlyVisibleMonth: CalendarMonth, date: Date, zone: string): Children {
-		const {weekdays, weeks} = month
+		const { weekdays, weeks } = month
 		const firstDay = getFirstDayOfMonth(date)
 		const today = getStartOfDayWithZone(new Date(), getTimeZone())
-		return m(".fill-absolute.flex.col.margin-are-inset-lr", [
+		return m(".fill-absolute.flex.col.mlr-safe-inset", [
 			styles.isDesktopLayout()
-				? m(".mt-s.pr-l.flex.row.items-center", [
-					renderCalendarSwitchLeftButton("prevMonth_label", () => attrs.onChangeMonth(false)),
-					renderCalendarSwitchRightButton("nextMonth_label", () => attrs.onChangeMonth(true)),
-					m("h1", formatMonthWithFullYear(firstDay)),
-				])
+				? // Only display navigation buttons if it is the visible page
+				  month === currentlyVisibleMonth
+					? m(".mt-s.pr-l.flex.row.items-center", [
+							renderCalendarSwitchLeftButton("prevMonth_label", () => attrs.onChangeMonth(false)),
+							renderCalendarSwitchRightButton("nextMonth_label", () => attrs.onChangeMonth(true)),
+							m("h1", formatMonthWithFullYear(firstDay)),
+					  ])
+					: m(".mt-s.pr-l.flex.row.items-center", [m("h1", formatMonthWithFullYear(firstDay))])
 				: m(".pt-s"),
 			m(
 				".flex.mb-s",
-				weekdays.map(wd => m(".flex-grow", m(".calendar-day-indicator.b", wd))),
+				weekdays.map((wd) => m(".flex-grow", m(".calendar-day-indicator.b", wd))),
 			),
 			m(
 				".flex.col.flex-grow",
 				{
-					oncreate: vnode => {
+					oncreate: (vnode) => {
 						if (month === currentlyVisibleMonth) {
 							this._monthDom = vnode.dom as HTMLElement
 							m.redraw()
 						}
 					},
-					onupdate: vnode => {
+					onupdate: (vnode) => {
 						if (month === currentlyVisibleMonth) {
 							this._monthDom = vnode.dom as HTMLElement
 						}
 					},
-					onmousemove: (mouseEvent: MouseEvent & {redraw?: boolean}) => {
+					onmousemove: (mouseEvent: MouseEvent & { redraw?: boolean }) => {
 						mouseEvent.redraw = false
 						const posAndBoundsFromMouseEvent = getPosAndBoundsFromMouseEvent(mouseEvent)
 						this._lastMousePos = posAndBoundsFromMouseEvent
 						this._dayUnderMouse = getDateFromMousePos(
 							posAndBoundsFromMouseEvent,
-							weeks.map(week => week.map(day => day.date)),
+							weeks.map((week) => week.map((day) => day.date)),
 						)
 
 						this._eventDragHandler.handleDrag(this._dayUnderMouse, posAndBoundsFromMouseEvent)
 					},
-					onmouseup: (mouseEvent: MouseEvent & {redraw?: boolean}) => {
+					onmouseup: (mouseEvent: MouseEvent & { redraw?: boolean }) => {
 						mouseEvent.redraw = false
 
 						this._endDrag()
 					},
-					onmouseleave: (mouseEvent: MouseEvent & {redraw?: boolean}) => {
+					onmouseleave: (mouseEvent: MouseEvent & { redraw?: boolean }) => {
 						mouseEvent.redraw = false
 
 						this._endDrag()
 					},
 				},
-				weeks.map(week => {
+				weeks.map((week) => {
 					return m(
 						".flex.flex-grow.rel",
 						{
@@ -221,11 +225,11 @@ export class CalendarMonthView implements Component<CalendarMonthAttrs>, ClassCo
 	}
 
 	_renderDay(attrs: CalendarMonthAttrs, day: CalendarDay, today: Date, weekDayNumber: number): Children {
-		const {selectedDate} = attrs
+		const { selectedDate } = attrs
 		const isSelectedDate = isSameDay(selectedDate, day.date)
 		return m(
 			".calendar-day.calendar-column-border.flex-grow.rel.overflow-hidden.fill-absolute.cursor-pointer" +
-			(day.paddingDay ? ".calendar-alternate-background" : ""),
+				(day.paddingDay ? ".calendar-alternate-background" : ""),
 			{
 				key: day.date.getTime(),
 				onclick: (e: MouseEvent) => {
@@ -262,10 +266,7 @@ export class CalendarMonthView implements Component<CalendarMonthAttrs>, ClassCo
 		)
 	}
 
-	_renderDayHeader({
-						 date,
-						 day
-					 }: CalendarDay, today: Date, onDateSelected: (date: Date, calendarViewTypeToShow: CalendarViewType) => unknown): Children {
+	_renderDayHeader({ date, day }: CalendarDay, today: Date, onDateSelected: (date: Date, calendarViewTypeToShow: CalendarViewType) => unknown): Children {
 		return m(".flex-center", [
 			m(
 				".calendar-day-indicator.circle" + getDateIndicator(date, today),
@@ -284,7 +285,7 @@ export class CalendarMonthView implements Component<CalendarMonthAttrs>, ClassCo
 	}
 
 	_renderWeekEvents(attrs: CalendarMonthAttrs, week: Array<CalendarDay>, zone: string): Children {
-		const eventsOnDays = attrs.getEventsOnDays(week.map(day => day.date))
+		const eventsOnDays = attrs.getEventsOnDays(week.map((day) => day.date))
 		const events = new Set(eventsOnDays.longEvents.concat(flat(eventsOnDays.shortEvents)))
 		const firstDayOfWeek = week[0].date
 		const lastDayOfWeek = lastThrow(week)
@@ -304,10 +305,10 @@ export class CalendarMonthView implements Component<CalendarMonthAttrs>, ClassCo
 		return layOutEvents(
 			Array.from(events),
 			zone,
-			columns => {
+			(columns) => {
 				return columns
 					.map((events, columnIndex) => {
-						return events.map(event => {
+						return events.map((event) => {
 							if (columnIndex < eventsPerDay) {
 								const eventIsAllDay = isAllDayEventByTimes(event.startTime, event.endTime)
 								const eventStart = eventIsAllDay ? getAllDayDateForTimezone(event.startTime, zone) : event.startTime
@@ -346,7 +347,7 @@ export class CalendarMonthView implements Component<CalendarMonthAttrs>, ClassCo
 									".abs.small" + (isPadding ? ".calendar-bubble-more-padding-day" : ""),
 									{
 										style: {
-											bottom: px(-EVENT_BUBBLE_VERTICAL_OFFSET),
+											bottom: 0,
 											height: px(CALENDAR_EVENT_HEIGHT),
 											left: px(weekday * dayWidth + eventMargin),
 											width: px(dayWidth - 2 - eventMargin * 2),
@@ -369,7 +370,7 @@ export class CalendarMonthView implements Component<CalendarMonthAttrs>, ClassCo
 						}),
 					)
 			},
-			true,
+			EventLayoutMode.DayBasedColumn,
 		)
 	}
 

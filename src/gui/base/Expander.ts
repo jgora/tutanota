@@ -1,15 +1,15 @@
-import m, {Children, Component, Vnode} from "mithril"
-import type {TranslationKey} from "../../misc/LanguageViewModel"
-import {lang} from "../../misc/LanguageViewModel"
-import {addFlash, removeFlash} from "./Flash"
-import {Icon} from "./Icon"
-import {Icons} from "./icons/Icons"
-import {BootIcons} from "./icons/BootIcons"
-import {theme} from "../theme"
-import {px} from "../size"
-import {DefaultAnimationTime} from "../animation/Animations"
-import type {lazy} from "@tutao/tutanota-utils"
-import {assertNotNull} from "@tutao/tutanota-utils"
+import m, { Children, Component, Vnode } from "mithril"
+import type { TranslationKey } from "../../misc/LanguageViewModel"
+import { lang } from "../../misc/LanguageViewModel"
+import { addFlash, removeFlash } from "./Flash"
+import { Icon } from "./Icon"
+import { Icons } from "./icons/Icons"
+import { BootIcons } from "./icons/BootIcons"
+import { theme } from "../theme"
+import { px } from "../size"
+import { DefaultAnimationTime } from "../animation/Animations"
+import type { lazy } from "@tutao/tutanota-utils"
+import { assertNotNull } from "@tutao/tutanota-utils"
 
 export type ExpanderAttrs = {
 	label: TranslationKey | lazy<string>
@@ -23,11 +23,10 @@ export type ExpanderPanelAttrs = {
 	expanded: boolean
 }
 
-export class ExpanderButtonN implements Component<ExpanderAttrs> {
+export class ExpanderButton implements Component<ExpanderAttrs> {
 	view(vnode: Vnode<ExpanderAttrs>): Children {
 		const a = vnode.attrs
-		return m(".flex.limit-width", [
-			// .limit-width does not work without .flex in IE11
+		return m(".limit-width", [
 			m(
 				"button.expander.bg-transparent.pt-s.hover-ul.limit-width.flex.items-center",
 				{
@@ -36,18 +35,18 @@ export class ExpanderButtonN implements Component<ExpanderAttrs> {
 						a.onExpandedChange(!a.expanded)
 						event.stopPropagation()
 					},
-					oncreate: vnode => addFlash(vnode.dom),
-					onremove: vnode => removeFlash(vnode.dom),
+					oncreate: (vnode) => addFlash(vnode.dom),
+					onremove: (vnode) => removeFlash(vnode.dom),
 					"aria-expanded": String(a.expanded),
 				},
 				[
 					a.showWarning
 						? m(Icon, {
-							icon: Icons.Warning,
-							style: {
-								fill: a.color ? a.color : theme.content_button,
-							},
-						})
+								icon: Icons.Warning,
+								style: {
+									fill: a.color ? a.color : theme.content_button,
+								},
+						  })
 						: null,
 					m(
 						"small.b.text-ellipsis",
@@ -78,10 +77,11 @@ export class ExpanderButtonN implements Component<ExpanderAttrs> {
 /**
  * Panel which shows or hides content depending on the attrs.expanded and animates transitions.
  */
-export class ExpanderPanelN implements Component<ExpanderPanelAttrs> {
+export class ExpanderPanel implements Component<ExpanderPanelAttrs> {
 	childDiv: HTMLElement | null = null
 	// There are some cases where the child div will be added to and a redraw won't be triggered, in which case
-	// the expander panel wont update until some kind of interaction happens
+	// the expander panel won't update until some kind of interaction happens.
+	// Unfortunately no one knows what these cases are anymore besides some direct mutation.
 	observer: MutationObserver | null = null
 	// We calculate the height manually because we need concrete values for the transition (can't just transition from 0px to 100%)
 	lastCalculatedHeight: number | null = null
@@ -92,9 +92,9 @@ export class ExpanderPanelN implements Component<ExpanderPanelAttrs> {
 
 	oninit(vnode: Vnode<ExpanderPanelAttrs>) {
 		this.childrenInDom = vnode.attrs.expanded
-		this.observer = new MutationObserver(mutations => {
-			// redraw if a child has been added that wont be getting displayed
-			if (this.childDiv && this.childDiv.offsetHeight !== this.lastCalculatedHeight) {
+		this.observer = new MutationObserver((mutations) => {
+			// redraw if a child has been added that won't be getting displayed
+			if (this.childDiv && this.childDiv.getBoundingClientRect().height !== this.lastCalculatedHeight) {
 				m.redraw()
 			}
 		})
@@ -105,7 +105,7 @@ export class ExpanderPanelN implements Component<ExpanderPanelAttrs> {
 		const currentExpanded = vnode.attrs.expanded
 
 		if (oldExpanded !== currentExpanded) {
-			this._handleExpansionStateChanged(currentExpanded)
+			this.handleExpansionStateChanged(currentExpanded)
 		}
 
 		return true
@@ -113,13 +113,14 @@ export class ExpanderPanelN implements Component<ExpanderPanelAttrs> {
 
 	view(vnode: Vnode<ExpanderPanelAttrs>): Children {
 		const expanded = vnode.attrs.expanded
-		this.lastCalculatedHeight = this.childDiv?.offsetHeight ?? 0
-		// The expander panel children are wrapped in an extra div so that we can calculate the height properly,
-		// since offsetHeight doesn't include borders or margins
+		// getBoundingClientRect() gives us the correct size, with a fraction
+		this.lastCalculatedHeight = this.childDiv?.getBoundingClientRect().height ?? 0
 		return m(
-			".expander-panel.overflow-hidden",
+			".expander-panel",
+			// We want overflow while expanded in some specific cases like dropdowns, but generally we don't want it because we want to clip our children
+			// for animation and sizing, so we enable it only when expanded
 			m(
-				"div",
+				expanded ? "div" : ".overflow-hidden",
 				{
 					style: {
 						opacity: expanded ? "1" : "0",
@@ -127,10 +128,24 @@ export class ExpanderPanelN implements Component<ExpanderPanelAttrs> {
 						transition: `opacity ${DefaultAnimationTime}ms ease-out, height ${DefaultAnimationTime}ms ease-out`,
 					},
 				},
+				// we use this wrapper to measure the child reliably
+				// just a marker class
 				m(
 					".expander-child-wrapper",
 					{
-						oncreate: vnode => {
+						style: {
+							// one way to deal with collapsible margins.
+							// CSS is fun in the way that it likes to collapse some vertical margins in some cases.
+							// https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_Box_Model/Mastering_margin_collapsing
+							// One of such cases is when there's no content between the parent and the child and no margins or borders.
+							// So assuming that the child we want to display inside has a margin-top set it would actually overflow our child-wrapper on the
+							// top. Which means all our sizing is wrong.
+							// There are few ways to prevent this, one of them is `display: flow-root`. It should have no side effects except for some
+							// `display: float` items but if you are using `float` still you have no one to blame but yourself.
+							// we could set `overflow: hidden` here instead but we do measure this element so we probably shouldn't
+							display: "flow-root",
+						},
+						oncreate: (vnode) => {
 							this.childDiv = vnode.dom as HTMLElement
 							assertNotNull(this.observer).observe(this.childDiv, {
 								childList: true,
@@ -147,13 +162,16 @@ export class ExpanderPanelN implements Component<ExpanderPanelAttrs> {
 		)
 	}
 
-	_handleExpansionStateChanged(expanded: boolean) {
+	private handleExpansionStateChanged(expanded: boolean) {
 		clearTimeout(this.setChildrenInDomTimeout)
 
 		if (expanded) {
 			this.childrenInDom = true
 		} else {
-			this.setChildrenInDomTimeout = setTimeout(() => (this.childrenInDom = false), DefaultAnimationTime)
+			this.setChildrenInDomTimeout = setTimeout(() => {
+				this.childrenInDom = false
+				m.redraw()
+			}, DefaultAnimationTime)
 		}
 	}
 }

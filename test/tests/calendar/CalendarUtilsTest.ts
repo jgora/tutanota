@@ -1,33 +1,82 @@
 import o from "ospec"
-import type {AlarmOccurrence, CalendarMonth} from "../../../src/calendar/date/CalendarUtils.js"
+import type { AlarmOccurrence, CalendarMonth } from "../../../src/calendar/date/CalendarUtils.js"
 import {
+	CalendarEventValidity,
+	checkEventValidity,
 	eventEndsBefore,
 	eventStartsAfter,
 	findNextAlarmOccurrence,
+	getAllDayDateForTimezone,
+	getAllDayDateUTCFromZone,
 	getCalendarMonth,
 	getDiffInDays,
 	getDiffInHours,
+	getStartOfDayWithZone,
 	getStartOfWeek,
 	getTimeZone,
 	getWeekNumber,
 	isEventBetweenDays,
 	prepareCalendarDescription,
 } from "../../../src/calendar/date/CalendarUtils.js"
-import {lang} from "../../../src/misc/LanguageViewModel.js"
-import {createGroupMembership} from "../../../src/api/entities/sys/TypeRefs.js"
-import {createGroup} from "../../../src/api/entities/sys/TypeRefs.js"
-import {createUser} from "../../../src/api/entities/sys/TypeRefs.js"
-import {AlarmInterval, EndType, GroupType, RepeatPeriod, ShareCapability,} from "../../../src/api/common/TutanotaConstants.js"
-import {timeStringFromParts} from "../../../src/misc/Formatter.js"
-import {DateTime} from "luxon"
-import {getAllDayDateUTC} from "../../../src/api/common/utils/CommonCalendarUtils.js"
-import {hasCapabilityOnGroup} from "../../../src/sharing/GroupUtils.js"
-import {parseTime} from "../../../src/misc/parsing/TimeParser.js"
-import type {CalendarEvent} from "../../../src/api/entities/tutanota/TypeRefs.js"
-import {createCalendarEvent} from "../../../src/api/entities/tutanota/TypeRefs.js"
-import {neverNull} from "@tutao/tutanota-utils";
+import { lang } from "../../../src/misc/LanguageViewModel.js"
+import { createGroup, createGroupMembership, createUser } from "../../../src/api/entities/sys/TypeRefs.js"
+import { AlarmInterval, EndType, GroupType, RepeatPeriod, ShareCapability } from "../../../src/api/common/TutanotaConstants.js"
+import { timeStringFromParts } from "../../../src/misc/Formatter.js"
+import { DateTime } from "luxon"
+import { getAllDayDateUTC } from "../../../src/api/common/utils/CommonCalendarUtils.js"
+import { hasCapabilityOnGroup } from "../../../src/sharing/GroupUtils.js"
+import { parseTime } from "../../../src/misc/parsing/TimeParser.js"
+import type { CalendarEvent } from "../../../src/api/entities/tutanota/TypeRefs.js"
+import { createCalendarEvent } from "../../../src/api/entities/tutanota/TypeRefs.js"
+import { lastThrow, neverNull } from "@tutao/tutanota-utils"
 
 o.spec("calendar utils tests", function () {
+	function iso(strings: TemplateStringsArray, ...dates: number[]) {
+		let result = ""
+
+		dates.forEach((d, i) => {
+			const s = strings[i]
+			result += s
+			result += `(${d}) ${DateTime.fromMillis(d).toISO({ format: "extended", includeOffset: true })}`
+		})
+		result += lastThrow(strings)
+		return result
+	}
+
+	o.spec("getAllDayDateUTCFromZone", function () {
+		o("it produces a date with the same day in UTC", function () {
+			// DateTime.fromObject({year: 2023, month: 1, day: 30}, {zone: "Asia/Krasnoyarsk"}).toMillis()
+			const date = new Date(1675011600000)
+			// DateTime.fromObject({year: 2023, month: 1, day: 30}, {zone:"UTC"}).toMillis()
+			const expected = 1675036800000
+			const result = getAllDayDateUTCFromZone(date, "Asia/Krasnoyarsk").getTime()
+			o(result).equals(expected)(iso`${result} vs. ${expected}`)
+		})
+	})
+
+	o.spec("getStartOfDayWithZone", function () {
+		//FIXME
+		o("it produces a date at the start of the day according to the time zone", function () {
+			// DateTime.fromObject({year: 2023, month: 1, day: 30, hour: 5, minute: 30}, {zone: "Asia/Krasnoyarsk"}).toMillis()
+			const date = new Date(1675031400000)
+			// DateTime.fromObject({year: 2023, month: 1, day: 30}, {zone: "Asia/Krasnoyarsk"}).toMillis()
+			const expected = 1675011600000
+			const result = getStartOfDayWithZone(date, "Asia/Krasnoyarsk")
+			o(result.getTime()).equals(expected)(iso`${result.getTime()} vs ${expected}`)
+		})
+	})
+
+	o.spec("getAllDayDateForTimezone", function () {
+		o("converts UTC all-day date into a local one", function () {
+			// DateTime.fromObject({year: 2023, month: 1, day: 30}, {zone: "UTC"}).toMillis()
+			const date = new Date(1675036800000)
+			// DateTime.fromObject({year: 2023, month: 1, day: 30}, {zone: "Asia/Krasnoyarsk"}).toMillis()
+			const expected = 1675011600000
+			const result = getAllDayDateForTimezone(date, "Asia/Krasnoyarsk")
+			o(result.getTime()).equals(expected)(iso`${result.getTime()} vs ${expected}`)
+		})
+	})
+
 	o.spec("getCalendarMonth", function () {
 		o.before(function () {
 			lang.init({})
@@ -41,12 +90,12 @@ o.spec("calendar utils tests", function () {
 			//console.log(result)
 			o(result).equals(
 				"Sun,Mon,Tue,Wed,Thu,Fri,Sat\n" +
-				"26,27,28,29,30,31,1\n" +
-				"2,3,4,5,6,7,8\n" +
-				"9,10,11,12,13,14,15\n" +
-				"16,17,18,19,20,21,22\n" +
-				"23,24,25,26,27,28,29\n" +
-				"30,1,2,3,4,5,6",
+					"26,27,28,29,30,31,1\n" +
+					"2,3,4,5,6,7,8\n" +
+					"9,10,11,12,13,14,15\n" +
+					"16,17,18,19,20,21,22\n" +
+					"23,24,25,26,27,28,29\n" +
+					"30,1,2,3,4,5,6",
 			)
 		})
 		o("getCalendarMonth starting on monday - first day saturday", function () {
@@ -54,12 +103,12 @@ o.spec("calendar utils tests", function () {
 			//console.log(result)
 			o(result).equals(
 				"Mon,Tue,Wed,Thu,Fri,Sat,Sun\n" +
-				"27,28,29,30,31,1,2\n" +
-				"3,4,5,6,7,8,9\n" +
-				"10,11,12,13,14,15,16\n" +
-				"17,18,19,20,21,22,23\n" +
-				"24,25,26,27,28,29,30\n" +
-				"1,2,3,4,5,6,7",
+					"27,28,29,30,31,1,2\n" +
+					"3,4,5,6,7,8,9\n" +
+					"10,11,12,13,14,15,16\n" +
+					"17,18,19,20,21,22,23\n" +
+					"24,25,26,27,28,29,30\n" +
+					"1,2,3,4,5,6,7",
 			)
 		})
 		o("getCalendarMonth starting on saturday - first day saturday", function () {
@@ -67,12 +116,12 @@ o.spec("calendar utils tests", function () {
 			//console.log(result)
 			o(result).equals(
 				"Sat,Sun,Mon,Tue,Wed,Thu,Fri\n" +
-				"1,2,3,4,5,6,7\n" +
-				"8,9,10,11,12,13,14\n" +
-				"15,16,17,18,19,20,21\n" +
-				"22,23,24,25,26,27,28\n" +
-				"29,30,1,2,3,4,5\n" +
-				"6,7,8,9,10,11,12",
+					"1,2,3,4,5,6,7\n" +
+					"8,9,10,11,12,13,14\n" +
+					"15,16,17,18,19,20,21\n" +
+					"22,23,24,25,26,27,28\n" +
+					"29,30,1,2,3,4,5\n" +
+					"6,7,8,9,10,11,12",
 			)
 		})
 		o("getCalendarMonth starting on sunday - first day sunday", function () {
@@ -81,12 +130,12 @@ o.spec("calendar utils tests", function () {
 			//console.log(result)
 			o(result).equals(
 				"Sun,Mon,Tue,Wed,Thu,Fri,Sat\n" +
-				"1,2,3,4,5,6,7\n" +
-				"8,9,10,11,12,13,14\n" +
-				"15,16,17,18,19,20,21\n" +
-				"22,23,24,25,26,27,28\n" +
-				"29,30,1,2,3,4,5\n" +
-				"6,7,8,9,10,11,12",
+					"1,2,3,4,5,6,7\n" +
+					"8,9,10,11,12,13,14\n" +
+					"15,16,17,18,19,20,21\n" +
+					"22,23,24,25,26,27,28\n" +
+					"29,30,1,2,3,4,5\n" +
+					"6,7,8,9,10,11,12",
 			)
 		})
 		o("getCalendarMonth starting on monday - first day sunday", function () {
@@ -94,12 +143,12 @@ o.spec("calendar utils tests", function () {
 			//console.log(result)
 			o(result).equals(
 				"Mon,Tue,Wed,Thu,Fri,Sat,Sun\n" +
-				"26,27,28,29,30,31,1\n" +
-				"2,3,4,5,6,7,8\n" +
-				"9,10,11,12,13,14,15\n" +
-				"16,17,18,19,20,21,22\n" +
-				"23,24,25,26,27,28,29\n" +
-				"30,1,2,3,4,5,6",
+					"26,27,28,29,30,31,1\n" +
+					"2,3,4,5,6,7,8\n" +
+					"9,10,11,12,13,14,15\n" +
+					"16,17,18,19,20,21,22\n" +
+					"23,24,25,26,27,28,29\n" +
+					"30,1,2,3,4,5,6",
 			)
 		})
 		o("getCalendarMonth starting on saturday - first day sunday", function () {
@@ -107,12 +156,12 @@ o.spec("calendar utils tests", function () {
 			//console.log(result)
 			o(result).equals(
 				"Sat,Sun,Mon,Tue,Wed,Thu,Fri\n" +
-				"31,1,2,3,4,5,6\n" +
-				"7,8,9,10,11,12,13\n" +
-				"14,15,16,17,18,19,20\n" +
-				"21,22,23,24,25,26,27\n" +
-				"28,29,30,1,2,3,4\n" +
-				"5,6,7,8,9,10,11",
+					"31,1,2,3,4,5,6\n" +
+					"7,8,9,10,11,12,13\n" +
+					"14,15,16,17,18,19,20\n" +
+					"21,22,23,24,25,26,27\n" +
+					"28,29,30,1,2,3,4\n" +
+					"5,6,7,8,9,10,11",
 			)
 		})
 		o("getCalendarMonth starting on sunday - first day monday", function () {
@@ -121,12 +170,12 @@ o.spec("calendar utils tests", function () {
 			//console.log(result)
 			o(result).equals(
 				"Sun,Mon,Tue,Wed,Thu,Fri,Sat\n" +
-				"30,1,2,3,4,5,6\n" +
-				"7,8,9,10,11,12,13\n" +
-				"14,15,16,17,18,19,20\n" +
-				"21,22,23,24,25,26,27\n" +
-				"28,29,30,31,1,2,3\n" +
-				"4,5,6,7,8,9,10",
+					"30,1,2,3,4,5,6\n" +
+					"7,8,9,10,11,12,13\n" +
+					"14,15,16,17,18,19,20\n" +
+					"21,22,23,24,25,26,27\n" +
+					"28,29,30,31,1,2,3\n" +
+					"4,5,6,7,8,9,10",
 			)
 		})
 		o("getCalendarMonth starting on monday - first day monday", function () {
@@ -134,12 +183,12 @@ o.spec("calendar utils tests", function () {
 			//console.log(result)
 			o(result).equals(
 				"Mon,Tue,Wed,Thu,Fri,Sat,Sun\n" +
-				"1,2,3,4,5,6,7\n" +
-				"8,9,10,11,12,13,14\n" +
-				"15,16,17,18,19,20,21\n" +
-				"22,23,24,25,26,27,28\n" +
-				"29,30,31,1,2,3,4\n" +
-				"5,6,7,8,9,10,11",
+					"1,2,3,4,5,6,7\n" +
+					"8,9,10,11,12,13,14\n" +
+					"15,16,17,18,19,20,21\n" +
+					"22,23,24,25,26,27,28\n" +
+					"29,30,31,1,2,3,4\n" +
+					"5,6,7,8,9,10,11",
 			)
 		})
 		o("getCalendarMonth starting on saturday - first day monday", function () {
@@ -147,17 +196,17 @@ o.spec("calendar utils tests", function () {
 			//console.log(result)
 			o(result).equals(
 				"Sat,Sun,Mon,Tue,Wed,Thu,Fri\n" +
-				"29,30,1,2,3,4,5\n" +
-				"6,7,8,9,10,11,12\n" +
-				"13,14,15,16,17,18,19\n" +
-				"20,21,22,23,24,25,26\n" +
-				"27,28,29,30,31,1,2\n" +
-				"3,4,5,6,7,8,9",
+					"29,30,1,2,3,4,5\n" +
+					"6,7,8,9,10,11,12\n" +
+					"13,14,15,16,17,18,19\n" +
+					"20,21,22,23,24,25,26\n" +
+					"27,28,29,30,31,1,2\n" +
+					"3,4,5,6,7,8,9",
 			)
 		})
 	})
 	o.spec("parseTimeTo", function () {
-		function parseTimeString(timeString: string): { hours: number, minutes: number } {
+		function parseTimeString(timeString: string): { hours: number; minutes: number } {
 			return neverNull(parseTime(timeString)?.toObject() ?? null)
 		}
 
@@ -419,9 +468,7 @@ o.spec("calendar utils tests", function () {
 			)
 		})
 		o("non-HTTP/HTTPS link is not allowed", function () {
-			o(prepareCalendarDescription(`JoinBlahBlah<protocol://the-link.com/path>`)).equals(
-				`JoinBlahBlah<protocol://the-link.com/path>`,
-			)
+			o(prepareCalendarDescription(`JoinBlahBlah<protocol://the-link.com/path>`)).equals(`JoinBlahBlah<protocol://the-link.com/path>`)
 		})
 		o("link with additional text is not allowed", function () {
 			o(prepareCalendarDescription("JoinBlahBlah<https://the-link.com/path and some other text>")).equals(
@@ -437,26 +484,32 @@ o.spec("calendar utils tests", function () {
 	o.spec("findNextAlarmOccurrence", function () {
 		const timeZone = "Europe/Berlin"
 		o("weekly never ends", function () {
-			const now = DateTime.fromObject({
-				year: 2019,
-				month: 5,
-				day: 2,
-				zone: timeZone,
-			}).toJSDate()
-			const eventStart = DateTime.fromObject({
-				year: 2019,
-				month: 5,
-				day: 2,
-				hour: 12,
-				zone: timeZone,
-			}).toJSDate()
-			const eventEnd = DateTime.fromObject({
-				year: 2019,
-				month: 5,
-				day: 2,
-				hour: 14,
-				zone: timeZone,
-			}).toJSDate()
+			const now = DateTime.fromObject(
+				{
+					year: 2019,
+					month: 5,
+					day: 2,
+				},
+				{ zone: timeZone },
+			).toJSDate()
+			const eventStart = DateTime.fromObject(
+				{
+					year: 2019,
+					month: 5,
+					day: 2,
+					hour: 12,
+				},
+				{ zone: timeZone },
+			).toJSDate()
+			const eventEnd = DateTime.fromObject(
+				{
+					year: 2019,
+					month: 5,
+					day: 2,
+					hour: 14,
+				},
+				{ zone: timeZone },
+			).toJSDate()
 			const occurrences = iterateAlarmOccurrences(
 				now,
 				timeZone,
@@ -471,45 +524,55 @@ o.spec("calendar utils tests", function () {
 				10,
 			)
 			o(occurrences.slice(0, 4)).deepEquals([
-				DateTime.fromObject({
-					year: 2019,
-					month: 5,
-					day: 2,
-					hour: 11,
-					zone: timeZone,
-				}).toJSDate(),
-				DateTime.fromObject({
-					year: 2019,
-					month: 5,
-					day: 9,
-					hour: 11,
-					zone: timeZone,
-				}).toJSDate(),
-				DateTime.fromObject({
-					year: 2019,
-					month: 5,
-					day: 16,
-					hour: 11,
-					zone: timeZone,
-				}).toJSDate(),
-				DateTime.fromObject({
-					year: 2019,
-					month: 5,
-					day: 23,
-					hour: 11,
-					zone: timeZone,
-				}).toJSDate(),
+				DateTime.fromObject(
+					{
+						year: 2019,
+						month: 5,
+						day: 2,
+						hour: 11,
+					},
+					{ zone: timeZone },
+				).toJSDate(),
+				DateTime.fromObject(
+					{
+						year: 2019,
+						month: 5,
+						day: 9,
+						hour: 11,
+					},
+					{ zone: timeZone },
+				).toJSDate(),
+				DateTime.fromObject(
+					{
+						year: 2019,
+						month: 5,
+						day: 16,
+						hour: 11,
+					},
+					{ zone: timeZone },
+				).toJSDate(),
+				DateTime.fromObject(
+					{
+						year: 2019,
+						month: 5,
+						day: 23,
+						hour: 11,
+					},
+					{ zone: timeZone },
+				).toJSDate(),
 			])
 		})
 		o("ends for all-day event correctly", function () {
 			const repeatRuleTimeZone = "Asia/Anadyr" // +12
 
-			const now = DateTime.fromObject({
-				year: 2019,
-				month: 5,
-				day: 1,
-				zone: timeZone,
-			}).toJSDate()
+			const now = DateTime.fromObject(
+				{
+					year: 2019,
+					month: 5,
+					day: 1,
+				},
+				{ zone: timeZone },
+			).toJSDate()
 			// UTC date just encodes the date, whatever you pass to it. You just have to extract consistently
 			const eventStart = getAllDayDateUTC(
 				DateTime.fromObject({
@@ -546,20 +609,24 @@ o.spec("calendar utils tests", function () {
 				10,
 			)
 			o(occurrences).deepEquals([
-				DateTime.fromObject({
-					year: 2019,
-					month: 5,
-					day: 1,
-					hour: 0,
-					zone: timeZone,
-				}).toJSDate(),
-				DateTime.fromObject({
-					year: 2019,
-					month: 5,
-					day: 2,
-					hour: 0,
-					zone: timeZone,
-				}).toJSDate(),
+				DateTime.fromObject(
+					{
+						year: 2019,
+						month: 5,
+						day: 1,
+						hour: 0,
+					},
+					{ zone: timeZone },
+				).toJSDate(),
+				DateTime.fromObject(
+					{
+						year: 2019,
+						month: 5,
+						day: 2,
+						hour: 0,
+					},
+					{ zone: timeZone },
+				).toJSDate(),
 			])
 		})
 	})
@@ -588,118 +655,144 @@ o.spec("calendar utils tests", function () {
 		}
 
 		o("starts after", function () {
-			o(eventStartsAfter(new Date(2021, 0, 1), zone, eventOn(new Date(2021, 0, 1), new Date(2021, 0, 1)))).equals(
-				false,
-			)(`starts same day`)
-			o(
-				eventStartsAfter(new Date(2021, 0, 1), zone, eventOn(new Date(2020, 11, 31), new Date(2021, 0, 1))),
-			).equals(false)(`starts before`)
-			o(eventStartsAfter(new Date(2021, 0, 1), zone, eventOn(new Date(2021, 0, 2), new Date(2021, 0, 2)))).equals(
-				true,
-			)(`starts after`)
+			o(eventStartsAfter(new Date(2021, 0, 1), zone, eventOn(new Date(2021, 0, 1), new Date(2021, 0, 1)))).equals(false)(`starts same day`)
+			o(eventStartsAfter(new Date(2021, 0, 1), zone, eventOn(new Date(2020, 11, 31), new Date(2021, 0, 1)))).equals(false)(`starts before`)
+			o(eventStartsAfter(new Date(2021, 0, 1), zone, eventOn(new Date(2021, 0, 2), new Date(2021, 0, 2)))).equals(true)(`starts after`)
 		})
 		o("ends before", function () {
-			o(
-				eventEndsBefore(new Date(2021, 0, 1), zone, eventOn(new Date(2020, 11, 31), new Date(2021, 0, 1))),
-			).equals(false)(`ends same day`)
-			o(
-				eventEndsBefore(new Date(2021, 0, 1), zone, eventOn(new Date(2020, 11, 31), new Date(2021, 0, 2))),
-			).equals(false)(`ends after`)
-			o(
-				eventEndsBefore(new Date(2021, 0, 1), zone, eventOn(new Date(2020, 11, 30), new Date(2020, 11, 31))),
-			).equals(true)(`ends before`)
+			o(eventEndsBefore(new Date(2021, 0, 1), zone, eventOn(new Date(2020, 11, 31), new Date(2021, 0, 1)))).equals(false)(`ends same day`)
+			o(eventEndsBefore(new Date(2021, 0, 1), zone, eventOn(new Date(2020, 11, 31), new Date(2021, 0, 2)))).equals(false)(`ends after`)
+			o(eventEndsBefore(new Date(2021, 0, 1), zone, eventOn(new Date(2020, 11, 30), new Date(2020, 11, 31)))).equals(true)(`ends before`)
 		})
 		o("event is in week", function () {
 			const firstDayOfWeek = new Date(2021, 8, 6)
 			const lastDayOfWeek = new Date(2021, 8, 12)
+			o(isEventBetweenDays(eventOn(new Date(2021, 8, 5, 13, 30), new Date(2021, 8, 6, 13, 30)), firstDayOfWeek, lastDayOfWeek, zone)).equals(true)(
+				`starts before, ends first day`,
+			)
+			o(isEventBetweenDays(eventOn(new Date(2021, 8, 5, 13, 30), new Date(2021, 8, 12, 13, 30)), firstDayOfWeek, lastDayOfWeek, zone)).equals(true)(
+				`starts before, ends last day`,
+			)
+			o(isEventBetweenDays(eventOn(new Date(2021, 8, 6, 13, 30), new Date(2021, 8, 6, 13, 30)), firstDayOfWeek, lastDayOfWeek, zone)).equals(true)(
+				`starts first day, ends first day`,
+			)
+			o(isEventBetweenDays(eventOn(new Date(2021, 8, 6, 13, 30), new Date(2021, 8, 12, 13, 30)), firstDayOfWeek, lastDayOfWeek, zone)).equals(true)(
+				`starts first day, ends last day`,
+			)
+			o(isEventBetweenDays(eventOn(new Date(2021, 8, 6, 13, 30), new Date(2021, 8, 13, 13, 30)), firstDayOfWeek, lastDayOfWeek, zone)).equals(true)(
+				`starts first day, ends after`,
+			)
+			o(isEventBetweenDays(eventOn(new Date(2021, 8, 12, 13, 30), new Date(2021, 8, 12, 13, 30)), firstDayOfWeek, lastDayOfWeek, zone)).equals(true)(
+				`starts last day, ends last day`,
+			)
+			o(isEventBetweenDays(eventOn(new Date(2021, 8, 12, 13, 30), new Date(2021, 8, 13, 13, 30)), firstDayOfWeek, lastDayOfWeek, zone)).equals(true)(
+				`starts last day, ends after`,
+			)
+			o(isEventBetweenDays(eventOn(new Date(2021, 8, 5, 13, 30), new Date(2021, 8, 13, 13, 30)), firstDayOfWeek, lastDayOfWeek, zone)).equals(true)(
+				`starts before, ends after`,
+			)
+			o(isEventBetweenDays(eventOn(new Date(2021, 8, 5, 13, 30), new Date(2021, 8, 5, 13, 30)), firstDayOfWeek, lastDayOfWeek, zone)).equals(false)(
+				`starts before, ends before`,
+			)
+			o(isEventBetweenDays(eventOn(new Date(2021, 8, 13, 13, 30), new Date(2021, 8, 13, 13, 30)), firstDayOfWeek, lastDayOfWeek, zone)).equals(false)(
+				`starts after, ends after`,
+			) // Cases not mentioned are UB
+		})
+	})
+	o.spec("check event validity", function () {
+		o("events with invalid dates are detected", function () {
 			o(
-				isEventBetweenDays(
-					eventOn(new Date(2021, 8, 5, 13, 30), new Date(2021, 8, 6, 13, 30)),
-					firstDayOfWeek,
-					lastDayOfWeek,
-					zone,
+				checkEventValidity(
+					createCalendarEvent({
+						startTime: new Date("nan"),
+						endTime: new Date("1990"),
+					}),
 				),
-			).equals(true)(`starts before, ends first day`)
+			).equals(CalendarEventValidity.InvalidContainsInvalidDate)
 			o(
-				isEventBetweenDays(
-					eventOn(new Date(2021, 8, 5, 13, 30), new Date(2021, 8, 12, 13, 30)),
-					firstDayOfWeek,
-					lastDayOfWeek,
-					zone,
+				checkEventValidity(
+					createCalendarEvent({
+						startTime: new Date("1991"),
+						endTime: new Date("nan"),
+					}),
 				),
-			).equals(true)(`starts before, ends last day`)
+			).equals(CalendarEventValidity.InvalidContainsInvalidDate)
 			o(
-				isEventBetweenDays(
-					eventOn(new Date(2021, 8, 6, 13, 30), new Date(2021, 8, 6, 13, 30)),
-					firstDayOfWeek,
-					lastDayOfWeek,
-					zone,
+				checkEventValidity(
+					createCalendarEvent({
+						startTime: new Date("nan"),
+						endTime: new Date("nan"),
+					}),
 				),
-			).equals(true)(`starts first day, ends first day`)
+			).equals(CalendarEventValidity.InvalidContainsInvalidDate)
+		})
+		o("events with start date not before end date are detected", function () {
 			o(
-				isEventBetweenDays(
-					eventOn(new Date(2021, 8, 6, 13, 30), new Date(2021, 8, 12, 13, 30)),
-					firstDayOfWeek,
-					lastDayOfWeek,
-					zone,
+				checkEventValidity(
+					createCalendarEvent({
+						startTime: new Date("1990"),
+						endTime: new Date("1990"),
+					}),
 				),
-			).equals(true)(`starts first day, ends last day`)
+			).equals(CalendarEventValidity.InvalidEndBeforeStart)
 			o(
-				isEventBetweenDays(
-					eventOn(new Date(2021, 8, 6, 13, 30), new Date(2021, 8, 13, 13, 30)),
-					firstDayOfWeek,
-					lastDayOfWeek,
-					zone,
+				checkEventValidity(
+					createCalendarEvent({
+						startTime: new Date("1990"),
+						endTime: new Date("1980"),
+					}),
 				),
-			).equals(true)(`starts first day, ends after`)
+			).equals(CalendarEventValidity.InvalidEndBeforeStart)
+		})
+		o("events with date before 1970 are detected", function () {
 			o(
-				isEventBetweenDays(
-					eventOn(new Date(2021, 8, 12, 13, 30), new Date(2021, 8, 12, 13, 30)),
-					firstDayOfWeek,
-					lastDayOfWeek,
-					zone,
+				checkEventValidity(
+					createCalendarEvent({
+						startTime: new Date("1969"),
+						endTime: new Date("1990"),
+					}),
 				),
-			).equals(true)(`starts last day, ends last day`)
+			).equals(CalendarEventValidity.InvalidPre1970)
 			o(
-				isEventBetweenDays(
-					eventOn(new Date(2021, 8, 12, 13, 30), new Date(2021, 8, 13, 13, 30)),
-					firstDayOfWeek,
-					lastDayOfWeek,
-					zone,
+				checkEventValidity(
+					createCalendarEvent({
+						startTime: new Date("1960"),
+						endTime: new Date("1966"),
+					}),
 				),
-			).equals(true)(`starts last day, ends after`)
+			).equals(CalendarEventValidity.InvalidPre1970)
 			o(
-				isEventBetweenDays(
-					eventOn(new Date(2021, 8, 5, 13, 30), new Date(2021, 8, 13, 13, 30)),
-					firstDayOfWeek,
-					lastDayOfWeek,
-					zone,
+				checkEventValidity(
+					createCalendarEvent({
+						startTime: new Date("1970"),
+						endTime: new Date("1966"),
+					}),
 				),
-			).equals(true)(`starts before, ends after`)
+			).equals(CalendarEventValidity.InvalidEndBeforeStart)
+		})
+		o("valid events are detected", function () {
 			o(
-				isEventBetweenDays(
-					eventOn(new Date(2021, 8, 5, 13, 30), new Date(2021, 8, 5, 13, 30)),
-					firstDayOfWeek,
-					lastDayOfWeek,
-					zone,
+				checkEventValidity(
+					createCalendarEvent({
+						startTime: new Date("1970"),
+						endTime: new Date("1990"),
+					}),
 				),
-			).equals(false)(`starts before, ends before`)
+			).equals(CalendarEventValidity.Valid)
 			o(
-				isEventBetweenDays(
-					eventOn(new Date(2021, 8, 13, 13, 30), new Date(2021, 8, 13, 13, 30)),
-					firstDayOfWeek,
-					lastDayOfWeek,
-					zone,
+				checkEventValidity(
+					createCalendarEvent({
+						startTime: new Date("1971"),
+						endTime: new Date("2022"),
+					}),
 				),
-			).equals(false)(`starts after, ends after`) // Cases not mentioned are UB
+			).equals(CalendarEventValidity.Valid)
 		})
 	})
 })
 
 function toCalendarString(calenderMonth: CalendarMonth) {
-	return (
-		calenderMonth.weekdays.join(",") + "\n" + calenderMonth.weeks.map(w => w.map(d => d.day).join(",")).join("\n")
-	)
+	return calenderMonth.weekdays.join(",") + "\n" + calenderMonth.weeks.map((w) => w.map((d) => d.day).join(",")).join("\n")
 }
 
 function iterateAlarmOccurrences(
@@ -718,18 +811,9 @@ function iterateAlarmOccurrences(
 	const occurrences: Date[] = []
 
 	while (occurrences.length < maxOccurrences) {
-		const next: AlarmOccurrence = neverNull(findNextAlarmOccurrence(
-			now,
-			timeZone,
-			eventStart,
-			eventEnd,
-			repeatPeriod,
-			interval,
-			endType,
-			endValue,
-			alarmInterval,
-			calculationZone,
-		))
+		const next: AlarmOccurrence = neverNull(
+			findNextAlarmOccurrence(now, timeZone, eventStart, eventEnd, repeatPeriod, interval, endType, endValue, alarmInterval, calculationZone),
+		)
 
 		if (next) {
 			occurrences.push(next.alarmTime)

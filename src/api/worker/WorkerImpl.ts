@@ -1,48 +1,57 @@
-import type {Commands} from "../common/MessageDispatcher"
-import {errorToObj, MessageDispatcher, Request, WorkerTransport} from "../common/MessageDispatcher"
-import {CryptoError} from "../common/error/CryptoError"
-import {BookingFacade} from "./facades/BookingFacade"
-import {NotAuthenticatedError} from "../common/error/RestError"
-import {ProgrammingError} from "../common/error/ProgrammingError"
-import {initLocator, locator, resetLocator} from "./WorkerLocator"
-import {assertWorkerOrNode, isMainOrNode} from "../common/Env"
-import type {ContactFormFacade} from "./facades/ContactFormFacade"
-import type {BrowserData} from "../../misc/ClientConstants"
-import type {InfoMessage} from "../common/CommonTypes"
-import {CryptoFacade} from "./crypto/CryptoFacade"
-import {delay} from "@tutao/tutanota-utils"
-import type {EntityUpdate, User, WebsocketCounterData, WebsocketLeaderStatus} from "../entities/sys/TypeRefs.js"
-import type {ProgressMonitorId} from "../common/utils/ProgressMonitor"
-import {urlify} from "./Urlifier"
-import type {GiftCardFacade} from "./facades/GiftCardFacade"
-import type {LoginFacade} from "./facades/LoginFacade"
-import type {CustomerFacade} from "./facades/CustomerFacade"
-import type {GroupManagementFacade} from "./facades/GroupManagementFacade"
-import {ConfigurationDatabase} from "./facades/ConfigurationDatabase"
-import {CalendarFacade} from "./facades/CalendarFacade"
-import {MailFacade} from "./facades/MailFacade"
-import {ShareFacade} from "./facades/ShareFacade"
-import {CounterFacade} from "./facades/CounterFacade"
-import {Indexer} from "./search/Indexer"
-import {SearchFacade} from "./search/SearchFacade"
-import {MailAddressFacade} from "./facades/MailAddressFacade"
-import {FileFacade} from "./facades/FileFacade.js"
-import {UserManagementFacade} from "./facades/UserManagementFacade"
-import {exposeLocal, exposeRemote} from "../common/WorkerProxy"
-import type {SearchIndexStateInfo} from "./search/SearchTypes"
-import type {DeviceEncryptionFacade} from "./facades/DeviceEncryptionFacade"
-import type {EntropySource} from "@tutao/tutanota-crypto"
-import {aes256RandomKey, keyToBase64, random} from "@tutao/tutanota-crypto"
-import type {NativeInterface} from "../../native/common/NativeInterface"
-import type {EntityRestInterface} from "./rest/EntityRestClient"
-import {WsConnectionState} from "../main/WorkerClient";
-import {RestClient} from "./rest/RestClient"
-import {IServiceExecutor} from "../common/ServiceRequest.js"
-import {BlobFacade} from "./facades/BlobFacade"
-import {ExposedCacheStorage} from "./rest/EntityRestCache.js"
-import {ILoginListener} from "../main/LoginListener"
+import type { Commands } from "../common/MessageDispatcher"
+import { errorToObj, MessageDispatcher, Request, WorkerTransport } from "../common/MessageDispatcher"
+import { CryptoError } from "../common/error/CryptoError"
+import { BookingFacade } from "./facades/lazy/BookingFacade.js"
+import { NotAuthenticatedError } from "../common/error/RestError"
+import { ProgrammingError } from "../common/error/ProgrammingError"
+import { initLocator, locator, resetLocator } from "./WorkerLocator"
+import { assertWorkerOrNode, isMainOrNode } from "../common/Env"
+import type { ContactFormFacade } from "./facades/lazy/ContactFormFacade.js"
+import type { BrowserData } from "../../misc/ClientConstants"
+import { CryptoFacade } from "./crypto/CryptoFacade"
+import type { GiftCardFacade } from "./facades/lazy/GiftCardFacade.js"
+import type { LoginFacade, LoginListener } from "./facades/LoginFacade"
+import type { CustomerFacade } from "./facades/lazy/CustomerFacade.js"
+import type { GroupManagementFacade } from "./facades/lazy/GroupManagementFacade.js"
+import { ConfigurationDatabase } from "./facades/lazy/ConfigurationDatabase.js"
+import { CalendarFacade } from "./facades/lazy/CalendarFacade.js"
+import { MailFacade } from "./facades/lazy/MailFacade.js"
+import { ShareFacade } from "./facades/lazy/ShareFacade.js"
+import { CounterFacade } from "./facades/lazy/CounterFacade.js"
+import type { Indexer } from "./search/Indexer"
+import { SearchFacade } from "./search/SearchFacade"
+import { MailAddressFacade } from "./facades/lazy/MailAddressFacade.js"
+import { FileFacade } from "./facades/lazy/FileFacade.js"
+import { UserManagementFacade } from "./facades/lazy/UserManagementFacade.js"
+import { DelayedImpls, exposeLocalDelayed, exposeRemote } from "../common/WorkerProxy"
+import type { DeviceEncryptionFacade } from "./facades/DeviceEncryptionFacade"
+import { random } from "@tutao/tutanota-crypto"
+import type { NativeInterface } from "../../native/common/NativeInterface"
+import type { EntityRestInterface } from "./rest/EntityRestClient"
+import { RestClient } from "./rest/RestClient"
+import { IServiceExecutor } from "../common/ServiceRequest.js"
+import { BlobFacade } from "./facades/lazy/BlobFacade.js"
+import { ExposedCacheStorage } from "./rest/DefaultEntityRestCache.js"
+import { BlobAccessTokenFacade } from "./facades/BlobAccessTokenFacade.js"
+import { WebsocketConnectivityListener } from "../../misc/WebsocketConnectivityModel.js"
+import { EventBusClient } from "./EventBusClient.js"
+import { EntropyFacade } from "./facades/EntropyFacade.js"
+import { ExposedProgressTracker } from "../main/ProgressTracker.js"
+import { ExposedEventController } from "../main/EventController.js"
+import { ExposedOperationProgressTracker } from "../main/OperationProgressTracker.js"
+import { WorkerFacade } from "./facades/WorkerFacade.js"
+import { InfoMessageHandler } from "../../gui/InfoMessageHandler.js"
 
 assertWorkerOrNode()
+
+export interface WorkerRandomizer {
+	generateRandomNumber(numBytes: number): Promise<number>
+}
+
+export interface ExposedEventBus {
+	tryReconnect: EventBusClient["tryReconnect"]
+	close: EventBusClient["close"]
+}
 
 /** Interface of the facades exposed by the worker, basically interface for the worker itself */
 export interface WorkerInterface {
@@ -60,6 +69,7 @@ export interface WorkerInterface {
 	readonly bookingFacade: BookingFacade
 	readonly mailAddressFacade: MailAddressFacade
 	readonly fileFacade: FileFacade
+	readonly blobAccessTokenFacade: BlobAccessTokenFacade
 	readonly blobFacade: BlobFacade
 	readonly userManagementFacade: UserManagementFacade
 	readonly contactFormFacade: ContactFormFacade
@@ -68,11 +78,20 @@ export interface WorkerInterface {
 	readonly serviceExecutor: IServiceExecutor
 	readonly cryptoFacade: CryptoFacade
 	readonly cacheStorage: ExposedCacheStorage
+	readonly random: WorkerRandomizer
+	readonly eventBus: ExposedEventBus
+	readonly entropyFacade: EntropyFacade
+	readonly workerFacade: WorkerFacade
 }
 
 /** Interface for the "main"/webpage context of the app, interface for the worker client. */
 export interface MainInterface {
-	readonly loginListener: ILoginListener
+	readonly loginListener: LoginListener
+	readonly wsConnectivityListener: WebsocketConnectivityListener
+	readonly progressTracker: ExposedProgressTracker
+	readonly eventController: ExposedEventController
+	readonly operationProgressTracker: ExposedOperationProgressTracker
+	readonly infoMessageHandler: InfoMessageHandler
 }
 
 type WorkerRequest = Request<WorkerRequestType>
@@ -80,13 +99,9 @@ type WorkerRequest = Request<WorkerRequestType>
 export class WorkerImpl implements NativeInterface {
 	private readonly _scope: DedicatedWorkerGlobalScope
 	private readonly _dispatcher: MessageDispatcher<MainRequestType, WorkerRequestType>
-	private _newEntropy: number
-	private _lastEntropyUpdate: number
 
 	constructor(self: DedicatedWorkerGlobalScope) {
 		this._scope = self
-		this._newEntropy = -1
-		this._lastEntropyUpdate = new Date().getTime()
 		this._dispatcher = new MessageDispatcher(new WorkerTransport(this._scope), this.queueCommands(this.exposedInterface))
 	}
 
@@ -124,96 +139,123 @@ export class WorkerImpl implements NativeInterface {
 		}
 	}
 
-	get exposedInterface(): WorkerInterface {
+	get exposedInterface(): DelayedImpls<WorkerInterface> {
 		return {
-			get loginFacade() {
+			async loginFacade() {
 				return locator.login
 			},
 
-			get customerFacade() {
-				return locator.customer
+			async customerFacade() {
+				return locator.customer()
 			},
 
-			get giftCardFacade() {
-				return locator.giftCards
+			async giftCardFacade() {
+				return locator.giftCards()
 			},
 
-			get groupManagementFacade() {
-				return locator.groupManagement
+			async groupManagementFacade() {
+				return locator.groupManagement()
 			},
 
-			get configFacade() {
-				return locator.configFacade
+			async configFacade() {
+				return locator.configFacade()
 			},
 
-			get calendarFacade() {
-				return locator.calendar
+			async calendarFacade() {
+				return locator.calendar()
 			},
 
-			get mailFacade() {
-				return locator.mail
+			async mailFacade() {
+				return locator.mail()
 			},
 
-			get shareFacade() {
-				return locator.share
+			async shareFacade() {
+				return locator.share()
 			},
 
-			get counterFacade() {
-				return locator.counters
+			async counterFacade() {
+				return locator.counters()
 			},
 
-			get indexerFacade() {
-				return locator.indexer
+			async indexerFacade() {
+				return locator.indexer()
 			},
 
-			get searchFacade() {
-				return locator.search
+			async searchFacade() {
+				return locator.search()
 			},
 
-			get bookingFacade() {
-				return locator.booking
+			async bookingFacade() {
+				return locator.booking()
 			},
 
-			get mailAddressFacade() {
-				return locator.mailAddress
+			async mailAddressFacade() {
+				return locator.mailAddress()
 			},
 
-			get fileFacade() {
-				return locator.file
+			async fileFacade() {
+				return locator.file()
 			},
 
-			get blobFacade() {
-				return locator.blob
+			async blobAccessTokenFacade() {
+				return locator.blobAccessToken
 			},
 
-			get userManagementFacade() {
-				return locator.userManagement
+			async blobFacade() {
+				return locator.blob()
 			},
 
-			get contactFormFacade() {
-				return locator.contactFormFacade
+			async userManagementFacade() {
+				return locator.userManagement()
 			},
 
-			get deviceEncryptionFacade() {
+			async contactFormFacade() {
+				return locator.contactFormFacade()
+			},
+
+			async deviceEncryptionFacade() {
 				return locator.deviceEncryptionFacade
 			},
 
-			get restInterface() {
+			async restInterface() {
 				return locator.cache
 			},
-			get serviceExecutor() {
+
+			async serviceExecutor() {
 				return locator.serviceExecutor
 			},
-			get cryptoFacade() {
+
+			async cryptoFacade() {
 				return locator.crypto
 			},
-			get cacheStorage() {
+
+			async cacheStorage() {
 				return locator.cacheStorage
-			}
+			},
+
+			async random() {
+				return {
+					async generateRandomNumber(nbrOfBytes: number) {
+						return random.generateRandomNumber(nbrOfBytes)
+					},
+				}
+			},
+
+			async eventBus() {
+				return locator.eventBusClient
+			},
+
+			async entropyFacade() {
+				return locator.entropyFacade
+			},
+
+			async workerFacade() {
+				return locator.workerFacade
+			},
 		}
 	}
 
-	queueCommands(exposedWorker: WorkerInterface): Commands<WorkerRequestType> {
+	queueCommands(exposedWorker: DelayedImpls<WorkerInterface>): Commands<WorkerRequestType> {
 		return {
 			setup: async (message) => {
 				console.error("WorkerImpl: setup was called after bootstrap! message: ", message)
@@ -240,43 +282,11 @@ export class WorkerImpl implements NativeInterface {
 				const args = message.args as Parameters<RestClient["request"]>
 				let [path, method, options] = args
 				options = options ?? {}
-				options.headers = {...locator.user.createAuthHeaders(), ...options.headers}
+				options.headers = { ...locator.user.createAuthHeaders(), ...options.headers }
 				return locator.restClient.request(path, method, options)
 			},
-			entropy: (message: WorkerRequest) => {
-				return this.addEntropy(message.args[0])
-			},
 
-			tryReconnectEventBus(message: WorkerRequest) {
-				locator.eventBusClient.tryReconnect(
-					message.args[0],
-					message.args[1],
-					message.args[2],
-				)
-				return Promise.resolve()
-			},
-
-			generateSsePushIdentifer: () => {
-				return Promise.resolve(keyToBase64(aes256RandomKey()))
-			},
-			closeEventBus: (message: WorkerRequest) => {
-				locator.eventBusClient.close(message.args[0])
-				return Promise.resolve()
-			},
-			getLog: () => {
-				const global = self as any
-
-				if (global.logger) {
-					return Promise.resolve(global.logger.getEntries())
-				} else {
-					return Promise.resolve([])
-				}
-			},
-			urlify: async (message: WorkerRequest) => {
-				const html: string = message.args[0]
-				return Promise.resolve(urlify(html))
-			},
-			facade: exposeLocal(exposedWorker),
+			facade: exposeLocalDelayed<DelayedImpls<WorkerInterface>, WorkerRequestType>(exposedWorker),
 		}
 	}
 
@@ -285,76 +295,10 @@ export class WorkerImpl implements NativeInterface {
 	}
 
 	getMainInterface(): MainInterface {
-		return exposeRemote<MainInterface>(request => this._dispatcher.postRequest(request))
-	}
-
-	/**
-	 * Adds entropy to the randomizer. Updated the stored entropy for a user when enough entropy has been collected.
-	 * @param entropy
-	 * @returns {Promise.<void>}
-	 */
-	addEntropy(
-		entropy: {
-			source: EntropySource
-			entropy: number
-			data: number | Array<number>
-		}[],
-	): Promise<void> {
-		try {
-			return random.addEntropy(entropy)
-		} finally {
-			this._newEntropy = this._newEntropy + entropy.reduce((sum, value) => value.entropy + sum, 0)
-			let now = new Date().getTime()
-
-			if (this._newEntropy > 5000 && now - this._lastEntropyUpdate > 1000 * 60 * 5) {
-				this._lastEntropyUpdate = now
-				this._newEntropy = 0
-				locator.login.storeEntropy()
-			}
-		}
-	}
-
-	entityEventsReceived(data: EntityUpdate[], eventOwnerGroupId: Id): Promise<void> {
-		return this._dispatcher.postRequest(new Request("entityEvent", [data, eventOwnerGroupId]))
+		return exposeRemote<MainInterface>((request) => this._dispatcher.postRequest(request))
 	}
 
 	sendError(e: Error): Promise<void> {
 		return this._dispatcher.postRequest(new Request("error", [errorToObj(e)]))
-	}
-
-	sendProgress(progressPercentage: number): Promise<void> {
-		return this._dispatcher.postRequest(new Request("progress", [progressPercentage])).then(() => {
-			// the worker sometimes does not send the request if it does not get time
-			return delay(0)
-		})
-	}
-
-	sendIndexState(state: SearchIndexStateInfo): Promise<void> {
-		return this._dispatcher.postRequest(new Request("updateIndexState", [state]))
-	}
-
-	updateWebSocketState(state: WsConnectionState): Promise<void> {
-		console.log("ws displayed state: ", state)
-		return this._dispatcher.postRequest(new Request("updateWebSocketState", [state]))
-	}
-
-	updateCounter(update: WebsocketCounterData): Promise<void> {
-		return this._dispatcher.postRequest(new Request("counterUpdate", [update]))
-	}
-
-	infoMessage(message: InfoMessage): Promise<void> {
-		return this._dispatcher.postRequest(new Request("infoMessage", [message]))
-	}
-
-	createProgressMonitor(totalWork: number): Promise<ProgressMonitorId> {
-		return this._dispatcher.postRequest(new Request("createProgressMonitor", [totalWork]))
-	}
-
-	progressWorkDone(reference: ProgressMonitorId, totalWork: number): Promise<void> {
-		return this._dispatcher.postRequest(new Request("progressWorkDone", [reference, totalWork]))
-	}
-
-	updateLeaderStatus(status: WebsocketLeaderStatus): Promise<void> {
-		return this._dispatcher.postRequest(new Request("updateLeaderStatus", [status]))
 	}
 }

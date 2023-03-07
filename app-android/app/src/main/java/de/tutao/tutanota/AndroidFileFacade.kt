@@ -1,7 +1,6 @@
 package de.tutao.tutanota
 
 import android.Manifest
-import android.annotation.TargetApi
 import android.app.Activity
 import android.content.ContentValues
 import android.content.Context
@@ -12,6 +11,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import android.util.Log
 import android.webkit.MimeTypeMap
+import androidx.annotation.RequiresApi
 import androidx.core.content.FileProvider
 import androidx.core.net.toUri
 import de.tutao.tutanota.ipc.*
@@ -40,7 +40,7 @@ class TempDir(
 	private val randomTempDirectory = random.bytes(16).toBase64().base64ToBase64Url()
 
 	// We can only read from the temp/ subdir as configured in paths.xml
-	val root get() = File(context.filesDir, "temp/$this.randomTempDirectory").apply { mkdirs() }
+	val root get() = File(context.filesDir, "temp/$randomTempDirectory").apply { mkdirs() }
 	val encrypt get() = File(context.filesDir, "temp/$randomTempDirectory/encrypted").apply { mkdirs() }
 	val decrypt get() = File(context.filesDir, "temp/$randomTempDirectory/decrypted").apply { mkdirs() }
 }
@@ -71,12 +71,13 @@ class AndroidFileFacade(
 		for (infile in files) {
 			inStreams.add(FileInputStream(Uri.parse(infile).path))
 		}
-		val output = File(tempDir.decrypt, filename)
-		writeFileStream(output, SequenceInputStream(Collections.enumeration(inStreams)))
-		return output.toUri().toString()
+		val newFileName = getNonClobberingFileName(tempDir.decrypt, filename)
+		val outputFile = File(tempDir.decrypt, newFileName)
+		writeFileStream(outputFile, SequenceInputStream(Collections.enumeration(inStreams)))
+		return outputFile.toUri().toString()
 	}
 
-	override suspend fun openFileChooser(boundingRect: IpcClientRect): List<String> {
+	override suspend fun openFileChooser(boundingRect: IpcClientRect, filter: List<String>?): List<String> {
 		val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
 			type = "*/*"
 			addCategory(Intent.CATEGORY_OPENABLE)
@@ -142,7 +143,7 @@ class AndroidFileFacade(
 		}
 	}
 
-	@TargetApi(Build.VERSION_CODES.Q)
+	@RequiresApi(Build.VERSION_CODES.Q)
 	private suspend fun addFileToDownloadsMediaStore(fileUriString: String): String {
 		val contentResolver = activity.contentResolver
 		val fileUri = fileUriString.toUri()
@@ -409,4 +410,31 @@ fun getMimeType(fileUri: Uri, context: Context): String {
 		}
 	}
 	return "application/octet-stream"
+}
+
+fun getNonClobberingFileName(parentFile: File, child: String): String {
+	// should only happen if parent is not a dir
+	val siblings = parentFile.listFiles() ?: return child
+
+	val file = File(child)
+	val base = file.nameWithoutExtension
+	val ext = file.extension
+
+	fun doGetNonClobberingFileName(
+			siblings: Array<File>,
+			base: String,
+			ext: String, suffix: Int = 0
+	): String {
+		val nameToTry = if (suffix == 0) {
+			"$base.$ext"
+		} else {
+			"$base ($suffix).$ext"
+		}
+		if (siblings.firstOrNull { it.name == nameToTry } == null) {
+			return nameToTry
+		}
+		// yay tail recursion
+		return doGetNonClobberingFileName(siblings, base, ext, suffix + 1)
+	}
+	return doGetNonClobberingFileName(siblings, base, ext)
 }

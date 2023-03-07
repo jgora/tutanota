@@ -1,19 +1,17 @@
-import {lang} from "../../misc/LanguageViewModel"
-import {logins} from "../../api/main/LoginController"
-import {AdministratedGroupTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import {GroupTypeRef} from "../../api/entities/sys/TypeRefs.js"
-import {createContactFormLanguage} from "../../api/entities/tutanota/TypeRefs.js"
-import type {ContactFormLanguage} from "../../api/entities/tutanota/TypeRefs.js"
-import {getElementId} from "../../api/common/utils/EntityUtils"
-import {flat} from "@tutao/tutanota-utils"
-import {promiseMap} from "@tutao/tutanota-utils"
-import {locator} from "../../api/main/MainLocator"
+import { lang } from "../../misc/LanguageViewModel"
+import { logins } from "../../api/main/LoginController"
+import { AdministratedGroupTypeRef, GroupTypeRef } from "../../api/entities/sys/TypeRefs.js"
+import type { ContactFormLanguage } from "../../api/entities/tutanota/TypeRefs.js"
+import { createContactFormLanguage } from "../../api/entities/tutanota/TypeRefs.js"
+import { getElementId } from "../../api/common/utils/EntityUtils"
+import { flat, promiseMap } from "@tutao/tutanota-utils"
+import { locator } from "../../api/main/MainLocator"
 
 export function getDefaultContactFormLanguage(supportedLanguages: ContactFormLanguage[]): ContactFormLanguage {
-	let language = supportedLanguages.find(l => l.code === lang.code || l.code + "_sie" === lang.code)
+	let language = supportedLanguages.find((l) => l.code === lang.code || l.code + "_sie" === lang.code)
 
 	if (!language) {
-		language = supportedLanguages.find(l => l.code === "en")
+		language = supportedLanguages.find((l) => l.code === "en")
 	}
 
 	if (!language) {
@@ -30,10 +28,10 @@ export function getDefaultContactFormLanguage(supportedLanguages: ContactFormLan
 }
 
 export async function getAdministratedGroupIds(): Promise<Id[]> {
-	const localAdminGroups = await promiseMap(logins.getUserController().getLocalAdminGroupMemberships(), gm =>
+	const localAdminGroups = await promiseMap(logins.getUserController().getLocalAdminGroupMemberships(), (gm) =>
 		locator.entityClient.load(GroupTypeRef, gm.group),
 	)
-	const administratedGroupIds = await promiseMap(localAdminGroups, async localAdminGroup => {
+	const administratedGroupIds = await promiseMap(localAdminGroups, async (localAdminGroup) => {
 		if (localAdminGroup.administratedGroups) {
 			const administratedGroups = await locator.entityClient.loadAll(AdministratedGroupTypeRef, localAdminGroup.administratedGroups.items)
 			return administratedGroups.map(getElementId)
@@ -42,4 +40,17 @@ export async function getAdministratedGroupIds(): Promise<Id[]> {
 		}
 	})
 	return flat(administratedGroupIds)
+}
+
+export function getContactFormUrl(domain: string | null, path: string): string {
+	let pathPrefix = ""
+
+	if (location.pathname.indexOf("client/build") !== -1) {
+		// local
+		pathPrefix = ":9000/client/build"
+	}
+
+	// In case whitelabel domain was deleted but contact form is there we display a placeholder.
+	const displayDomain = domain ?? "[no domain]"
+	return "https://" + displayDomain + pathPrefix + "/contactform/" + path
 }

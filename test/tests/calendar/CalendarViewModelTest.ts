@@ -1,52 +1,47 @@
 import o from "ospec"
-import {accountMailAddress, calendarGroupId, makeCalendarModel, makeEvent, makeUserController,} from "./CalendarTestUtils.js"
-import type {LoginController} from "../../../src/api/main/LoginController.js"
-import {assertThrows} from "@tutao/tutanota-test-utils"
-import {assertNotNull, downcast, getStartOfDay, LazyLoaded, neverNull} from "@tutao/tutanota-utils"
-import type {CalendarEvent} from "../../../src/api/entities/tutanota/TypeRefs.js"
-import {createCalendarEvent, createEncryptedMailAddress,} from "../../../src/api/entities/tutanota/TypeRefs.js"
-import {DateTime} from "luxon"
-import {addDaysForEvent, getTimeZone} from "../../../src/calendar/date/CalendarUtils.js"
-import type {CalendarInfo, CalendarModel} from "../../../src/calendar/model/CalendarModel.js"
-import type {CreateCalendarEventViewModelFunction} from "../../../src/calendar/view/CalendarViewModel.js"
-import {CalendarViewModel} from "../../../src/calendar/view/CalendarViewModel.js"
-import {CalendarEventViewModel} from "../../../src/calendar/date/CalendarEventViewModel.js"
-import {EntityClient} from "../../../src/api/common/EntityClient.js"
-import type {EntityUpdateData} from "../../../src/api/main/EventController.js"
-import {EventController} from "../../../src/api/main/EventController.js"
-import {ProgressTracker} from "../../../src/api/main/ProgressTracker.js"
-import {DeviceConfig} from "../../../src/misc/DeviceConfig.js"
-import {OperationType} from "../../../src/api/common/TutanotaConstants.js"
-import {getElementId, getListId} from "../../../src/api/common/utils/EntityUtils.js"
-import {EntityRestClientMock} from "../api/worker/rest/EntityRestClientMock.js"
-import {ReceivedGroupInvitationsModel} from "../../../src/sharing/model/ReceivedGroupInvitationsModel.js"
+import { accountMailAddress, calendarGroupId, makeCalendarModel, makeEvent, makeUserController } from "./CalendarTestUtils.js"
+import type { LoginController } from "../../../src/api/main/LoginController.js"
+import { assertThrows } from "@tutao/tutanota-test-utils"
+import { assertNotNull, downcast, getStartOfDay, LazyLoaded, neverNull, noOp } from "@tutao/tutanota-utils"
+import type { CalendarEvent } from "../../../src/api/entities/tutanota/TypeRefs.js"
+import { createCalendarEvent, createEncryptedMailAddress } from "../../../src/api/entities/tutanota/TypeRefs.js"
+import { DateTime } from "luxon"
+import { addDaysForEvent, getTimeZone } from "../../../src/calendar/date/CalendarUtils.js"
+import type { CalendarInfo, CalendarModel } from "../../../src/calendar/model/CalendarModel.js"
+import type { CreateCalendarEventViewModelFunction } from "../../../src/calendar/view/CalendarViewModel.js"
+import { CalendarViewModel } from "../../../src/calendar/view/CalendarViewModel.js"
+import { CalendarEventViewModel } from "../../../src/calendar/date/CalendarEventViewModel.js"
+import { EntityClient } from "../../../src/api/common/EntityClient.js"
+import type { EntityUpdateData } from "../../../src/api/main/EventController.js"
+import { EventController } from "../../../src/api/main/EventController.js"
+import { ProgressTracker } from "../../../src/api/main/ProgressTracker.js"
+import { DeviceConfig } from "../../../src/misc/DeviceConfig.js"
+import { OperationType } from "../../../src/api/common/TutanotaConstants.js"
+import { getElementId, getListId } from "../../../src/api/common/utils/EntityUtils.js"
+import { EntityRestClientMock } from "../api/worker/rest/EntityRestClientMock.js"
+import { ReceivedGroupInvitationsModel } from "../../../src/sharing/model/ReceivedGroupInvitationsModel.js"
+import { ProgressMonitor } from "../../../src/api/common/utils/ProgressMonitor.js"
 
 let saveAndSendMock
 let rescheduleEventMock
 o.spec("CalendarViewModel", async function () {
 	let entityClientMock: EntityRestClientMock
 
-	function initCalendarViewModel(
-		makeViewModelCallback: CreateCalendarEventViewModelFunction,
-		eventController?,
-	): CalendarViewModel {
+	function initCalendarViewModel(makeViewModelCallback: CreateCalendarEventViewModelFunction, eventController?): CalendarViewModel {
 		if (eventController == null) {
 			eventController = downcast({
 				addEntityListener: () => Promise.resolve(),
 			})
 		}
 
-		const progressTracker: ProgressTracker = downcast({
-			registerMonitor: () => Promise.resolve(),
+		const progressTracker: ProgressTracker = {
+			registerMonitorSync: () => 1,
 			getMonitor: () => {
-				return {
-					workDone: () => Promise.resolve(),
-					completed: () => Promise.resolve(),
-				}
+				return new ProgressMonitor(100, noOp)
 			},
-		})
+		} as Partial<ProgressTracker> as ProgressTracker
 		const deviceConfig: DeviceConfig = downcast({
-			getHiddenCalendars: Id => [],
+			getHiddenCalendars: (Id) => [],
 		})
 		const calendarInvitations: ReceivedGroupInvitationsModel = downcast({})
 		let calendarModel: CalendarModel = makeCalendarModel()
@@ -279,7 +274,7 @@ o.spec("CalendarViewModel", async function () {
 				makeEvent("event2", new Date(2021, 0, 1), new Date(2021, 0, 3), "uid2"),
 				makeEvent("event3", new Date(2021, 0, 3, 13, 0), new Date(2021, 0, 3, 14, 30), "uid3"),
 			]
-			const {days, eventsForDays} = init(inputEvents)
+			const { days, eventsForDays } = init(inputEvents)
 			const expected = {
 				shortEvents: [[], [], [inputEvents[2]], [], [], [], []],
 				longEvents: [inputEvents[0], inputEvents[1]],
@@ -287,7 +282,7 @@ o.spec("CalendarViewModel", async function () {
 
 			viewModel._replaceEvents(eventsForDays)
 
-			const {shortEvents, longEvents} = viewModel.getEventsOnDays(days)
+			const { shortEvents, longEvents } = viewModel.getEventsOnDays(days)
 			o({
 				shortEvents,
 				longEvents: Array.from(longEvents),
@@ -301,7 +296,7 @@ o.spec("CalendarViewModel", async function () {
 				makeEvent("event2", new Date(2021, 0, 1), new Date(2021, 0, 3), "uid2"),
 				makeEvent("event3", originalDateForDraggedEvent, new Date(2021, 0, 3, 14, 30), "uid3"),
 			]
-			const {days, eventsForDays} = init(inputEvents)
+			const { days, eventsForDays } = init(inputEvents)
 
 			viewModel._replaceEvents(eventsForDays)
 
@@ -311,7 +306,7 @@ o.spec("CalendarViewModel", async function () {
 				shortEvents: [[], [], [], [viewModel._draggedEvent?.eventClone], [], [], []],
 				longEvents: [inputEvents[0], inputEvents[1]],
 			} as any
-			const {shortEvents, longEvents} = viewModel.getEventsOnDays(days)
+			const { shortEvents, longEvents } = viewModel.getEventsOnDays(days)
 			o({
 				shortEvents: shortEvents,
 				longEvents: Array.from(longEvents),
@@ -325,7 +320,7 @@ o.spec("CalendarViewModel", async function () {
 				makeEvent("event2", new Date(2021, 0, 1), new Date(2021, 0, 3), "uid2"),
 				makeEvent("event3", originalDateForDraggedEvent, new Date(2021, 0, 3, 14, 30), "uid3"),
 			]
-			const {days, eventsForDays, month} = init(inputEvents)
+			const { days, eventsForDays, month } = init(inputEvents)
 
 			viewModel._replaceEvents(eventsForDays)
 
@@ -337,7 +332,7 @@ o.spec("CalendarViewModel", async function () {
 				shortEvents: [[], [], [], [], [viewModel._transientEvents[0]], [], []],
 				longEvents: [inputEvents[0], inputEvents[1]],
 			}
-			const {shortEvents, longEvents} = viewModel.getEventsOnDays(days)
+			const { shortEvents, longEvents } = viewModel.getEventsOnDays(days)
 			o({
 				shortEvents,
 				longEvents: Array.from(longEvents),
@@ -360,7 +355,7 @@ o.spec("CalendarViewModel", async function () {
 				makeEvent("event2", new Date(2021, 0, 1), new Date(2021, 0, 3), "uid2"),
 				eventToDrag,
 			]
-			const {days, eventsForDays, month} = init(inputEvents)
+			const { days, eventsForDays, month } = init(inputEvents)
 
 			viewModel._replaceEvents(eventsForDays)
 
@@ -369,7 +364,7 @@ o.spec("CalendarViewModel", async function () {
 			//end drag
 			const newData = new Date(2021, 0, 5, 13, 0)
 			await simulateEndDrag(originalDateForDraggedEvent, newData, viewModel)
-			o(viewModel.temporaryEvents.some(e => e.uid === eventToDrag.uid)).equals(true)("Has transient event")
+			o(viewModel.temporaryEvents.some((e) => e.uid === eventToDrag.uid)).equals(true)("Has transient event")
 			o(entityListeners.length).equals(1)("Listener was added")
 			const entityUpdate: EntityUpdateData = {
 				application: "tutanota",
@@ -378,15 +373,10 @@ o.spec("CalendarViewModel", async function () {
 				instanceId: getElementId(eventToDrag),
 				operation: OperationType.CREATE,
 			}
-			const updatedEventFromServer = makeEvent(
-				getElementId(eventToDrag),
-				newData,
-				new Date(2021, 0, 5, 14, 30),
-				assertNotNull(eventToDrag.uid),
-			)
+			const updatedEventFromServer = makeEvent(getElementId(eventToDrag), newData, new Date(2021, 0, 5, 14, 30), assertNotNull(eventToDrag.uid))
 			entityClientMock.addListInstances(updatedEventFromServer)
 			await entityListeners[0]([entityUpdate], eventToDrag._ownerGroup)
-			o(viewModel.temporaryEvents.some(e => e.uid === eventToDrag.uid)).equals(false)("Transient event removed")
+			o(viewModel.temporaryEvents.some((e) => e.uid === eventToDrag.uid)).equals(false)("Transient event removed")
 		})
 	})
 })
@@ -405,7 +395,7 @@ async function simulateEndDrag(originalDate: Date, newDate: Date, viewModel: Cal
 function makeTestEvent(): CalendarEvent {
 	const zone = getTimeZone()
 
-	const wrapEncIntoMailAddress = address =>
+	const wrapEncIntoMailAddress = (address) =>
 		createEncryptedMailAddress({
 			address,
 		})
@@ -413,20 +403,24 @@ function makeTestEvent(): CalendarEvent {
 	const encMailAddress = wrapEncIntoMailAddress(accountMailAddress)
 	return createCalendarEvent({
 		summary: "test event",
-		startTime: DateTime.fromObject({
-			year: 2020,
-			month: 5,
-			day: 26,
-			hour: 12,
-			zone,
-		}).toJSDate(),
-		endTime: DateTime.fromObject({
-			year: 2020,
-			month: 5,
-			day: 26,
-			hour: 13,
-			zone,
-		}).toJSDate(),
+		startTime: DateTime.fromObject(
+			{
+				year: 2020,
+				month: 5,
+				day: 26,
+				hour: 12,
+			},
+			{ zone },
+		).toJSDate(),
+		endTime: DateTime.fromObject(
+			{
+				year: 2020,
+				month: 5,
+				day: 26,
+				hour: 13,
+			},
+			{ zone },
+		).toJSDate(),
 		description: "note",
 		location: "location",
 		_ownerGroup: calendarGroupId,
@@ -434,10 +428,7 @@ function makeTestEvent(): CalendarEvent {
 	})
 }
 
-async function makeCalendarEventViewModel(
-	existingEvent: CalendarEvent,
-	calendars: LazyLoaded<Map<Id, CalendarInfo>>,
-): Promise<CalendarEventViewModel> {
+async function makeCalendarEventViewModel(existingEvent: CalendarEvent, calendars: LazyLoaded<Map<Id, CalendarInfo>>): Promise<CalendarEventViewModel> {
 	return downcast({
 		saveAndSend: saveAndSendMock,
 		rescheduleEvent: rescheduleEventMock,

@@ -1,108 +1,59 @@
-import {Octokit} from "@octokit/rest"
-import {Option, program} from "commander"
-import {fileURLToPath} from "url"
-import path from "path"
+import { Octokit } from "@octokit/rest"
+import { Option, program } from "commander"
+import { fileURLToPath } from "url"
 import fs from "fs"
+import crypto from "crypto"
 
 const wasRunFromCli = fileURLToPath(import.meta.url).startsWith(process.argv[1])
 
 if (wasRunFromCli) {
 	program
-		.requiredOption('--releaseName <releaseName>', "Name of the release")
-		.requiredOption('--milestone <milestone>', "Milestone to reference")
-		.requiredOption('--tag <tag>', "The commit tag to reference")
+		.requiredOption("--milestone <milestone>", "Milestone to reference")
 		.addOption(
-			new Option("--platform <platform>", 'Which platform to build')
-				.choices(["android", "ios", "desktop", "all"])
-				.default("all")
+			new Option("--platform <platform>", "label filter for the issues to include in the notes")
+				.choices(["android", "ios", "desktop", "web"])
+				.default("web"),
 		)
-		.option('--uploadFile <filePath>', "Path to a file to upload")
-		.option('--apkChecksum <checksum>', "Checksum for the APK")
-		.option('--toFile <toFile>', "If provided, the release notes will be written to the given file path. Implies `--dryRun`")
-		.option('--dryRun', "Don't make any changes to github")
-		.option('--format <format>', "Format to generate notes in", "github")
 		.action(async (options) => {
-			await createReleaseNotes(options)
+			await renderReleaseNotes(options)
 		})
 		.parseAsync(process.argv)
 }
 
-async function createReleaseNotes(
-	{
-		releaseName,
-		milestone,
-		tag,
-		platform,
-		uploadFile,
-		apkChecksum,
-		toFile,
-		dryRun,
-		format
-	}
-) {
-
-	const releaseToken = process.env.GITHUB_TOKEN
-
-	if (!releaseToken) {
-		throw new Error("No GITHUB_TOKEN set!")
-	}
-
+async function renderReleaseNotes({ milestone, platform }) {
 	const octokit = new Octokit({
-		auth: releaseToken,
-		userAgent: 'tuta-github-release-v0.0.1'
+		userAgent: "tuta-github-release-v0.0.1",
 	})
-
-	let releaseNotes
 
 	const githubMilestone = await getMilestone(octokit, milestone)
 	const issues = await getIssuesForMilestone(octokit, githubMilestone)
-	const {bugs, other} = sortIssues(filterIssues(issues, platform))
+	const { bugs, other } = sortIssues(filterIssues(issues, platform))
+	const releaseNotes =
+		platform === "ios"
+			? renderIosReleaseNotes(bugs, other)
+			: renderGithubReleaseNotes({
+					milestoneUrl: githubMilestone.html_url,
+					bugIssues: bugs,
+					otherIssues: other,
+			  })
 
-	if (format === "ios") {
-		releaseNotes = renderIosReleaseNotes(bugs, other)
-	} else {
-		releaseNotes = renderGithubReleaseNotes({
-			milestoneUrl: githubMilestone.html_url,
-			bugIssues: bugs,
-			otherIssues: other,
-			apkChecksum: apkChecksum
-		})
-	}
-
-	console.log("Release notes:")
 	console.log(releaseNotes)
-
-	if (!dryRun && !toFile) {
-		const draftResponse = await createReleaseDraft(octokit, releaseName, tag, releaseNotes)
-
-		const {upload_url, id} = draftResponse.data
-
-		if (uploadFile) {
-			console.log(`Uploading asset "${uploadFile}"`)
-			await uploadAsset(octokit, upload_url, id, uploadFile)
-		}
-	}
-
-	if (toFile) {
-		console.log(`writing release notes to ${toFile}`)
-		await fs.promises.writeFile(toFile, releaseNotes, "utf-8")
-	}
 }
 
 async function getMilestone(octokit, milestoneName) {
-	const {data} = await octokit.issues.listMilestones({
+	const { data } = await octokit.issues.listMilestones({
 		owner: "tutao",
 		repo: "tutanota",
 		direction: "desc",
-		state: "all"
+		state: "all",
 	})
 
-	const milestone = data.find(m => m.title === milestoneName)
+	const milestone = data.find((m) => m.title === milestoneName)
 
 	if (milestone) {
 		return milestone
 	} else {
-		const titles = data.map(m => m.title)
+		const titles = data.map((m) => m.title)
 		throw new Error(`No milestone named ${milestoneName} found. Milestones: ${titles.join(", ")}`)
 	}
 }
@@ -112,7 +63,7 @@ async function getIssuesForMilestone(octokit, milestone) {
 		owner: "tutao",
 		repo: "tutanota",
 		milestone: milestone.number,
-		state: "all"
+		state: "all",
 	})
 	return response.data
 }
@@ -122,22 +73,20 @@ async function getIssuesForMilestone(octokit, milestone) {
  * If an issue has no platform label, then it will be included
  * If an issue has a label for a different platform, it won't be included,
  * _unless_ it also has the label for the specified platform.
- *
- * issues that have the "dev bug" label won't be included in any case.
  */
 function filterIssues(issues, platform) {
+	const allPlatforms = new Set(["android", "ios", "desktop"])
+	// issues that have any of these labels will not be included in any release notes
+	const excludedLabels = new Set(["dev bug", "topic:usage test", "no-release-notes"])
+	issues = issues.filter((issue) => !issue.labels.some((label) => excludedLabels.has(label.name)))
 
-	const allPlatforms = ["android", "ios", "desktop"]
-	issues = issues.filter(issue => !issue.labels.some(label => label.name === "dev bug"))
-
-	if (platform === "all") {
-		return issues
-	} else if (allPlatforms.includes(platform)) {
-		const otherPlatforms = allPlatforms.filter(p => p !== platform)
-		return issues.filter(issue =>
-			issue.labels.some(label => label.name === platform) ||
-			!issue.labels.some(label => otherPlatforms.includes(label.name))
-		)
+	if (platform === "web") {
+		// for the web app, we only want to include issues that don't have a platform label
+		return issues.filter((i) => areDisjoint(labelSet(i), allPlatforms))
+	} else if (allPlatforms.has(platform)) {
+		const otherPlatforms = new Set(allPlatforms)
+		otherPlatforms.delete(platform)
+		return issues.filter((issue) => issue.labels.some((label) => label.name === platform) || !issue.labels.some((label) => otherPlatforms.has(label.name)))
 	} else {
 		throw new Error(`Invalid value "${platform}" for "platform"`)
 	}
@@ -150,76 +99,53 @@ function sortIssues(issues) {
 	const bugs = []
 	const other = []
 	for (const issue of issues) {
-		const isBug = issue.labels.find(l => l.name === "bug" || l.name === "dev bug")
+		const isBug = issue.labels.find((l) => l.name === "bug" || l.name === "dev bug")
 		if (isBug) {
 			bugs.push(issue)
 		} else {
 			other.push(issue)
 		}
 	}
-	return {bugs, other}
+	return { bugs, other }
 }
 
-function renderGithubReleaseNotes({milestoneUrl, bugIssues, otherIssues, apkChecksum}) {
+function renderGithubReleaseNotes({ milestoneUrl, bugIssues, otherIssues }) {
+	const whatsNewListRendered = otherIssues.length > 0 ? "# What's new\n" + otherIssues.map((issue) => ` - ${issue.title} #${issue.number}`).join("\n") : ""
 
-	const whatsNewListRendered = otherIssues.map(issue => {
-		return ` - ${issue.title} #${issue.number}`
-	}).join("\n")
-
-	const bugsListRendered = bugIssues.map(issue => {
-		return ` - ${issue.title} #${issue.number}`
-	}).join("\n")
+	const bugsListRendered = bugIssues.length > 0 ? "# Bugfixes\n" + bugIssues.map((issue) => ` - ${issue.title} #${issue.number}`).join("\n") : ""
 
 	const milestoneUrlObject = new URL(milestoneUrl)
 	milestoneUrlObject.searchParams.append("closed", "1")
-
-	const apkSection = apkChecksum ? `# APK Checksum\nSHA256: ${apkChecksum}` : ""
-
 	return `
-# What's new
 ${whatsNewListRendered}
 
-# Bugfixes
 ${bugsListRendered}
 
 # Milestone
 ${milestoneUrlObject.toString()}
-
-${apkSection}
 `.trim()
 }
 
 function renderIosReleaseNotes(bugs, rest) {
-	return `
-what's new:
-${rest.map(issue => issue.title).join("\n")}
+	const whatsNewSection = rest.length > 0 ? "what's new:\n" + rest.map((issue) => issue.title).join("\n") : ""
 
-bugfixes:
-${bugs.map(issue => issue.title).join("\n")}`.trim()
+	const bugfixSection = bugs.length > 0 ? "\nbugfixes:\n" + bugs.map((issue) => "fixed " + issue.title).join("\n") : ""
+
+	return `${whatsNewSection}\n${bugfixSection}`.trim()
 }
 
-async function createReleaseDraft(octokit, name, tag, body) {
-	return octokit.repos.createRelease({
-		owner: "tutao",
-		repo: "tutanota",
-		draft: true,
-		name,
-		tag_name: tag,
-		body,
-	})
+/**
+ * test whether two js sets have no elements in common
+ */
+function areDisjoint(setA, setB) {
+	return [...setA].filter((el) => setB.has(el)).length === 0
 }
 
-async function uploadAsset(octokit, uploadUrl, releaseId, assetPath) {
-	const response = octokit.rest.repos.uploadReleaseAsset({
-		owner: "tutao",
-		repo: "tutanota",
-		release_id: releaseId,
-		data: await fs.promises.readFile(assetPath),
-		name: path.basename(assetPath),
-		upload_url: uploadUrl
-	});
+function labelSet(issue) {
+	return new Set(issue.labels.map((l) => l.name))
+}
 
-	if (response.status < 200 || response.status > 299) {
-		console.error(`Asset upload failed "${assetPath}. Response:"`, response)
-	}
+function hashFileSha256(filePath) {
+	const input = fs.readFileSync(filePath)
+	return crypto.createHash("sha256").update(input).digest("hex")
 }

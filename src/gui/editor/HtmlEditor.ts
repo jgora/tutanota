@@ -1,172 +1,156 @@
-import m, {Children, Component} from "mithril"
+import m, { Children, Component } from "mithril"
 import stream from "mithril/stream"
-import Stream from "mithril/stream"
-import {Editor} from "./Editor.js"
-import {DropDownSelector} from "../base/DropDownSelector"
-import type {TranslationKey, TranslationText} from "../../misc/LanguageViewModel"
-import {lang} from "../../misc/LanguageViewModel"
-import {px} from "../size"
-import {htmlSanitizer} from "../../misc/HtmlSanitizer"
-import type {Options as ToolbarOptions} from "../base/RichTextToolbar"
-import {RichTextToolbar} from "../base/RichTextToolbar"
-import type {lazy} from "@tutao/tutanota-utils"
-import {assertNotNull} from "@tutao/tutanota-utils"
+import { Editor } from "./Editor.js"
+import type { TranslationKey, TranslationText } from "../../misc/LanguageViewModel"
+import { lang } from "../../misc/LanguageViewModel"
+import { px } from "../size"
+import { htmlSanitizer } from "../../misc/HtmlSanitizer"
+import { assertNotNull } from "@tutao/tutanota-utils"
+import { DropDownSelector } from "../base/DropDownSelector.js"
+import { RichTextToolbar, RichTextToolbarAttrs } from "../base/RichTextToolbar.js"
 
 export enum HtmlEditorMode {
 	HTML = "html",
 	WYSIWYG = "what you see is what you get",
 }
 
-type RichToolbarOptions = {enabled: boolean} & ToolbarOptions
-
 export class HtmlEditor implements Component {
-	// Currently accessed form outside
-	_editor: Editor;
-	private _mode: Stream<HtmlEditorMode>;
-	private _active: boolean;
-	private _disabled: boolean;
-	private _domTextArea: HTMLTextAreaElement | null = null;
-	private _showBorders: boolean;
-	private _minHeight: number | null;
-	private _placeholderId: TranslationKey | null;
-	view: Component["view"]
-	private _placeholderDomElement: HTMLElement | null = null;
-	private _value: Stream<string>;
-	private _modeSwitcher: DropDownSelector<HtmlEditorMode> | null;
-	private _htmlMonospace: boolean;
-	private _richToolbarOptions: RichToolbarOptions;
+	editor: Editor
+	private mode = HtmlEditorMode.WYSIWYG
+	private active = false
+	private domTextArea: HTMLTextAreaElement | null = null
+	private _showBorders = false
+	private minHeight: number | null = null
+	private placeholderId: TranslationKey | null = null
+	private placeholderDomElement: HTMLElement | null = null
+	private value = stream("")
+	private htmlMonospace = true
+	private modeSwitcherLabel: TranslationText | null = null
+	private toolbarEnabled = false
+	private toolbarAttrs: Omit<RichTextToolbarAttrs, "editor"> = {}
 
-	constructor(labelIdOrLabelFunction?: TranslationText, richToolbarOptions?: RichToolbarOptions,
-				injections?: () => Children) {
-		if (typeof richToolbarOptions === 'undefined') {
-			richToolbarOptions = {enabled: false}
-		}
-		this._editor = new Editor(null, (html) => htmlSanitizer.sanitizeFragment(html, {blockExternalContent: false}).fragment)
-		this._mode = stream<HtmlEditorMode>(HtmlEditorMode.WYSIWYG)
-		this._active = false
-		this._disabled = false
-		this._showBorders = false
-		this._minHeight = null
-		this._placeholderId = null
-		this._value = stream("")
-		this._modeSwitcher = null
-		this._htmlMonospace = true
-		this._richToolbarOptions = richToolbarOptions;
+	constructor(private label?: TranslationText, private readonly injections?: () => Children) {
+		this.editor = new Editor(null, (html) => htmlSanitizer.sanitizeFragment(html, { blockExternalContent: false }).fragment)
+		this.view = this.view.bind(this)
+		this.initializeEditorListeners()
+	}
 
-		this._mode.map(v => {
-			this.setValue(this._value())
-			this._editor.initialized.promise.then(() => {
-				const dom = assertNotNull(this._editor?.domElement)
-				dom.onfocus = (_) => focus()
-				dom.onblur = (_) => blur()
-			})
-		})
+	view(): Children {
+		const modeSwitcherLabel = this.modeSwitcherLabel
+		let borderClasses = this._showBorders
+			? this.active && this.editor.isEnabled()
+				? ".editor-border-active"
+				: ".editor-border" + (modeSwitcherLabel != null ? ".editor-no-top-border" : "")
+			: ""
 
-		let focus = () => {
-			this._active = true
-			m.redraw()
-		}
+		const renderedInjections = this.injections?.() ?? null
 
-		let blur = () => {
-			this._active = false
-			if (this._mode() === HtmlEditorMode.WYSIWYG) {
-				this._value(this._editor.getValue())
-			} else {
-				this._value(assertNotNull(this._domTextArea).value)
-			}
-		}
+		const getPlaceholder = () =>
+			!this.active && this.isEmpty()
+				? m(
+						".abs.text-ellipsis.noselect.z1.i.pr-s",
+						{
+							oncreate: (vnode) => (this.placeholderDomElement = vnode.dom as HTMLElement),
+							onclick: () =>
+								this.mode === HtmlEditorMode.WYSIWYG ? assertNotNull(this.editor.domElement).focus() : assertNotNull(this.domTextArea).focus(),
+						},
+						this.placeholderId ? lang.get(this.placeholderId) : "",
+				  )
+				: null
 
-		let getPlaceholder = () => {
-			return (!this._active && this.isEmpty()) ? m(".abs.text-ellipsis.noselect.backface_fix.z1.i.pr-s", {
-					oncreate: vnode => this._placeholderDomElement = vnode.dom as HTMLElement,
-					onclick: () => this._mode() === HtmlEditorMode.WYSIWYG
-						? assertNotNull(this._editor.domElement).focus()
-						: assertNotNull(this._domTextArea).focus()
-				},
-				(this._placeholderId ? lang.get(this._placeholderId) : "")
-			) : null
-		}
-
-		const label = labelIdOrLabelFunction
-
-
-		const toolbar = new RichTextToolbar(this._editor, richToolbarOptions)
-
-		this.view = () => {
-			const borderClasses: string = this._showBorders
-				? (this._active
-						? ".editor-border-active"
-						: (".editor-border" + (this._modeSwitcher ? ".editor-no-top-border" : ""))
-				)
-				: ""
-			const renderedInjections = injections && injections() || null
-
-			return m(".html-editor" + (this._mode() === HtmlEditorMode.WYSIWYG ? ".text-break" : ""), [
-				this._modeSwitcher ? m(this._modeSwitcher) : null,
-				(label)
-					? m(".small.mt-form", lang.getMaybeLazy(label))
-					: null,
-				m(borderClasses, [
-					getPlaceholder(),
-					this._mode() === HtmlEditorMode.WYSIWYG
-						? m(".wysiwyg.rel.overflow-hidden.selectable", [
-							(this._editor.isEnabled() && (this._richToolbarOptions.enabled || renderedInjections))
+		return m(".html-editor" + (this.mode === HtmlEditorMode.WYSIWYG ? ".text-break" : ""), [
+			modeSwitcherLabel != null
+				? m(DropDownSelector, {
+						label: () => lang.getMaybeLazy(modeSwitcherLabel),
+						items: [
+							{ name: lang.get("richText_label"), value: HtmlEditorMode.WYSIWYG },
+							{ name: lang.get("htmlSourceCode_label"), value: HtmlEditorMode.HTML },
+						],
+						selectedValue: this.mode,
+						selectionChangedHandler: (mode: HtmlEditorMode) => {
+							this.mode = mode
+							this.setValue(this.value())
+							this.initializeEditorListeners()
+						},
+				  })
+				: null,
+			this.label ? m(".small.mt-form", lang.getMaybeLazy(this.label)) : null,
+			m(borderClasses, [
+				getPlaceholder(),
+				this.mode === HtmlEditorMode.WYSIWYG
+					? m(".wysiwyg.rel.overflow-hidden.selectable", [
+							this.editor.isEnabled() && (this.toolbarEnabled || renderedInjections)
 								? [
-									m(".flex-end.mr-negative-s.sticky.pb-2", [
-										(this._richToolbarOptions.enabled) ? m(toolbar) : null,
-										renderedInjections,
-									]),
-									m("hr.hr.mb-s")
-								]
+										m(".flex-end.sticky.pb-2", [
+											this.toolbarEnabled ? m(RichTextToolbar, Object.assign({ editor: this.editor }, this.toolbarAttrs)) : null,
+											renderedInjections,
+										]),
+										m("hr.hr.mb-s"),
+								  ]
 								: null,
-							m(this._editor,
-								{
-									oncreate: () => {
-										this._editor.initialized.promise.then(() => this._editor.setHTML(this._value()))
-									},
-									onremove: () => {
-										this._value(this.getValue())
+							m(this.editor, {
+								oncreate: () => {
+									this.editor.initialized.promise.then(() => this.editor.setHTML(this.value()))
+								},
+								onremove: () => {
+									this.value(this.getValue())
+								},
+							}),
+					  ])
+					: m(
+							".html",
+							m("textarea.input-area.selectable", {
+								oncreate: (vnode) => {
+									this.domTextArea = vnode.dom as HTMLTextAreaElement
+									if (!this.isEmpty()) {
+										this.domTextArea.value = this.value()
 									}
-								}
-							)
-						])
-						: m(".html", m("textarea.input-area.selectable", {
-							oncreate: vnode => {
-								this._domTextArea = vnode.dom as HTMLTextAreaElement
-								if (!this.isEmpty()) {
-									this._domTextArea.value = this._value()
-								}
-							},
-							onfocus: () => focus(),
-							onblur: () => blur(),
-							oninput: () => {
-								if (this._domTextArea) {
-									this._domTextArea.style.height = '0px'
-									this._domTextArea.style.height = (this._domTextArea.scrollHeight) + 'px'
-								}
-							},
-							style: {
-								'font-family': this._htmlMonospace ? 'monospace' : 'inherit',
-								"min-height": this._minHeight ? px(this._minHeight) : 'initial'
-							},
-							disabled: !this._editor.enabled
-						})),
-				])
-			])
+								},
+								onfocus: () => this.focus(),
+								onblur: () => this.blur(),
+								oninput: () => {
+									if (this.domTextArea) {
+										this.domTextArea.style.height = "0px"
+										this.domTextArea.style.height = this.domTextArea.scrollHeight + "px"
+									}
+								},
+								style: {
+									"font-family": this.htmlMonospace ? "monospace" : "inherit",
+									"min-height": this.minHeight ? px(this.minHeight) : "initial",
+								},
+								disabled: !this.editor.enabled,
+							}),
+					  ),
+			]),
+		])
+	}
+
+	private initializeEditorListeners() {
+		this.editor.initialized.promise.then(() => {
+			const dom = assertNotNull(this.editor?.domElement)
+			dom.onfocus = () => this.focus()
+			dom.onblur = () => this.blur()
+		})
+	}
+
+	private focus() {
+		this.active = true
+		m.redraw()
+	}
+
+	private blur() {
+		this.active = false
+		if (this.mode === HtmlEditorMode.WYSIWYG) {
+			this.value(this.editor.getValue())
+		} else {
+			this.value(assertNotNull(this.domTextArea).value)
 		}
 	}
 
-
-	setModeSwitcher(label: TranslationKey | lazy<string>): this {
-		this._modeSwitcher = new DropDownSelector(label, null, [
-			{name: lang.get("richText_label"), value: HtmlEditorMode.WYSIWYG},
-			{name: lang.get("htmlSourceCode_label"), value: HtmlEditorMode.HTML}
-		], this._mode).setSelectionChangedHandler(v => {
-			this._mode(v)
-		})
+	setModeSwitcher(label: TranslationText): this {
+		this.modeSwitcherLabel = label
 		return this
 	}
-
 
 	showBorders(): HtmlEditor {
 		this._showBorders = true
@@ -174,67 +158,87 @@ export class HtmlEditor implements Component {
 	}
 
 	setMinHeight(height: number): HtmlEditor {
-		this._minHeight = height
-		this._editor.setMinHeight(height)
+		this.minHeight = height
+		this.editor.setMinHeight(height)
 		return this
 	}
 
 	setPlaceholderId(placeholderId: TranslationKey): HtmlEditor {
-		this._placeholderId = placeholderId
+		this.placeholderId = placeholderId
 		return this
 	}
 
 	getValue(): string {
-		if (this._mode() === HtmlEditorMode.WYSIWYG) {
-			if (this._editor.isAttached()) {
-				return this._editor.getHTML()
+		if (this.mode === HtmlEditorMode.WYSIWYG) {
+			if (this.editor.isAttached()) {
+				return this.editor.getHTML()
 			} else {
-				return this._value()
+				return this.value()
 			}
 		} else {
-			if (this._domTextArea) {
-				return htmlSanitizer.sanitizeHTML(this._domTextArea.value, {blockExternalContent: false}).html
+			if (this.domTextArea) {
+				return htmlSanitizer.sanitizeHTML(this.domTextArea.value, { blockExternalContent: false }).html
 			} else {
-				return this._value()
+				return this.value()
 			}
 		}
 	}
 
 	setValue(html: string): HtmlEditor {
-		if (this._mode() === HtmlEditorMode.WYSIWYG) {
-			this._editor.initialized.promise.then(() => this._editor.setHTML(html))
-		} else if (this._domTextArea) {
-			this._domTextArea.value = html
+		if (this.mode === HtmlEditorMode.WYSIWYG) {
+			this.editor.initialized.promise.then(() => this.editor.setHTML(html))
+		} else if (this.domTextArea) {
+			this.domTextArea.value = html
 		}
-		this._value(html)
+		this.value(html)
 		return this
 	}
 
-
 	isActive(): boolean {
-		return this._active
+		return this.active
 	}
 
 	isEmpty(): boolean {
-		return this._value() === ""
+		// either nothing or default squire content
+		return this.value() === "" || this.value() === '<div dir="auto"><br></div>'
 	}
 
-
 	setEnabled(enabled: boolean): HtmlEditor {
-		this._editor.setEnabled(enabled)
-		if (this._domTextArea) {
-			this._domTextArea.disabled = !enabled
+		this.editor.setEnabled(enabled)
+		if (this.domTextArea) {
+			this.domTextArea.disabled = !enabled
 		}
 		return this
 	}
 
 	setMode(mode: HtmlEditorMode): HtmlEditor {
-		this._mode(mode)
+		this.mode = mode
 		return this
 	}
 
 	setHtmlMonospace(monospace: boolean): HtmlEditor {
-		this._htmlMonospace = monospace
+		this.htmlMonospace = monospace
+		return this
+	}
+
+	/** show the rich text toolbar */
+	enableToolbar(): this {
+		this.toolbarEnabled = true
+		return this
+	}
+
+	isToolbarEnabled(): boolean {
+		return this.toolbarEnabled
+	}
+
+	/** toggle the visibility of the rich text toolbar */
+	toggleToolbar(): this {
+		this.toolbarEnabled = !this.toolbarEnabled
+		return this
+	}
+
+	setToolbarOptions(attrs: Omit<RichTextToolbarAttrs, "editor">): this {
+		this.toolbarAttrs = attrs
 		return this
 	}
 }

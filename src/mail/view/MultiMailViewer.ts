@@ -1,63 +1,66 @@
-import m, {Component} from "mithril"
-import {MailView} from "./MailView"
-import {assertMainOrNode, isApp} from "../../api/common/Env"
-import {ActionBar} from "../../gui/base/ActionBar"
+import m, { Component, Vnode } from "mithril"
+import { assertMainOrNode, isApp } from "../../api/common/Env"
+import { ActionBar } from "../../gui/base/ActionBar"
 import ColumnEmptyMessageBox from "../../gui/base/ColumnEmptyMessageBox"
-import {lang} from "../../misc/LanguageViewModel"
-import {Icons} from "../../gui/base/icons/Icons"
-import {getFolderIcon, getFolderName, getSortedCustomFolders, getSortedSystemFolders, markMails} from "../model/MailUtils"
-import {logins} from "../../api/main/LoginController"
-import {FeatureType} from "../../api/common/TutanotaConstants"
-import type {ButtonAttrs} from "../../gui/base/ButtonN"
-import {ButtonType} from "../../gui/base/ButtonN"
-import {BootIcons} from "../../gui/base/icons/BootIcons"
-import {theme} from "../../gui/theme"
-import type {Mail} from "../../api/entities/tutanota/TypeRefs.js"
-import {locator} from "../../api/main/MainLocator"
-import {moveMails, promptAndDeleteMails} from "./MailGuiUtils"
-import {attachDropdown} from "../../gui/base/DropdownN"
-import {exportMails} from "../export/Exporter"
-import {showProgressDialog} from "../../gui/dialogs/ProgressDialog"
-import {MailboxDetail} from "../model/MailModel.js"
+import { lang } from "../../misc/LanguageViewModel"
+import { Icons } from "../../gui/base/icons/Icons"
+import { getFolderIcon, getIndentedFolderNameForDropdown, getMoveTargetFolderSystems, markMails } from "../model/MailUtils"
+import { logins } from "../../api/main/LoginController"
+import { FeatureType } from "../../api/common/TutanotaConstants"
+import { BootIcons } from "../../gui/base/icons/BootIcons"
+import { theme } from "../../gui/theme"
+import type { Mail } from "../../api/entities/tutanota/TypeRefs.js"
+import { locator } from "../../api/main/MainLocator"
+import { moveMails, promptAndDeleteMails } from "./MailGuiUtils"
+import { attachDropdown, DropdownButtonAttrs } from "../../gui/base/Dropdown.js"
+import { exportMails } from "../export/Exporter"
+import { showProgressDialog } from "../../gui/dialogs/ProgressDialog"
+import { IconButtonAttrs } from "../../gui/base/IconButton.js"
 
 assertMainOrNode()
+
+export type MultiMailViewerAttrs = {
+	selectedEntities: Array<Mail>
+	selectNone: () => unknown
+}
 
 /**
  * The MailViewer displays the action buttons for multiple selected emails.
  */
-export class MultiMailViewer implements Component {
-	view: Component["view"]
-	private readonly _mailView: MailView
-
-	constructor(mailView: MailView) {
-		this._mailView = mailView
-
-		this.view = () => {
-			return [
-				m(
-					".fill-absolute.mt-xs.plr-l",
-					mailView.mailList && mailView.mailList.list.getSelectedEntities().length > 0
-						? [
-							m(".button-height"), // just for the margin
-							m(".flex-space-between.mr-negative-s", [
-								m(".flex.items-center", this._getMailSelectionMessage(mailView)),
-								m(ActionBar, {
-									buttons: this.getActionBarButtons(true),
-								}),
-							]),
-						]
-						: m(ColumnEmptyMessageBox, {
-							message: () => this._getMailSelectionMessage(mailView),
+export class MultiMailViewer implements Component<MultiMailViewerAttrs> {
+	view({ attrs }: Vnode<MultiMailViewerAttrs>) {
+		const { selectedEntities, selectNone } = attrs
+		return [
+			m(
+				".fill-absolute.mt-xs",
+				selectedEntities.length > 0
+					? [
+							m(
+								".flex-space-between.pl-l",
+								{
+									style: {
+										marginRight: "6px",
+									},
+								},
+								[
+									m(".flex.items-center", this.getMailSelectionMessage(selectedEntities)),
+									m(ActionBar, {
+										buttons: getMultiMailViewerActionButtonAttrs(selectedEntities, selectNone, true),
+									}),
+								],
+							),
+					  ]
+					: m(ColumnEmptyMessageBox, {
+							message: () => this.getMailSelectionMessage(selectedEntities),
 							icon: BootIcons.Mail,
 							color: theme.content_message_bg,
-						}),
-				),
-			]
-		}
+					  }),
+			),
+		]
 	}
 
-	_getMailSelectionMessage(mailView: MailView): string {
-		let nbrOfSelectedMails = mailView.mailList ? mailView.mailList.list.getSelectedEntities().length : 0
+	private getMailSelectionMessage(selectedEntities: Array<Mail>): string {
+		let nbrOfSelectedMails = selectedEntities.length
 
 		if (nbrOfSelectedMails === 0) {
 			return lang.get("noMail_msg")
@@ -69,116 +72,101 @@ export class MultiMailViewer implements Component {
 			})
 		}
 	}
+}
 
-	getActionBarButtons(prependCancel: boolean = false): ButtonAttrs[] {
-		const getSelectedMails = () => this._mailView.mailList?.list.getSelectedEntities() ?? []
+/**
+ *
+ * @param selectedEntities the list of entities (mails) the produced action button attrs apply to
+ * @param selectNone a function that can be used to clear the selection
+ * @param prependCancel should we have a cancel button that clears the selection
+ */
+export function getMultiMailViewerActionButtonAttrs(selectedEntities: Array<Mail>, selectNone: () => unknown, prependCancel: boolean): Array<IconButtonAttrs> {
+	const actionBarAction = (action: () => unknown) => () => {
+		selectNone()
+		action()
+	}
 
-		const cancel: ButtonAttrs[] = prependCancel ?
-			[{
-				label: "cancel_action",
-				click: () => this._mailView.mailList?.list.selectNone(),
-				icon: () => Icons.Cancel,
-			}]
-			: []
-
-		return [
-			...cancel,
-			attachDropdown(
-				{
-					mainButtonAttrs: {
-						label: "move_action",
-						icon: () => Icons.Folder,
-					},
-					childAttrs: () => this.makeMoveMailButtons(getSelectedMails())
-				},
-			),
-			{
-				label: "delete_action",
-				click: () => {
-					const mails = getSelectedMails()
-					promptAndDeleteMails(locator.mailModel, mails, () => this._mailView.mailList?.list.selectNone())
-				},
-				icon: () => Icons.Trash,
+	const move = [
+		attachDropdown({
+			mainButtonAttrs: {
+				title: "move_action",
+				icon: Icons.Folder,
 			},
-			attachDropdown(
+			childAttrs: async () => {
+				const moveTargets = await getMoveMailButtonAttrs(selectedEntities, selectNone)
+				return moveTargets.length > 0 ? moveTargets : []
+			},
+		}),
+	]
+
+	const cancel: IconButtonAttrs[] = prependCancel
+		? [
 				{
-					mainButtonAttrs: {
-						label: "more_label",
-						icon: () => Icons.More,
-					}, childAttrs: () => [
-						{
-							label: "markUnread_action",
-							click: this._actionBarAction(mails => markMails(locator.entityClient, mails, true)),
-							icon: () => Icons.NoEye,
-							type: ButtonType.Dropdown,
-						},
-						{
-							label: "markRead_action",
-							click: this._actionBarAction(mails => markMails(locator.entityClient, mails, false)),
-							icon: () => Icons.Eye,
-							type: ButtonType.Dropdown,
-						},
-						!isApp() && !logins.isEnabled(FeatureType.DisableMailExport)
-							? {
-								label: "export_action",
-								click: this._actionBarAction(mails =>
-									showProgressDialog("pleaseWait_msg", exportMails(mails, locator.entityClient, locator.fileController)),
-								),
-								icon: () => Icons.Export,
-								type: ButtonType.Dropdown,
-							}
-							: null,
-					]
+					title: "cancel_action",
+					click: selectNone,
+					icon: Icons.Cancel,
 				},
+		  ]
+		: []
+
+	return [
+		...cancel,
+		{
+			title: "delete_action",
+			click: () => promptAndDeleteMails(locator.mailModel, selectedEntities, () => selectNone()),
+			icon: Icons.Trash,
+		},
+		...move,
+		attachDropdown({
+			mainButtonAttrs: {
+				title: "more_label",
+				icon: Icons.More,
+			},
+			childAttrs: () => [
+				{
+					label: "markUnread_action",
+					click: actionBarAction(() => markMails(locator.entityClient, selectedEntities, true)),
+					icon: Icons.NoEye,
+				},
+				{
+					label: "markRead_action",
+					click: actionBarAction(() => markMails(locator.entityClient, selectedEntities, false)),
+					icon: Icons.Eye,
+				},
+				!isApp() && !logins.isEnabled(FeatureType.DisableMailExport)
+					? {
+							label: "export_action",
+							click: actionBarAction(() =>
+								showProgressDialog("pleaseWait_msg", exportMails(selectedEntities, locator.entityClient, locator.fileController)),
+							),
+							icon: Icons.Export,
+					  }
+					: null,
+			],
+		}),
+	]
+}
+
+/**
+ * Generate button attrs that will move the selected mails to respective folders on clicking the button
+ */
+async function getMoveMailButtonAttrs(selectedEntities: Mail[], selectNone: () => unknown): Promise<Array<DropdownButtonAttrs>> {
+	const actionBarAction = (action: () => unknown) => () => {
+		selectNone()
+		action()
+	}
+	const moveTargets = await getMoveTargetFolderSystems(locator.mailModel, selectedEntities)
+	return moveTargets.map((folderInfo) => {
+		return {
+			label: () => getIndentedFolderNameForDropdown(folderInfo),
+			click: actionBarAction(() =>
+				moveMails({
+					mailModel: locator.mailModel,
+					mails: selectedEntities,
+					targetMailFolder: folderInfo.folder,
+				}),
 			),
-		]
-	}
-
-	/**
-	 * Generate buttons that will move the selected mails to respective folders
-	 */
-	private async makeMoveMailButtons(selectedEntities: Mail[]): Promise<ButtonAttrs[]> {
-		let selectedMailbox: MailboxDetail | null = null
-
-		for (const mail of selectedEntities) {
-			const mailBox = await locator.mailModel.getMailboxDetailsForMail(mail)
-
-			// We can't move if mails are from different mailboxes
-			if (selectedMailbox != null && selectedMailbox !== mailBox) {
-				return []
-			}
-
-			selectedMailbox = mailBox
+			icon: getFolderIcon(folderInfo.folder),
 		}
-
-		if (selectedMailbox == null) return []
-		return getSortedSystemFolders(selectedMailbox.folders)
-			.concat(getSortedCustomFolders(selectedMailbox.folders))
-			.filter(f => f !== this._mailView.selectedFolder)
-			.map(f => {
-				return {
-					label: () => getFolderName(f),
-					click: this._actionBarAction(mails => moveMails({mailModel: locator.mailModel, mails: mails, targetMailFolder: f})),
-					icon: getFolderIcon(f),
-					type: ButtonType.Dropdown,
-				}
-			})
-	}
-
-	/**
-	 * Helper function to generate action which will first unselect everything and then execute action with previously
-	 * selected mails. Workaround to avoid selecting the next email after the selected emails are removed.
-	 * @param action
-	 * @returns {Function}
-	 * @private
-	 */
-	_actionBarAction(action: (arg0: Mail[]) => unknown): () => void {
-		return () => {
-			const mails = this._mailView.mailList?.list.getSelectedEntities() ?? []
-
-			this._mailView.mailList?.list.selectNone()
-
-			action(mails)
-		}
-	}
+	})
 }

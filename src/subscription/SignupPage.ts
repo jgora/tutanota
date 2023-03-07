@@ -1,10 +1,10 @@
-import m, {Children, Vnode, VnodeDOM} from "mithril"
-import type {TranslationKey} from "../misc/LanguageViewModel"
-import type {UpgradeSubscriptionData} from "./UpgradeSubscriptionWizard"
-import {getDisplayNameOfSubscriptionType, SubscriptionType} from "./SubscriptionUtils"
-import type {WizardPageAttrs, WizardPageN} from "../gui/base/WizardDialogN"
-import {emitWizardEvent, WizardEventType} from "../gui/base/WizardDialogN"
-import {SignupForm} from "./SignupForm"
+import m, { Children, Vnode, VnodeDOM } from "mithril"
+import type { TranslationKey } from "../misc/LanguageViewModel"
+import type { UpgradeSubscriptionData } from "./UpgradeSubscriptionWizard"
+import type { WizardPageAttrs, WizardPageN } from "../gui/base/WizardDialog.js"
+import { emitWizardEvent, WizardEventType } from "../gui/base/WizardDialog.js"
+import { SignupForm } from "./SignupForm"
+import { getDisplayNameOfSubscriptionType, SubscriptionType } from "./FeatureListProvider"
 
 type ConfirmStatus = {
 	type: string
@@ -12,7 +12,7 @@ type ConfirmStatus = {
 }
 
 export class SignupPage implements WizardPageN<UpgradeSubscriptionData> {
-	private dom!: HTMLElement;
+	private dom!: HTMLElement
 
 	oncreate(vnode: VnodeDOM<WizardPageAttrs<UpgradeSubscriptionData>>) {
 		this.dom = vnode.dom as HTMLElement
@@ -24,13 +24,13 @@ export class SignupPage implements WizardPageN<UpgradeSubscriptionData> {
 		let mailAddress: undefined | string = undefined
 		if (newAccountData) mailAddress = newAccountData.mailAddress
 		return m(SignupForm, {
-			newSignupHandler: newAccountData => {
+			newSignupHandler: (newAccountData) => {
 				if (newAccountData) data.newAccountData = newAccountData
 				emitWizardEvent(this.dom, WizardEventType.SHOWNEXTPAGE)
 			},
 			isBusinessUse: data.options.businessUse,
 			isPaidSubscription: () => data.type !== SubscriptionType.Free,
-			campaign: () => data.campaign,
+			campaign: () => data.registrationDataId,
 			prefilledMailAddress: mailAddress,
 			readonly: !!newAccountData,
 		})

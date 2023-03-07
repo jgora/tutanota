@@ -1,10 +1,10 @@
-import m, {Children, Component, Vnode} from "mithril"
-import type {TranslationText} from "../../../misc/LanguageViewModel"
-import {lang} from "../../../misc/LanguageViewModel"
-import {addFlash, removeFlash} from "../Flash"
-import {assertNotNull} from "@tutao/tutanota-utils"
-import type {clickHandler} from "../GuiUtils"
-import {theme} from "../../theme.js"
+import m, { Children, Component, Vnode } from "mithril"
+import type { TranslationText } from "../../../misc/LanguageViewModel"
+import { lang } from "../../../misc/LanguageViewModel"
+import { addFlash, removeFlash } from "../Flash"
+import { assertNotNull } from "@tutao/tutanota-utils"
+import type { clickHandler } from "../GuiUtils"
+import { theme } from "../../theme.js"
 
 export interface FolderColumnHeaderButtonAttrs {
 	label: TranslationText
@@ -14,17 +14,17 @@ export interface FolderColumnHeaderButtonAttrs {
 export class FolderColumnHeaderButton implements Component<FolderColumnHeaderButtonAttrs> {
 	private domButton: HTMLElement | null = null
 
-	view({attrs}: Vnode<FolderColumnHeaderButtonAttrs>): Children {
-		return m("button",
+	view({ attrs }: Vnode<FolderColumnHeaderButtonAttrs>): Children {
+		return m(
+			"button",
 			{
-				class: "bg-transparent button-height full-width noselect limit-width",
+				class: "bg-transparent button-height full-width noselect limit-width border-radius-small",
 				style: {
 					border: `2px solid ${theme.content_accent}`,
-					"border-radius": "3px",
 				},
 				onclick: (event: MouseEvent) => attrs.click(event, assertNotNull(this.domButton)),
 				title: lang.getMaybeLazy(attrs.label),
-				oncreate: vnode => this.domButton = vnode.dom as HTMLButtonElement,
+				oncreate: (vnode) => (this.domButton = vnode.dom as HTMLButtonElement),
 			},
 			m(
 				"",
@@ -34,9 +34,10 @@ export class FolderColumnHeaderButton implements Component<FolderColumnHeaderBut
 					style: {
 						borderColor: theme.content_accent,
 					},
-					oncreate: vnode => addFlash(vnode.dom),
-					onremove: vnode => removeFlash(vnode.dom),
-				}, this.renderLabel(attrs)
+					oncreate: (vnode) => addFlash(vnode.dom),
+					onremove: (vnode) => removeFlash(vnode.dom),
+				},
+				this.renderLabel(attrs),
 			),
 		)
 	}

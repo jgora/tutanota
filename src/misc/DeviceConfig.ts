@@ -1,14 +1,15 @@
-import type {Base64} from "@tutao/tutanota-utils"
-import {base64ToUint8Array, typedEntries, uint8ArrayToBase64} from "@tutao/tutanota-utils"
-import type {LanguageCode} from "./LanguageViewModel"
-import type {ThemeId} from "../gui/theme"
-import type {CalendarViewType} from "../calendar/view/CalendarViewModel"
-import type {CredentialsStorage, PersistentCredentials} from "./credentials/CredentialsProvider"
-import {ProgrammingError} from "../api/common/error/ProgrammingError"
-import type {CredentialEncryptionMode} from "./credentials/CredentialEncryptionMode"
-import {assertMainOrNodeBoot} from "../api/common/Env"
-import {PersistedAssignmentData, UsageTestStorage} from "./UsageTestModel"
-import {client} from "./ClientDetector"
+import type { Base64 } from "@tutao/tutanota-utils"
+import { base64ToUint8Array, typedEntries, uint8ArrayToBase64 } from "@tutao/tutanota-utils"
+import type { LanguageCode } from "./LanguageViewModel"
+import type { ThemeId } from "../gui/theme"
+import type { CalendarViewType } from "../calendar/view/CalendarViewModel"
+import type { CredentialsStorage, PersistentCredentials } from "./credentials/CredentialsProvider.js"
+import { ProgrammingError } from "../api/common/error/ProgrammingError"
+import type { CredentialEncryptionMode } from "./credentials/CredentialEncryptionMode"
+import { assertMainOrNodeBoot } from "../api/common/Env"
+import { PersistedAssignmentData, UsageTestStorage } from "./UsageTestModel"
+import { client } from "./ClientDetector"
+import { NewsItemStorage } from "./news/NewsModel.js"
 
 assertMainOrNodeBoot()
 export const defaultThemeId: ThemeId = "light"
@@ -17,35 +18,37 @@ export const defaultThemeId: ThemeId = "light"
  * Definition of the config object that will be saved to local storage
  */
 interface ConfigObject {
-	_version: number,
+	_version: number
 	_credentials: Map<Id, PersistentCredentials>
 	_scheduledAlarmUsers: Id[]
 	_themeId: ThemeId
 	_language: LanguageCode | null
 	_defaultCalendarView: Record<Id, CalendarViewType | null>
+	/** map from user id to a list of calendar grouproots*/
 	_hiddenCalendars: Record<Id, Id[]>
+	/** map from user id to a list of expanded folders (elementId)*/
+	expandedMailFolders: Record<Id, Id[]>
 	_signupToken: string
 	_credentialEncryptionMode: CredentialEncryptionMode | null
 	_encryptedCredentialsKey: Base64 | null
+	/** list of acknowledged news item ids for this device */
+	acknowledgedNewsItems: Id[]
 	_testDeviceId: string | null
 	_testAssignments: PersistedAssignmentData | null
 	offlineTimeRangeDaysByUser: Record<Id, number>
+	conversationViewShowOnlySelectedMail: boolean
 }
 
 /**
  * Device config for internal user auto login. Only one config per device is stored.
  */
-export class DeviceConfig implements CredentialsStorage, UsageTestStorage {
-
+export class DeviceConfig implements CredentialsStorage, UsageTestStorage, NewsItemStorage {
 	public static Version = 3
 	public static LocalStorageKey = "tutanotaConfig"
 
 	private config!: ConfigObject
 
-	constructor(
-		private readonly _version: number,
-		private readonly localStorage: Storage | null
-	) {
+	constructor(private readonly _version: number, private readonly localStorage: Storage | null) {
 		this.init()
 	}
 
@@ -59,7 +62,7 @@ export class DeviceConfig implements CredentialsStorage, UsageTestStorage {
 		}
 
 		let signupToken
-		if (!!loadedConfig._signupToken) {
+		if (loadedConfig._signupToken) {
 			signupToken = loadedConfig._signupToken
 		} else {
 			let bytes = new Uint8Array(6)
@@ -74,15 +77,18 @@ export class DeviceConfig implements CredentialsStorage, UsageTestStorage {
 			_credentials: loadedConfig._credentials ? new Map(typedEntries(loadedConfig._credentials)) : new Map(),
 			_credentialEncryptionMode: loadedConfig._credentialEncryptionMode ?? null,
 			_encryptedCredentialsKey: loadedConfig._encryptedCredentialsKey ?? null,
+			acknowledgedNewsItems: loadedConfig.acknowledgedNewsItems ?? [],
 			_themeId: loadedConfig._themeId ?? defaultThemeId,
 			_scheduledAlarmUsers: loadedConfig._scheduledAlarmUsers ?? [],
 			_language: loadedConfig._language ?? null,
 			_defaultCalendarView: loadedConfig._defaultCalendarView ?? {},
 			_hiddenCalendars: loadedConfig._hiddenCalendars ?? {},
+			expandedMailFolders: loadedConfig.expandedMailFolders ?? {},
 			_testDeviceId: loadedConfig._testDeviceId ?? null,
 			_testAssignments: loadedConfig._testAssignments ?? null,
 			_signupToken: signupToken,
-			offlineTimeRangeDaysByUser: loadedConfig.offlineTimeRangeDaysByUser ?? {}
+			offlineTimeRangeDaysByUser: loadedConfig.offlineTimeRangeDaysByUser ?? {},
+			conversationViewShowOnlySelectedMail: loadedConfig.conversationViewShowOnlySelectedMail ?? false,
 		}
 
 		// We need to write the config if there was a migration and if we generate the signup token and if.
@@ -111,7 +117,6 @@ export class DeviceConfig implements CredentialsStorage, UsageTestStorage {
 	}
 
 	store(persistentCredentials: PersistentCredentials): void {
-
 		const existing = this.config._credentials.get(persistentCredentials.credentialInfo.userId)
 
 		if (existing?.databaseKey) {
@@ -230,6 +235,29 @@ export class DeviceConfig implements CredentialsStorage, UsageTestStorage {
 		}
 	}
 
+	getExpandedFolders(user: Id): Id[] {
+		return this.config.expandedMailFolders.hasOwnProperty(user) ? this.config.expandedMailFolders[user] : []
+	}
+
+	setExpandedFolders(user: Id, folders: Id[]) {
+		if (this.config.expandedMailFolders[user] !== folders) {
+			this.config.expandedMailFolders[user] = folders
+
+			this.writeToStorage()
+		}
+	}
+
+	hasAcknowledgedNewsItemForDevice(newsItemId: Id): boolean {
+		return this.config.acknowledgedNewsItems.includes(newsItemId)
+	}
+
+	acknowledgeNewsItemForDevice(newsItemId: Id) {
+		if (!this.config.acknowledgedNewsItems.includes(newsItemId)) {
+			this.config.acknowledgedNewsItems.push(newsItemId)
+			this.writeToStorage()
+		}
+	}
+
 	getCredentialEncryptionMode(): CredentialEncryptionMode | null {
 		return this.config._credentialEncryptionMode
 	}
@@ -280,8 +308,16 @@ export class DeviceConfig implements CredentialsStorage, UsageTestStorage {
 		this.config.offlineTimeRangeDaysByUser[userId] = days
 		this.writeToStorage()
 	}
-}
 
+	getConversationViewShowOnlySelectedMail(): boolean {
+		return this.config.conversationViewShowOnlySelectedMail
+	}
+
+	setConversationViewShowOnlySelectedMail(setting: boolean) {
+		this.config.conversationViewShowOnlySelectedMail = setting
+		this.writeToStorage()
+	}
+}
 
 export function migrateConfig(loadedConfig: any) {
 	if (loadedConfig === DeviceConfig.Version) {
@@ -303,12 +339,10 @@ export function migrateConfig(loadedConfig: any) {
  * Exported for testing
  */
 export function migrateConfigV2to3(loadedConfig: any) {
-
 	const oldCredentialsArray = loadedConfig._credentials
 	loadedConfig._credentials = {}
 
 	for (let credential of oldCredentialsArray) {
-
 		let login, type
 		if (credential.mailAddress.includes("@")) {
 			login = credential.mailAddress

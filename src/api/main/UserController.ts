@@ -1,16 +1,16 @@
-import {AccountType, GroupType, OperationType} from "../common/TutanotaConstants"
-import type {Base64Url} from "@tutao/tutanota-utils"
-import {downcast, first, mapAndFilterNull, neverNull, ofClass} from "@tutao/tutanota-utils"
-import {MediaType} from "../common/EntityFunctions"
-import {assertMainOrNode, getHttpOrigin, isDesktop} from "../common/Env"
-import type {EntityUpdateData} from "./EventController"
-import {isUpdateForTypeRef} from "./EventController"
-import {NotFoundError} from "../common/error/RestError"
-import {locator} from "./MainLocator"
-import {isSameId} from "../common/utils/EntityUtils"
-import {getWhitelabelCustomizations} from "../../misc/WhitelabelCustomizations"
-import {EntityClient} from "../common/EntityClient"
-import {CloseSessionService} from "../entities/sys/Services"
+import { AccountType, GroupType, OperationType } from "../common/TutanotaConstants"
+import type { Base64Url } from "@tutao/tutanota-utils"
+import { downcast, first, mapAndFilterNull, neverNull, ofClass } from "@tutao/tutanota-utils"
+import { MediaType } from "../common/EntityFunctions"
+import { assertMainOrNode, getApiOrigin, isDesktop } from "../common/Env"
+import type { EntityUpdateData } from "./EventController"
+import { isUpdateForTypeRef } from "./EventController"
+import { NotFoundError } from "../common/error/RestError"
+import { locator } from "./MainLocator"
+import { isSameId } from "../common/utils/EntityUtils"
+import { getWhitelabelCustomizations } from "../../misc/WhitelabelCustomizations"
+import { EntityClient } from "../common/EntityClient"
+import { CloseSessionService } from "../entities/sys/Services"
 import {
 	AccountingInfo,
 	AccountingInfoTypeRef,
@@ -26,93 +26,47 @@ import {
 	User,
 	UserTypeRef,
 	WhitelabelConfig,
-	WhitelabelConfigTypeRef
+	WhitelabelConfigTypeRef,
 } from "../entities/sys/TypeRefs"
 import {
 	createUserSettingsGroupRoot,
 	TutanotaProperties,
 	TutanotaPropertiesTypeRef,
 	UserSettingsGroupRoot,
-	UserSettingsGroupRootTypeRef
+	UserSettingsGroupRootTypeRef,
 } from "../entities/tutanota/TypeRefs"
-import {typeModels as sysTypeModels} from "../entities/sys/TypeModels"
-import {SessionType} from "../common/SessionType"
+import { typeModels as sysTypeModels } from "../entities/sys/TypeModels"
+import { SessionType } from "../common/SessionType"
 
 assertMainOrNode()
 
-export interface IUserController {
-	// should be readonly but is needed for a workaround in CalendarModel
-	user: User
-	readonly userGroupInfo: GroupInfo
-	readonly props: TutanotaProperties
-	readonly sessionId: IdTuple
-	readonly accessToken: string
-	readonly userSettingsGroupRoot: UserSettingsGroupRoot
-	readonly sessionType: SessionType
-	readonly userId: Id
-
-	isGlobalAdmin(): boolean
-
-	isGlobalOrLocalAdmin(): boolean
-
-	isFreeAccount(): boolean
-
-	isPremiumAccount(): boolean
-
-	isInternalUser(): boolean
-
-	loadCustomer(): Promise<Customer>
-
-	loadCustomerInfo(): Promise<CustomerInfo>
-
-	loadAccountingInfo(): Promise<AccountingInfo>
-
-	getMailGroupMemberships(): GroupMembership[]
-
-	getCalendarMemberships(): GroupMembership[]
-
-	getUserMailGroupMembership(): GroupMembership
-
-	getLocalAdminGroupMemberships(): GroupMembership[]
-
-	getTemplateMemberships(): GroupMembership[]
-
-	entityEventsReceived(updates: ReadonlyArray<EntityUpdateData>, eventOwnerGroupId: Id): Promise<void>
-
-	/**
-	 * Delete the session (only if it's a non-persistent session
-	 * @param sync whether or not to delete in the main thread. For example, will be true when logging out due to closing the tab
-	 */
-	deleteSession(sync: boolean): Promise<void>
-
-	loadWhitelabelConfig(): Promise<| {
-		whitelabelConfig: WhitelabelConfig
-		domainInfo: DomainInfo
-	}
-		| null
-		| undefined>
-
-	isWhitelabelAccount(): Promise<boolean>
-
-	isPersistentSession(): boolean
-}
-
-export class UserController implements IUserController {
-
+export class UserController {
 	constructor(
+		// should be readonly but is needed for a workaround in CalendarModel
 		public user: User,
-		public userGroupInfo: GroupInfo,
-		readonly sessionId: IdTuple,
-		public props: TutanotaProperties,
-		readonly accessToken: Base64Url,
-		public userSettingsGroupRoot: UserSettingsGroupRoot,
-		readonly sessionType: SessionType,
+		private _userGroupInfo: GroupInfo,
+		public readonly sessionId: IdTuple,
+		private _props: TutanotaProperties,
+		public readonly accessToken: Base64Url,
+		private _userSettingsGroupRoot: UserSettingsGroupRoot,
+		public readonly sessionType: SessionType,
 		private readonly entityClient: EntityClient,
-	) {
-	}
+	) {}
 
 	get userId(): Id {
 		return this.user._id
+	}
+
+	get props(): TutanotaProperties {
+		return this._props
+	}
+
+	get userGroupInfo(): GroupInfo {
+		return this._userGroupInfo
+	}
+
+	get userSettingsGroupRoot(): UserSettingsGroupRoot {
+		return this._userSettingsGroupRoot
 	}
 
 	/**
@@ -121,7 +75,7 @@ export class UserController implements IUserController {
 	 */
 	isGlobalAdmin(): boolean {
 		if (this.isInternalUser()) {
-			return this.user.memberships.find(m => m.groupType === GroupType.Admin) != null
+			return this.user.memberships.find((m) => m.groupType === GroupType.Admin) != null
 		} else {
 			return false
 		}
@@ -129,7 +83,7 @@ export class UserController implements IUserController {
 
 	isGlobalOrLocalAdmin(): boolean {
 		if (this.isInternalUser()) {
-			return this.user.memberships.find(m => m.groupType === GroupType.Admin || m.groupType === GroupType.LocalAdmin) != null
+			return this.user.memberships.find((m) => m.groupType === GroupType.Admin || m.groupType === GroupType.LocalAdmin) != null
 		} else {
 			return false
 		}
@@ -156,23 +110,23 @@ export class UserController implements IUserController {
 	}
 
 	loadCustomer(): Promise<Customer> {
-		return locator.entityClient.load(CustomerTypeRef, neverNull(this.user.customer))
+		return this.entityClient.load(CustomerTypeRef, neverNull(this.user.customer))
 	}
 
 	loadCustomerInfo(): Promise<CustomerInfo> {
-		return this.loadCustomer().then(customer => locator.entityClient.load(CustomerInfoTypeRef, customer.customerInfo))
+		return this.loadCustomer().then((customer) => this.entityClient.load(CustomerInfoTypeRef, customer.customerInfo))
 	}
 
 	loadAccountingInfo(): Promise<AccountingInfo> {
-		return this.loadCustomerInfo().then(customerInfo => locator.entityClient.load(AccountingInfoTypeRef, customerInfo.accountingInfo))
+		return this.loadCustomerInfo().then((customerInfo) => this.entityClient.load(AccountingInfoTypeRef, customerInfo.accountingInfo))
 	}
 
 	getMailGroupMemberships(): GroupMembership[] {
-		return this.user.memberships.filter(membership => membership.groupType === GroupType.Mail)
+		return this.user.memberships.filter((membership) => membership.groupType === GroupType.Mail)
 	}
 
 	getCalendarMemberships(): GroupMembership[] {
-		return this.user.memberships.filter(membership => membership.groupType === GroupType.Calendar)
+		return this.user.memberships.filter((membership) => membership.groupType === GroupType.Calendar)
 	}
 
 	getUserMailGroupMembership(): GroupMembership {
@@ -180,16 +134,16 @@ export class UserController implements IUserController {
 	}
 
 	getLocalAdminGroupMemberships(): GroupMembership[] {
-		return this.user.memberships.filter(membership => membership.groupType === GroupType.LocalAdmin)
+		return this.user.memberships.filter((membership) => membership.groupType === GroupType.LocalAdmin)
 	}
 
 	getTemplateMemberships(): GroupMembership[] {
-		return this.user.memberships.filter(membership => membership.groupType === GroupType.Template)
+		return this.user.memberships.filter((membership) => membership.groupType === GroupType.Template)
 	}
 
 	async entityEventsReceived(updates: ReadonlyArray<EntityUpdateData>, eventOwnerGroupId: Id): Promise<void> {
 		for (const update of updates) {
-			const {instanceListId, instanceId, operation} = update
+			const { instanceListId, instanceId, operation } = update
 			if (operation === OperationType.UPDATE && isUpdateForTypeRef(UserTypeRef, update) && isSameId(this.user.userGroup.group, eventOwnerGroupId)) {
 				this.user = await this.entityClient.load(UserTypeRef, this.user._id)
 			} else if (
@@ -197,11 +151,11 @@ export class UserController implements IUserController {
 				isUpdateForTypeRef(GroupInfoTypeRef, update) &&
 				isSameId(this.userGroupInfo._id, [neverNull(instanceListId), instanceId])
 			) {
-				this.userGroupInfo = await this.entityClient.load(GroupInfoTypeRef, this.userGroupInfo._id)
+				this._userGroupInfo = await this.entityClient.load(GroupInfoTypeRef, this._userGroupInfo._id)
 			} else if (isUpdateForTypeRef(TutanotaPropertiesTypeRef, update) && operation === OperationType.UPDATE) {
-				this.props = await this.entityClient.loadRoot(TutanotaPropertiesTypeRef, this.user.userGroup.group)
+				this._props = await this.entityClient.loadRoot(TutanotaPropertiesTypeRef, this.user.userGroup.group)
 			} else if (isUpdateForTypeRef(UserSettingsGroupRootTypeRef, update)) {
-				this.userSettingsGroupRoot = await this.entityClient.load(UserSettingsGroupRootTypeRef, this.user.userGroup.group)
+				this._userSettingsGroupRoot = await this.entityClient.load(UserSettingsGroupRootTypeRef, this.user.userGroup.group)
 			} else if (isUpdateForTypeRef(CustomerInfoTypeRef, update) && operation === OperationType.CREATE) {
 				// After premium upgrade customer info is deleted and created with new id. We want to make sure that it's cached for offline login.
 				await this.entityClient.load(CustomerInfoTypeRef, [update.instanceListId, update.instanceId])
@@ -209,6 +163,10 @@ export class UserController implements IUserController {
 		}
 	}
 
+	/**
+	 * Delete the session (only if it's a non-persistent session
+	 * @param sync whether or not to delete in the main thread. For example, will be true when logging out due to closing the tab
+	 */
 	async deleteSession(sync: boolean): Promise<void> {
 		// in case the tab is closed we need to delete the session in the main thread (synchronous rest request)
 		if (sync) {
@@ -217,8 +175,7 @@ export class UserController implements IUserController {
 			}
 		} else {
 			if (this.sessionType !== SessionType.Persistent) {
-				await locator.loginFacade.deleteSession(this.accessToken)
-							 .catch((e) => console.log("Error ignored on Logout:", e))
+				await locator.loginFacade.deleteSession(this.accessToken).catch((e) => console.log("Error ignored on Logout:", e))
 			}
 			await locator.worker.reset()
 		}
@@ -230,7 +187,7 @@ export class UserController implements IUserController {
 
 			if (sendBeacon) {
 				try {
-					const path = `${getHttpOrigin()}/rest/sys/${CloseSessionService}`
+					const path = `${getApiOrigin()}/rest/sys/${CloseSessionService.name.toLowerCase()}`
 					const requestObject = createCloseSessionServicePost({
 						accessToken: this.accessToken,
 						sessionId: this.sessionId,
@@ -255,7 +212,7 @@ export class UserController implements IUserController {
 				// Fall back to sync XHR if
 				const path = "/rest/sys/session/" + this.sessionId[0] + "/" + this.sessionId[1]
 				const xhr = new XMLHttpRequest()
-				xhr.open("DELETE", getHttpOrigin() + path, false) // sync requests increase reliability when invoked in onunload
+				xhr.open("DELETE", getApiOrigin() + path, false) // sync requests increase reliability when invoked in onunload
 
 				xhr.setRequestHeader("accessToken", this.accessToken)
 				xhr.setRequestHeader("v", sysTypeModels.Session.version)
@@ -291,15 +248,17 @@ export class UserController implements IUserController {
 		}
 
 		const customerInfo = await this.loadCustomerInfo()
-		return customerInfo.domainInfos.some(domainInfo => domainInfo.whitelabelConfig)
+		return customerInfo.domainInfos.some((domainInfo) => domainInfo.whitelabelConfig)
 	}
 
-	async loadWhitelabelConfig(): Promise<| {
-		whitelabelConfig: WhitelabelConfig
-		domainInfo: DomainInfo
-	}
+	async loadWhitelabelConfig(): Promise<
+		| {
+				whitelabelConfig: WhitelabelConfig
+				domainInfo: DomainInfo
+		  }
 		| null
-		| undefined> {
+		| undefined
+	> {
 		// The model allows for multiple domainInfos to have whitelabel configs
 		// but in reality on the server only a single custom configuration is allowed
 		// therefore the result of the filtering all domainInfos with no whitelabelConfig
@@ -308,7 +267,7 @@ export class UserController implements IUserController {
 		const domainInfoAndConfig = first(
 			mapAndFilterNull(
 				customerInfo.domainInfos,
-				domainInfo =>
+				(domainInfo) =>
 					domainInfo.whitelabelConfig && {
 						domainInfo,
 						whitelabelConfig: domainInfo.whitelabelConfig,
@@ -339,27 +298,19 @@ export type UserControllerInitData = {
 }
 // noinspection JSUnusedGlobalSymbols
 // dynamically imported
-export async function initUserController(
-	{
-		user,
-		userGroupInfo,
-		sessionId,
-		accessToken,
-		sessionType
-	}: UserControllerInitData
-): Promise<UserController> {
+export async function initUserController({ user, userGroupInfo, sessionId, accessToken, sessionType }: UserControllerInitData): Promise<UserController> {
 	const entityClient = locator.entityClient
-	const [
-		props,
-		userSettingsGroupRoot,
-	] = await Promise.all([
+	const [props, userSettingsGroupRoot] = await Promise.all([
 		entityClient.loadRoot(TutanotaPropertiesTypeRef, user.userGroup.group),
-		entityClient.load(UserSettingsGroupRootTypeRef, user.userGroup.group)
-					.catch(ofClass(NotFoundError, () =>
-							entityClient.setup(null, createUserSettingsGroupRoot({_ownerGroup: user.userGroup.group}))
-										.then(() => entityClient.load(UserSettingsGroupRootTypeRef, user.userGroup.group)),
-						),
-					),
+		entityClient
+			.load(UserSettingsGroupRootTypeRef, user.userGroup.group)
+			.catch(
+				ofClass(NotFoundError, () =>
+					entityClient
+						.setup(null, createUserSettingsGroupRoot({ _ownerGroup: user.userGroup.group }))
+						.then(() => entityClient.load(UserSettingsGroupRootTypeRef, user.userGroup.group)),
+				),
+			),
 	])
 	return new UserController(user, userGroupInfo, sessionId, props, accessToken, userSettingsGroupRoot, sessionType, entityClient)
 }

@@ -1,5 +1,5 @@
-import {AccountType, FeatureType, GroupType, TimeFormat} from "../../../src/api/common/TutanotaConstants.js"
-import type {IUserController} from "../../../src/api/main/UserController.js"
+import { AccountType, FeatureType, GroupType, TimeFormat } from "../../../src/api/common/TutanotaConstants.js"
+import type { UserController } from "../../../src/api/main/UserController.js"
 import {
 	createBookingsRef,
 	createCustomer,
@@ -10,19 +10,19 @@ import {
 	createGroupMembership,
 	createMailAddressAlias,
 	createUser,
-	Feature
+	Feature,
 } from "../../../src/api/entities/sys/TypeRefs.js"
-import {GENERATED_MAX_ID} from "../../../src/api/common/utils/EntityUtils.js"
-import {downcast, LazyLoaded} from "@tutao/tutanota-utils"
-import type {CalendarEvent} from "../../../src/api/entities/tutanota/TypeRefs.js"
-import {createCalendarEvent, createMailBox, createMailboxGroupRoot, createTutanotaProperties} from "../../../src/api/entities/tutanota/TypeRefs.js"
-import type {MailboxDetail} from "../../../src/mail/model/MailModel.js"
-import {MailModel} from "../../../src/mail/model/MailModel.js"
-import type {CalendarUpdateDistributor} from "../../../src/calendar/date/CalendarUpdateDistributor.js"
+import { GENERATED_MAX_ID } from "../../../src/api/common/utils/EntityUtils.js"
+import { downcast, LazyLoaded } from "@tutao/tutanota-utils"
+import type { CalendarEvent } from "../../../src/api/entities/tutanota/TypeRefs.js"
+import { createCalendarEvent, createMailBox, createMailboxGroupRoot, createTutanotaProperties } from "../../../src/api/entities/tutanota/TypeRefs.js"
+import type { MailboxDetail } from "../../../src/mail/model/MailModel.js"
+import { MailModel } from "../../../src/mail/model/MailModel.js"
+import type { CalendarUpdateDistributor } from "../../../src/calendar/date/CalendarUpdateDistributor.js"
 import o from "ospec"
-import type {CalendarInfo} from "../../../src/calendar/model/CalendarModel"
-import {CalendarModel} from "../../../src/calendar/model/CalendarModel"
-import type {IProgressMonitor} from "../../../src/api/common/utils/ProgressMonitor"
+import type { CalendarInfo } from "../../../src/calendar/model/CalendarModel"
+import { CalendarModel } from "../../../src/calendar/model/CalendarModel"
+import { FolderSystem } from "../../../src/api/common/mail/FolderSystem.js"
 
 export const accountMailAddress = "address@tutanota.com" as const
 export const userId = "12356" as const
@@ -33,7 +33,7 @@ export function makeUserController(
 	accountType: AccountType = AccountType.PREMIUM,
 	defaultSender?: string,
 	businessFeatureOrdered: boolean = false,
-): IUserController {
+): UserController {
 	const bookingsRef = createBookingsRef({
 		items: GENERATED_MAX_ID,
 	})
@@ -64,7 +64,7 @@ export function makeUserController(
 			defaultSender: defaultSender || accountMailAddress,
 		}),
 		userGroupInfo: createGroupInfo({
-			mailAddressAliases: aliases.map(address =>
+			mailAddressAliases: aliases.map((address) =>
 				createMailAddressAlias({
 					mailAddress: address,
 					enabled: true,
@@ -99,7 +99,7 @@ export function makeUserController(
 export function makeMailboxDetail(): MailboxDetail {
 	return {
 		mailbox: createMailBox(),
-		folders: [],
+		folders: new FolderSystem([]),
 		mailGroupInfo: createGroupInfo(),
 		mailGroup: createGroup({
 			user: userId,

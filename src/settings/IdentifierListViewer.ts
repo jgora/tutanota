@@ -1,29 +1,31 @@
-import m, {Children, Component, Vnode} from "mithril"
-import {isApp, isDesktop} from "../api/common/Env"
-import type {TranslationKey} from "../misc/LanguageViewModel"
-import {lang} from "../misc/LanguageViewModel"
-import {assertNotNull, neverNull, noOp, ofClass} from "@tutao/tutanota-utils"
-import type {PushIdentifier, User} from "../api/entities/sys/TypeRefs.js"
-import {createPushIdentifier, PushIdentifierTypeRef} from "../api/entities/sys/TypeRefs.js"
-import {logins} from "../api/main/LoginController"
-import {Icons} from "../gui/base/icons/Icons"
-import {PushServiceType} from "../api/common/TutanotaConstants"
-import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
-import {Dialog} from "../gui/base/Dialog"
-import {NotFoundError} from "../api/common/error/RestError"
-import {attachDropdown} from "../gui/base/DropdownN"
-import type {ButtonAttrs} from "../gui/base/ButtonN"
-import {ButtonN, ButtonType} from "../gui/base/ButtonN"
-import type {ExpanderAttrs} from "../gui/base/Expander"
-import {ExpanderButtonN, ExpanderPanelN} from "../gui/base/Expander"
+import m, { Children, Component, Vnode } from "mithril"
+import { isApp, isDesktop } from "../api/common/Env"
+import type { TranslationKey } from "../misc/LanguageViewModel"
+import { lang } from "../misc/LanguageViewModel"
+import { assertNotNull, neverNull, noOp, ofClass } from "@tutao/tutanota-utils"
+import type { PushIdentifier, User } from "../api/entities/sys/TypeRefs.js"
+import { createPushIdentifier, PushIdentifierTypeRef } from "../api/entities/sys/TypeRefs.js"
+import { logins } from "../api/main/LoginController"
+import { Icons } from "../gui/base/icons/Icons"
+import { PushServiceType } from "../api/common/TutanotaConstants"
+import { showProgressDialog } from "../gui/dialogs/ProgressDialog"
+import { Dialog } from "../gui/base/Dialog"
+import { NotFoundError } from "../api/common/error/RestError"
+import { attachDropdown } from "../gui/base/Dropdown.js"
+import type { ButtonAttrs } from "../gui/base/Button.js"
+import { Button, ButtonType } from "../gui/base/Button.js"
+import type { ExpanderAttrs } from "../gui/base/Expander"
+import { ExpanderButton, ExpanderPanel } from "../gui/base/Expander"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
-import {TextFieldN} from "../gui/base/TextFieldN"
-import type {EntityUpdateData} from "../api/main/EventController"
-import {isUpdateForTypeRef} from "../api/main/EventController"
-import {showNotAvailableForFreeDialog} from "../misc/SubscriptionDialogs"
-import {getCleanedMailAddress} from "../misc/parsing/MailAddressParser"
-import {locator} from "../api/main/MainLocator"
+import { TextField } from "../gui/base/TextField.js"
+import type { EntityUpdateData } from "../api/main/EventController"
+import { isUpdateForTypeRef } from "../api/main/EventController"
+import { showNotAvailableForFreeDialog } from "../misc/SubscriptionDialogs"
+import { getCleanedMailAddress } from "../misc/parsing/MailAddressParser"
+import { locator } from "../api/main/MainLocator"
+import { IconButton, IconButtonAttrs } from "../gui/base/IconButton.js"
+import { ButtonSize } from "../gui/base/ButtonSize.js"
 
 type IdentifierRowAttrs = {
 	name: string
@@ -37,31 +39,29 @@ type IdentifierRowAttrs = {
 
 class IdentifierRow implements Component<IdentifierRowAttrs> {
 	view(vnode: Vnode<IdentifierRowAttrs>): Children {
-		const dropdownAttrs = attachDropdown(
-			{
-				mainButtonAttrs: {
-					label: "edit_action",
-					icon: () => Icons.Edit,
-				}, childAttrs: () => [
-					{
-						label: () => lang.get(vnode.attrs.disabled ? "activate_action" : "deactivate_action"),
-						type: ButtonType.Dropdown,
-						click: vnode.attrs.disableClicked,
-					},
-					{
-						label: "delete_action",
-						type: ButtonType.Dropdown,
-						click: vnode.attrs.removeClicked,
-					},
-				]
+		const dropdownAttrs = attachDropdown({
+			mainButtonAttrs: {
+				title: "edit_action",
+				icon: Icons.More,
+				size: ButtonSize.Compact,
 			},
-		)
+			childAttrs: () => [
+				{
+					label: () => lang.get(vnode.attrs.disabled ? "activate_action" : "deactivate_action"),
+					click: vnode.attrs.disableClicked,
+				},
+				{
+					label: "delete_action",
+					click: vnode.attrs.removeClicked,
+				},
+			],
+		})
 		return m(".flex.flex-column.full-width", [
 			m(".flex.items-center.selectable", [
 				m("span" + (vnode.attrs.current ? ".b" : ""), vnode.attrs.name),
 				vnode.attrs.disabled ? m(".mlr", `(${lang.get("notificationsDisabled_label")})`) : null,
 				m(".flex-grow"),
-				m(ButtonN, dropdownAttrs),
+				m(IconButton, dropdownAttrs),
 			]),
 			this._identifier(vnode),
 		])
@@ -71,7 +71,7 @@ class IdentifierRow implements Component<IdentifierRowAttrs> {
 		const identifierText = vnode.attrs.formatIdentifier
 			? neverNull(vnode.attrs.identifier.match(/.{2}/g)).map((el, i) => m("span.pr-s" + (i % 2 === 0 ? ".b" : ""), el))
 			: vnode.attrs.identifier
-		return m(".text-break.small.monospace.mt-negative-s.selectable", identifierText)
+		return m(".text-break.small.monospace.mt-negative-hpad-button.selectable", identifierText)
 	}
 }
 
@@ -102,30 +102,31 @@ export class IdentifierListViewer {
 		}
 		const expanderContent = {
 			view: (): Children => {
-				const buttonAddAttrs: ButtonAttrs = {
-					label: "emailPushNotification_action",
+				const buttonAddAttrs: IconButtonAttrs = {
+					title: "emailPushNotification_action",
 					click: () => this._showAddNotificationEmailAddressDialog(this._user),
-					icon: () => Icons.Add,
+					icon: Icons.Add,
+					size: ButtonSize.Compact,
 				}
-				const rowAdd = m(".full-width.flex-space-between.items-center.mb-s", [lang.get("emailPushNotification_action"), m(ButtonN, buttonAddAttrs)])
+				const rowAdd = m(".full-width.flex-space-between.items-center.mb-s", [lang.get("emailPushNotification_action"), m(IconButton, buttonAddAttrs)])
 
 				const rows = this._identifiers
-								 .map(identifier => {
-									 const isCurrentDevice = (isApp() || isDesktop()) && identifier.identifier === this._currentIdentifier
+					.map((identifier) => {
+						const isCurrentDevice = (isApp() || isDesktop()) && identifier.identifier === this._currentIdentifier
 
-									 return m(IdentifierRow, {
-										 name: this._identifierDisplayName(isCurrentDevice, identifier.pushServiceType, identifier.displayName),
-										 disabled: identifier.disabled,
-										 identifier: identifier.identifier,
-										 current: isCurrentDevice,
-										 removeClicked: () => {
-											 locator.entityClient.erase(identifier).catch(ofClass(NotFoundError, noOp))
-										 },
-										 formatIdentifier: identifier.pushServiceType !== PushServiceType.EMAIL,
-										 disableClicked: () => this._disableIdentifier(identifier),
-									 })
-								 })
-								 .sort((l, r) => +r.attrs.current - +l.attrs.current)
+						return m(IdentifierRow, {
+							name: this._identifierDisplayName(isCurrentDevice, identifier.pushServiceType, identifier.displayName),
+							disabled: identifier.disabled,
+							identifier: identifier.identifier,
+							current: isCurrentDevice,
+							removeClicked: () => {
+								locator.entityClient.erase(identifier).catch(ofClass(NotFoundError, noOp))
+							},
+							formatIdentifier: identifier.pushServiceType !== PushServiceType.EMAIL,
+							disableClicked: () => this._disableIdentifier(identifier),
+						})
+					})
+					.sort((l, r) => +r.attrs.current - +l.attrs.current)
 
 				return m(".flex.flex-column.items-end.mb", [rowAdd].concat(rows))
 			},
@@ -133,9 +134,11 @@ export class IdentifierListViewer {
 		return [
 			m(".flex-space-between.items-center.mt-l.mb-s", [
 				m(".h4", lang.get("notificationSettings_action")),
-				m(ExpanderButtonN, pushIdentifiersExpanderAttrs),
+				m(ExpanderButton, pushIdentifiersExpanderAttrs),
 			]),
-			m(ExpanderPanelN, {
+			m(
+				ExpanderPanel,
+				{
 					expanded: this._expanded(),
 				},
 				m(expanderContent),
@@ -183,12 +186,12 @@ export class IdentifierListViewer {
 				title: lang.get("notificationSettings_action"),
 				child: {
 					view: () => [
-						m(TextFieldN, {
+						m(TextField, {
 							label: "mailAddress_label",
 							value: mailAddress,
-							oninput: (newValue) => mailAddress = newValue,
+							oninput: (newValue) => (mailAddress = newValue),
 						}),
-						m(".small.mt-s", lang.get("emailPushNotification_msg"))
+						m(".small.mt-s", lang.get("emailPushNotification_msg")),
 					],
 				},
 				validator: () => this._validateAddNotificationEmailAddressInput(mailAddress),

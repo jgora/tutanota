@@ -1,10 +1,9 @@
-import type {DbFacade} from "./DbFacade"
-import type {GroupType} from "../../common/TutanotaConstants"
-import type {TypeInfo} from "./IndexUtils"
-import type {lazy} from "@tutao/tutanota-utils"
-import {TypeRef} from "@tutao/tutanota-utils"
-import type {ModelAssociation, ModelValue} from "../../common/EntityTypes"
-import type {Base64} from "@tutao/tutanota-utils"
+import type { DbFacade } from "./DbFacade"
+import type { GroupType } from "../../common/TutanotaConstants"
+import type { TypeInfo } from "./IndexUtils"
+import type { Base64, lazy } from "@tutao/tutanota-utils"
+import { TypeRef } from "@tutao/tutanota-utils"
+import type { ModelAssociation, ModelValue } from "../../common/EntityTypes"
 // db types
 
 /**
@@ -148,15 +147,20 @@ export type SearchResult = {
 
 export const enum IndexingErrorReason {
 	Unknown,
-	ConnectionLost
+	ConnectionLost,
 }
 
+/**
+ * Current state of the Mailindexer
+ * aimedMailIndexTimestamp is the timestamp we are currently indexing for (or same as currentMailIndexTimestamp if we are not indexing)
+ */
 export type SearchIndexStateInfo = {
 	initializing: boolean
 	mailIndexEnabled: boolean
 	progress: number
 	currentMailIndexTimestamp: number
+	aimedMailIndexTimestamp: number
 	indexedMailCount: number
-	failedIndexingUpTo: number | null,
+	failedIndexingUpTo: number | null
 	error?: IndexingErrorReason | null
 }

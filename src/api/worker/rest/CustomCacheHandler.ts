@@ -1,12 +1,11 @@
-import {ListElementEntity} from "../../common/EntityTypes.js"
-import {CalendarEvent, CalendarEventTypeRef} from "../../entities/tutanota/TypeRefs.js"
-import {freezeMap, getTypeId, TypeRef} from "@tutao/tutanota-utils"
-import {CUSTOM_MAX_ID, CUSTOM_MIN_ID, firstBiggerThanSecond, getElementId, LOAD_MULTIPLE_LIMIT} from "../../common/utils/EntityUtils.js"
-import {resolveTypeReference} from "../../common/EntityFunctions.js"
-import {ExposedCacheStorage, Range} from "./EntityRestCache.js"
-import {EntityRestClient} from "./EntityRestClient.js"
-import {LateInitializedCacheStorage} from "./CacheStorageProxy.js"
-import {ProgrammingError} from "../../common/error/ProgrammingError.js"
+import { ListElementEntity } from "../../common/EntityTypes.js"
+import { CalendarEvent, CalendarEventTypeRef } from "../../entities/tutanota/TypeRefs.js"
+import { freezeMap, getTypeId, TypeRef } from "@tutao/tutanota-utils"
+import { CUSTOM_MAX_ID, CUSTOM_MIN_ID, firstBiggerThanSecond, getElementId, LOAD_MULTIPLE_LIMIT } from "../../common/utils/EntityUtils.js"
+import { resolveTypeReference } from "../../common/EntityFunctions.js"
+import { CacheStorage, ExposedCacheStorage, Range } from "./DefaultEntityRestCache.js"
+import { EntityRestClient } from "./EntityRestClient.js"
+import { ProgrammingError } from "../../common/error/ProgrammingError.js"
 
 /**
  * update when implementing custom cache handlers.
@@ -22,10 +21,9 @@ type CustomCacheHandledType = never | CalendarEvent
  */
 type CustomCacheHandlerMapping = CustomCacheHandledType extends infer A
 	? A extends ListElementEntity
-		? {ref: TypeRef<A>, handler: CustomCacheHandler<A>}
+		? { ref: TypeRef<A>; handler: CustomCacheHandler<A> }
 		: never
 	: never
-
 
 /**
  * wrapper for a TypeRef -> CustomCacheHandler map that's needed because we can't
@@ -34,13 +32,10 @@ type CustomCacheHandlerMapping = CustomCacheHandledType extends infer A
  * it is mostly read-only
  */
 export class CustomCacheHandlerMap {
-
 	private readonly handlers: Map<string, CustomCacheHandler<ListElementEntity>> = new Map()
 
-	constructor(
-		...args: Array<CustomCacheHandlerMapping>
-	) {
-		for (const {ref, handler} of args) {
+	constructor(...args: Array<CustomCacheHandlerMapping>) {
+		for (const { ref, handler } of args) {
 			const key = getTypeId(ref)
 			this.handlers.set(key, handler)
 		}
@@ -69,20 +64,14 @@ export interface CustomCacheHandler<T extends ListElementEntity> {
 	getElementIdsInCacheRange(storage: ExposedCacheStorage, listId: Id, ids: Array<Id>): Promise<Array<Id>>
 }
 
-
 /**
- * implements range loading in JS because the custom Ids of calendar events prevent us form doing
+ * implements range loading in JS because the custom Ids of calendar events prevent us from doing
  * this effectively in the database.
  */
 export class CustomCalendarEventCacheHandler implements CustomCacheHandler<CalendarEvent> {
+	constructor(private readonly entityRestClient: EntityRestClient) {}
 
-	constructor(
-		private readonly entityRestClient: EntityRestClient
-	) {
-
-	}
-
-	async loadRange(storage: LateInitializedCacheStorage, listId: Id, start: Id, count: number, reverse: boolean): Promise<CalendarEvent[]> {
+	async loadRange(storage: CacheStorage, listId: Id, start: Id, count: number, reverse: boolean): Promise<CalendarEvent[]> {
 		const range = await storage.getRangeForList(CalendarEventTypeRef, listId)
 
 		//if offline db for this list is empty load from server
@@ -99,6 +88,7 @@ export class CustomCalendarEventCacheHandler implements CustomCacheHandler<Calen
 			for (const event of rawList) {
 				await storage.put(event)
 			}
+
 			// we have all events now
 			await storage.setNewRangeForList(CalendarEventTypeRef, listId, CUSTOM_MIN_ID, CUSTOM_MAX_ID)
 		} else {
@@ -106,15 +96,14 @@ export class CustomCalendarEventCacheHandler implements CustomCacheHandler<Calen
 			rawList = await storage.getWholeList(CalendarEventTypeRef, listId)
 			console.log(`CalendarEvent list ${listId} has ${rawList.length} events`)
 		}
-
 		const typeModel = await resolveTypeReference(CalendarEventTypeRef)
 		const sortedList = reverse
 			? rawList
-				.filter(calendarEvent => firstBiggerThanSecond(start, getElementId(calendarEvent), typeModel))
-				.sort((a, b) => firstBiggerThanSecond(getElementId(b), getElementId(a), typeModel) ? 1 : -1)
+					.filter((calendarEvent) => firstBiggerThanSecond(start, getElementId(calendarEvent), typeModel))
+					.sort((a, b) => (firstBiggerThanSecond(getElementId(b), getElementId(a), typeModel) ? 1 : -1))
 			: rawList
-				.filter(calendarEvent => firstBiggerThanSecond(getElementId(calendarEvent), start, typeModel))
-				.sort((a, b) => firstBiggerThanSecond(getElementId(a), getElementId(b), typeModel) ? 1 : -1)
+					.filter((calendarEvent) => firstBiggerThanSecond(getElementId(calendarEvent), start, typeModel))
+					.sort((a, b) => (firstBiggerThanSecond(getElementId(a), getElementId(b), typeModel) ? 1 : -1))
 		return sortedList.slice(0, count)
 	}
 
@@ -124,7 +113,7 @@ export class CustomCalendarEventCacheHandler implements CustomCacheHandler<Calen
 		}
 	}
 
-	async getElementIdsInCacheRange(storage: LateInitializedCacheStorage, listId: Id, ids: Array<Id>): Promise<Array<Id>> {
+	async getElementIdsInCacheRange(storage: CacheStorage, listId: Id, ids: Array<Id>): Promise<Array<Id>> {
 		const range = await storage.getRangeForList(CalendarEventTypeRef, listId)
 		if (range) {
 			this.assertCorrectRange(range)

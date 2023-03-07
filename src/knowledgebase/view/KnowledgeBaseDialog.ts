@@ -1,23 +1,20 @@
-import {KnowledgeBaseModel} from "../model/KnowledgeBaseModel"
-import {Editor} from "../../gui/editor/Editor"
-import type {KnowledgebaseDialogContentAttrs} from "./KnowledgeBaseDialogContent"
-import {KnowledgeBaseDialogContent} from "./KnowledgeBaseDialogContent"
-import {showTemplatePopupInEditor} from "../../templates/view/TemplatePopup"
-import type {ButtonAttrs} from "../../gui/base/ButtonN"
-import {ButtonType} from "../../gui/base/ButtonN"
-import type {DialogHeaderBarAttrs} from "../../gui/base/DialogHeaderBar"
-import {lang} from "../../misc/LanguageViewModel"
-import type {TemplateGroupRoot} from "../../api/entities/tutanota/TypeRefs.js"
-import {noOp} from "@tutao/tutanota-utils"
-import {attachDropdown} from "../../gui/base/DropdownN"
+import { KnowledgeBaseModel } from "../model/KnowledgeBaseModel"
+import { Editor } from "../../gui/editor/Editor"
+import type { KnowledgebaseDialogContentAttrs } from "./KnowledgeBaseDialogContent"
+import { KnowledgeBaseDialogContent } from "./KnowledgeBaseDialogContent"
+import { showTemplatePopupInEditor } from "../../templates/view/TemplatePopup"
+import type { ButtonAttrs } from "../../gui/base/Button.js"
+import { ButtonType } from "../../gui/base/Button.js"
+import type { DialogHeaderBarAttrs } from "../../gui/base/DialogHeaderBar"
+import { lang } from "../../misc/LanguageViewModel"
+import type { KnowledgeBaseEntry, TemplateGroupRoot } from "../../api/entities/tutanota/TypeRefs.js"
+import type { lazy } from "@tutao/tutanota-utils"
+import { createDropdown } from "../../gui/base/Dropdown.js"
 import stream from "mithril/stream"
-import type {DialogInjectionRightAttrs} from "../../gui/base/DialogInjectionRight"
-import {Icons} from "../../gui/base/icons/Icons"
-import {TemplatePopupModel} from "../../templates/model/TemplatePopupModel"
-import {getSharedGroupName} from "../../sharing/GroupUtils"
-import type {KnowledgeBaseEntry} from "../../api/entities/tutanota/TypeRefs.js"
-import type {lazy} from "@tutao/tutanota-utils"
-import Stream from "mithril/stream";
+import Stream from "mithril/stream"
+import type { DialogInjectionRightAttrs } from "../../gui/base/DialogInjectionRight"
+import { TemplatePopupModel } from "../../templates/model/TemplatePopupModel"
+import { getSharedGroupName } from "../../sharing/GroupUtils"
 
 export function createKnowledgeBaseDialogInjection(
 	knowledgeBase: KnowledgeBaseModel,
@@ -25,7 +22,7 @@ export function createKnowledgeBaseDialogInjection(
 	editor: Editor,
 ): DialogInjectionRightAttrs<KnowledgebaseDialogContentAttrs> {
 	const knowledgebaseAttrs: KnowledgebaseDialogContentAttrs = {
-		onTemplateSelect: template => {
+		onTemplateSelect: (template) => {
 			showTemplatePopupInEditor(templateModel, editor, template, "")
 		},
 		model: knowledgeBase,
@@ -36,26 +33,6 @@ export function createKnowledgeBaseDialogInjection(
 		headerAttrs: _createHeaderAttrs(knowledgebaseAttrs, isDialogVisible),
 		componentAttrs: knowledgebaseAttrs,
 		component: KnowledgeBaseDialogContent,
-	}
-}
-
-export function createOpenKnowledgeBaseButtonAttrs(
-	dialogInjectionAttrs: DialogInjectionRightAttrs<KnowledgebaseDialogContentAttrs>,
-	getEmailContent: () => string,
-): ButtonAttrs {
-	return {
-		label: "openKnowledgebase_action",
-		click: () => {
-			if (dialogInjectionAttrs.visible() === true) {
-				dialogInjectionAttrs.visible(false)
-			} else {
-				dialogInjectionAttrs.componentAttrs.model.sortEntriesByMatchingKeywords(getEmailContent())
-				dialogInjectionAttrs.visible(true)
-				dialogInjectionAttrs.componentAttrs.model.init()
-			}
-		},
-		icon: () => Icons.Book,
-		isSelected: dialogInjectionAttrs.visible,
 	}
 }
 
@@ -105,29 +82,26 @@ function createAddButtonAttrs(model: KnowledgeBaseModel): ButtonAttrs {
 			type: ButtonType.Primary,
 		}
 	} else {
-		return attachDropdown(
-			{
-                mainButtonAttrs: {
-                    label: "add_action",
-                    click: noOp,
-                    type: ButtonType.Primary,
-                }, childAttrs: () =>
-                    templateGroupInstances.map(groupInstances => {
-                        return {
-                            label: () => getSharedGroupName(groupInstances.groupInfo, true),
-                            click: () => {
-                                showKnowledgeBaseEditor(null, groupInstances.groupRoot)
-                            },
-                            type: ButtonType.Dropdown,
-                        }
-                    })
-            },
-		)
+		return {
+			label: "add_action",
+			type: ButtonType.Primary,
+			click: createDropdown({
+				lazyButtons: () =>
+					templateGroupInstances.map((groupInstances) => {
+						return {
+							label: () => getSharedGroupName(groupInstances.groupInfo, true),
+							click: () => {
+								showKnowledgeBaseEditor(null, groupInstances.groupRoot)
+							},
+						}
+					}),
+			}),
+		}
 	}
 }
 
 function showKnowledgeBaseEditor(entryToEdit: KnowledgeBaseEntry | null, groupRoot: TemplateGroupRoot) {
-	import("../../settings/KnowledgeBaseEditor").then(editor => {
+	import("../../settings/KnowledgeBaseEditor").then((editor) => {
 		editor.showKnowledgeBaseEditor(entryToEdit, groupRoot)
 	})
 }

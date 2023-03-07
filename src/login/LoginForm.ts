@@ -1,16 +1,15 @@
-import m, {ChildArray, Children, Component, Vnode} from "mithril"
+import m, { Children, Component, Vnode } from "mithril"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
-import {BootstrapFeatureType} from "../api/common/TutanotaConstants"
-import {ButtonN, ButtonType} from "../gui/base/ButtonN"
-import {liveDataAttrs} from "../gui/AriaUtils"
-import {lang, TranslationKey} from "../misc/LanguageViewModel"
-import {TextFieldAttrs, TextFieldN, TextFieldType} from "../gui/base/TextFieldN"
-import {CheckboxN} from "../gui/base/CheckboxN"
-import {client} from "../misc/ClientDetector"
-import {getWhitelabelCustomizations} from "../misc/WhitelabelCustomizations"
-import {assertNotNull} from "@tutao/tutanota-utils"
-import {isOfflineStorageAvailable} from "../api/common/Env"
+import { BootstrapFeatureType } from "../api/common/TutanotaConstants"
+import { Button, ButtonType } from "../gui/base/Button.js"
+import { liveDataAttrs } from "../gui/AriaUtils"
+import { lang, TranslationKey } from "../misc/LanguageViewModel"
+import { Autocomplete, TextField, TextFieldType } from "../gui/base/TextField.js"
+import { Checkbox } from "../gui/base/Checkbox.js"
+import { client } from "../misc/ClientDetector"
+import { getWhitelabelCustomizations } from "../misc/WhitelabelCustomizations"
+import { isOfflineStorageAvailable } from "../api/common/Env"
 
 export type LoginFormAttrs = {
 	onSubmit: (username: string, password: string) => unknown
@@ -24,8 +23,8 @@ export type LoginFormAttrs = {
 }
 
 export class LoginForm implements Component<LoginFormAttrs> {
-	mailAddressTextField!: TextFieldN
-	passwordTextField!: TextFieldN
+	mailAddressTextField!: HTMLInputElement
+	passwordTextField!: HTMLInputElement
 	// When iOS does auto-filling (always in WebView as of iOS 12.2 and in older Safari)
 	// it only sends one input/change event for all fields so we didn't know if fields
 	// were updated. So we kindly ask our fields to update themselves with real DOM values.
@@ -36,12 +35,12 @@ export class LoginForm implements Component<LoginFormAttrs> {
 		this.autofillUpdateHandler = stream.combine(() => {
 			requestAnimationFrame(() => {
 				const oldAddress = a.mailAddress()
-				const newAddress = this.mailAddressTextField.domInput.value
+				const newAddress = this.mailAddressTextField.value
 				const oldPassword = a.password()
-				const newPassword = this.passwordTextField.domInput.value
+				const newPassword = this.passwordTextField.value
 				// only update values when they are different or we get stuck in an infinite loop
-				if (oldAddress !== newAddress) a.mailAddress(newAddress)
-				if (oldPassword !== newPassword) a.password(newPassword)
+				if (oldAddress !== newAddress && newAddress != "") a.mailAddress(newAddress)
+				if (oldPassword !== newPassword && newPassword != "") a.password(newPassword)
 			})
 		}, [a.mailAddress, a.password])
 	}
@@ -49,7 +48,7 @@ export class LoginForm implements Component<LoginFormAttrs> {
 	onremove(vnode: Vnode<LoginFormAttrs>) {
 		vnode.attrs.password("")
 		this.autofillUpdateHandler.end(true)
-		this.passwordTextField.domInput.value = ""
+		this.passwordTextField.value = ""
 	}
 
 	_passwordDisabled(): boolean {
@@ -71,50 +70,45 @@ export class LoginForm implements Component<LoginFormAttrs> {
 			[
 				m(
 					"",
-					{
-						oncreate: vnode => {
-							const childArray = assertNotNull(vnode.children) as ChildArray
-							const child = childArray[0] as Vnode<unknown, TextFieldN>
-							this.mailAddressTextField = child.state
-						},
-					},
-					m(TextFieldN, {
+					m(TextField, {
 						label: "mailAddress_label" as TranslationKey,
 						value: a.mailAddress(),
 						oninput: a.mailAddress,
 						type: TextFieldType.Email,
+						autocompleteAs: Autocomplete.email,
+						onDomInputCreated: (dom) => {
+							this.mailAddressTextField = dom
+							if (!client.isMobileDevice()) {
+								dom.focus() // have email address auto-focus so the user can immediately type their username (unless on mobile)
+							}
+						},
 					}),
 				),
 				m(
 					"",
-					{
-						oncreate: vnode => {
-							const childArray = assertNotNull(vnode.children) as ChildArray
-							const child = childArray[0] as Vnode<unknown, TextFieldN>
-							this.passwordTextField = child.state
-						},
-					},
-					m(TextFieldN, {
+					m(TextField, {
 						label: "password_label",
 						value: a.password(),
 						oninput: a.password,
 						type: TextFieldType.Password,
+						autocompleteAs: Autocomplete.currentPassword,
+						onDomInputCreated: (dom) => (this.passwordTextField = dom),
 					}),
 				),
 				a.savePassword && !this._passwordDisabled()
-					? m(CheckboxN, {
-						label: () => lang.get("storePassword_action"),
-						checked: a.savePassword(),
-						onChecked: a.savePassword,
-						helpLabel: (canSaveCredentials)
-							? () => lang.get("onlyPrivateComputer_msg") + (isOfflineStorageAvailable() ? "\n" + lang.get("dataWillBeStored_msg") : "")
-							: "functionNotSupported_msg",
-						disabled: !canSaveCredentials,
-					})
+					? m(Checkbox, {
+							label: () => lang.get("storePassword_action"),
+							checked: a.savePassword(),
+							onChecked: a.savePassword,
+							helpLabel: canSaveCredentials
+								? () => lang.get("onlyPrivateComputer_msg") + (isOfflineStorageAvailable() ? "\n" + lang.get("dataWillBeStored_msg") : "")
+								: "functionNotSupported_msg",
+							disabled: !canSaveCredentials,
+					  })
 					: null,
 				m(
 					".pt",
-					m(ButtonN, {
+					m(Button, {
 						label: "login_action",
 						click: () => a.onSubmit(a.mailAddress(), a.password()),
 						type: ButtonType.Login,
@@ -127,35 +121,35 @@ export class LoginForm implements Component<LoginFormAttrs> {
 						" ",
 						a.invalidCredentials && a.showRecoveryOption
 							? m(
-								"a",
-								{
-									href: "/recover",
-									onclick: (e: MouseEvent) => {
-										m.route.set("/recover", {
-											mailAddress: a.mailAddress(),
-											resetAction: "password",
-										})
-										e.preventDefault()
+									"a",
+									{
+										href: "/recover",
+										onclick: (e: MouseEvent) => {
+											m.route.set("/recover", {
+												mailAddress: a.mailAddress(),
+												resetAction: "password",
+											})
+											e.preventDefault()
+										},
 									},
-								},
-								lang.get("recoverAccountAccess_action"),
-							)
+									lang.get("recoverAccountAccess_action"),
+							  )
 							: a.accessExpired && a.accessExpired
-								? m(
+							? m(
 									"a",
 									{
 										// We import the dialog directly rather than redirecting to /recover here in order to not pass the password in plaintext via the URL
 										href: "#",
 										onclick: (e: MouseEvent) => {
-											import("./recover/TakeOverDeletedAddressDialog").then(({showTakeOverDialog}) =>
+											import("./recover/TakeOverDeletedAddressDialog").then(({ showTakeOverDialog }) =>
 												showTakeOverDialog(a.mailAddress(), a.password()),
 											)
 											e.preventDefault()
 										},
 									},
 									lang.get("help_label"),
-								)
-								: null,
+							  )
+							: null,
 					]),
 				),
 			],

@@ -16,6 +16,7 @@ export enum DesktopConfigKey {
 	spellcheck = "spellcheck",
 	selectedTheme = "selectedTheme",
 	themes = "themes",
+	webConfigLocation = "webConfigLocation",
 }
 
 export enum DesktopConfigEncKey {
@@ -29,7 +30,7 @@ export enum BuildConfigKey {
 	initialSseConnectTimeoutInSeconds = "initialSseConnectTimeoutInSeconds",
 	maxSseConnectTimeoutInSeconds = "maxSseConnectTimeoutInSeconds",
 	defaultDesktopConfig = "defaultDesktopConfig",
-	desktophtml = "desktophtml",
+	webAssetsPath = "webAssetsPath",
 	preloadjs = "preloadjs",
 	iconName = "iconName",
 	fileManagerTimeout = "fileManagerTimeout",

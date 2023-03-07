@@ -1,6 +1,8 @@
 //@bundleInto:common-min
 
 // keep in sync with LaunchHtml.js meta tag title
+import { ProgrammingError } from "./error/ProgrammingError.js"
+
 export const LOGIN_TITLE = "Mail. Done. Right. Tutanota Login & Sign up for an Ad-free Mailbox"
 export const Mode: Record<EnvMode, EnvMode> = Object.freeze({
 	Browser: "Browser",
@@ -12,21 +14,40 @@ export const Mode: Record<EnvMode, EnvMode> = Object.freeze({
 })
 
 export function getWebsocketOrigin(): string {
-	// replace "http" by "ws"
-	return "ws" + getHttpOrigin().substring(4)
+	return (
+		getApiOrigin()
+			// replaces http: with ws: and https: with wss:
+			.replace(/^http/, "ws")
+			// for ios app custom protocol
+			.replace(/^api/, "ws")
+	)
 }
 
-export function getHttpOrigin(): string {
+/** Returns the origin which should be used for API requests. */
+export function getApiOrigin(): string {
 	if (env.staticUrl) {
-		return env.staticUrl
+		if (isIOSApp()) {
+			// http:// -> api:// and https:// -> apis://
+			return env.staticUrl.replace(/^http/, "api")
+		} else {
+			return env.staticUrl
+		}
 	} else {
 		return location.protocol + "//" + location.hostname + (location.port ? ":" + location.port : "")
 	}
 }
 
+/**
+ * root used for gift cards and as the webauthn registered domain
+ */
 export function getWebRoot(): string {
-	const origin = getHttpOrigin()
-	return origin + (origin.includes("localhost") || origin.includes("local.tutanota.com") ? "/client/build" : "")
+	let origin: string
+	if (env.staticUrl) {
+		origin = env.staticUrl
+	} else {
+		return location.protocol + "//" + location.hostname + (location.port ? ":" + location.port : "")
+	}
+	return origin + (origin.includes("http://") || origin.includes("localhost") || origin.includes("local.tutanota.com") ? "/client/build" : "")
 }
 
 export function getPaymentWebRoot(): string {
@@ -45,16 +66,15 @@ export function isTutanotaDomain(): boolean {
 }
 
 export function isIOSApp(): boolean {
-	if (isWorker()) {
-		throw new Error("isIOSApp is not available in the worker yet (platformId is not set)")
+	if (isApp() && env.platformId == null) {
+		throw new ProgrammingError("PlatformId is not set!")
 	}
-
 	return env.mode === Mode.App && env.platformId === "ios"
 }
 
 export function isAndroidApp(): boolean {
-	if (isWorker()) {
-		throw new Error("isAndroidApp is not available in the worker yet (platformId is not set)")
+	if (isApp() && env.platformId == null) {
+		throw new ProgrammingError("PlatformId is not set!")
 	}
 
 	return env.mode === Mode.App && env.platformId === "android"
@@ -81,6 +101,10 @@ let node = typeof process === "object" && typeof process.versions === "object" &
 
 export function isMain(): boolean {
 	return !worker && !node
+}
+
+export function isWebClient() {
+	return env.mode === Mode.Browser
 }
 
 export function isAdminClient(): boolean {
@@ -157,7 +181,7 @@ export function bootFinished() {
  * Whether or not we will be using an offline cache (doesn't take into account if credentials are stored)
  */
 export function isOfflineStorageAvailable(): boolean {
-	return isDesktop()
+	return !isBrowser()
 }
 
 export function assertOfflineStorageAvailable() {

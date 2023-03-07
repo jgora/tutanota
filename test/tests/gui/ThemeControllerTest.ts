@@ -1,33 +1,34 @@
 import o from "ospec"
-import {ThemeController} from "../../../src/gui/ThemeController.js"
-import type {ThemeCustomizations} from "../../../src/misc/WhitelabelCustomizations.js"
-import {downcast} from "@tutao/tutanota-utils"
-import {ThemeFacade} from "../../../src/native/common/generatedipc/ThemeFacade"
-import {HtmlSanitizer} from "../../../src/misc/HtmlSanitizer.js"
-import {matchers, object, when} from "testdouble"
-import {verify} from "@tutao/tutanota-test-utils"
+import { ThemeController } from "../../../src/gui/ThemeController.js"
+import type { ThemeCustomizations } from "../../../src/misc/WhitelabelCustomizations.js"
+import { downcast } from "@tutao/tutanota-utils"
+import { ThemeFacade } from "../../../src/native/common/generatedipc/ThemeFacade"
+import { HtmlSanitizer } from "../../../src/misc/HtmlSanitizer.js"
+import { matchers, object, when } from "testdouble"
+import { verify } from "@tutao/tutanota-test-utils"
 
 o.spec("Theme Controller", function () {
 	let themeManager: ThemeController
 	let themeFacadeMock: ThemeFacade
 	let htmlSanitizerMock: HtmlSanitizer
 
-	o.beforeEach(function () {
+	o.beforeEach(async function () {
 		themeFacadeMock = object()
 		when(themeFacadeMock.getThemes()).thenResolve([])
 
 		htmlSanitizerMock = object()
-		themeManager = new ThemeController(themeFacadeMock, () => Promise.resolve(htmlSanitizerMock))
-	})
-	o("updateCustomTheme", async function () {
+		// this is called in the constructor. Eh!
 		when(htmlSanitizerMock.sanitizeHTML(matchers.anything())).thenReturn({
 			html: "sanitized",
 			externalContent: [],
 			inlineImageCids: [],
 			links: [],
 		})
-
+		themeManager = new ThemeController(themeFacadeMock, () => Promise.resolve(htmlSanitizerMock))
 		await themeManager.initialized
+	})
+
+	o("updateCustomTheme", async function () {
 		const theme: ThemeCustomizations = downcast({
 			themeId: "HelloFancyId",
 			content_bg: "#fffeee",

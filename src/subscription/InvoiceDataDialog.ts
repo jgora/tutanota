@@ -1,13 +1,14 @@
 import m from "mithril"
-import {Dialog} from "../gui/base/Dialog"
-import type {TranslationKey} from "../misc/LanguageViewModel"
-import {lang} from "../misc/LanguageViewModel"
-import {InvoiceDataInput} from "./InvoiceDataInput"
-import {updatePaymentData} from "./InvoiceAndPaymentDataPage"
-import {BadRequestError} from "../api/common/error/RestError"
-import type {AccountingInfo} from "../api/entities/sys/TypeRefs.js"
-import type {InvoiceData} from "../api/common/TutanotaConstants"
-import {ofClass} from "@tutao/tutanota-utils"
+import { Dialog } from "../gui/base/Dialog"
+import type { TranslationKey } from "../misc/LanguageViewModel"
+import { lang } from "../misc/LanguageViewModel"
+import { InvoiceDataInput } from "./InvoiceDataInput"
+import { updatePaymentData } from "./InvoiceAndPaymentDataPage"
+import { BadRequestError } from "../api/common/error/RestError"
+import type { AccountingInfo } from "../api/entities/sys/TypeRefs.js"
+import type { InvoiceData } from "../api/common/TutanotaConstants"
+import { ofClass } from "@tutao/tutanota-utils"
+import { asPaymentInterval } from "./PriceUtils.js"
 
 export function show(
 	businessUse: boolean,
@@ -24,14 +25,14 @@ export function show(
 		if (error) {
 			Dialog.message(error)
 		} else {
-			updatePaymentData(Number(accountingInfo.paymentInterval), invoiceDataInput.getInvoiceData(), null, null, false, "0", accountingInfo)
-				.then(success => {
+			updatePaymentData(asPaymentInterval(accountingInfo.paymentInterval), invoiceDataInput.getInvoiceData(), null, null, false, "0", accountingInfo)
+				.then((success) => {
 					if (success) {
 						dialog.close()
 					}
 				})
 				.catch(
-					ofClass(BadRequestError, e => {
+					ofClass(BadRequestError, (e) => {
 						Dialog.message("paymentMethodNotAvailable_msg")
 					}),
 				)

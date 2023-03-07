@@ -1,7 +1,7 @@
 //@bundleInto:common-min
 
-import {errorToString, stringToUtf8Uint8Array} from "@tutao/tutanota-utils"
-import {DataFile} from "./DataFile";
+import { errorToString, stringToUtf8Uint8Array } from "@tutao/tutanota-utils"
+import { DataFile } from "./DataFile"
 
 export const LOG_SIZE = 1000
 
@@ -41,11 +41,9 @@ export class Logger {
 	}
 
 	formatLogEntry(date: Date, level: string, ...rest: Array<any>): string {
-		const formattedArgs = rest.map(obj => {
+		const formattedArgs = rest.map((obj) => {
 			try {
-				return obj instanceof Error
-					? errorToString(Object.assign({stack: null}, obj))
-					: JSON.stringify(obj)
+				return obj instanceof Error ? errorToString(Object.assign({ stack: null }, obj)) : JSON.stringify(obj)
 			} catch (e) {
 				return "[cyclic object]"
 			}
@@ -68,11 +66,12 @@ export class Logger {
 	}
 }
 
-export function createLogFile(timestamp: number, content: string, scope: string): DataFile {
+export function createLogFile(content: string, scope: string, timestamp?: number): DataFile {
 	const data = stringToUtf8Uint8Array(content)
+	const timestampString = timestamp ? timestamp + "_" : ""
 	return {
 		_type: "DataFile",
-		name: timestamp + "_" + scope + "_tutanota.log",
+		name: timestampString + scope + "_tutanota.log",
 		mimeType: "text/plain",
 		data,
 		size: data.byteLength,
@@ -103,6 +102,9 @@ export function replaceNativeLogger(global: any, loggerInstance: Logger, force: 
 
 			trace(...args: any[]) {
 				globalConsole.trace(...args)
+			},
+			info(...args: any[]) {
+				globalConsole.info(...args)
 			},
 		}
 	}

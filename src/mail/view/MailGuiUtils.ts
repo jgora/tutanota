@@ -1,37 +1,43 @@
-import type {MailModel} from "../model/MailModel"
-import type {File as TutanotaFile, Mail, MailFolder} from "../../api/entities/tutanota/TypeRefs.js"
-import {createMail} from "../../api/entities/tutanota/TypeRefs.js"
-import {LockedError, PreconditionFailedError} from "../../api/common/error/RestError"
-import {Dialog} from "../../gui/base/Dialog"
-import {locator} from "../../api/main/MainLocator"
-import {getArchiveFolder, getFolderIcon, getInboxFolder} from "../model/MailUtils"
-import {AllIcons} from "../../gui/base/Icon"
-import {Icons} from "../../gui/base/icons/Icons"
-import type {InlineImages} from "./MailViewer"
-import {isApp, isDesktop} from "../../api/common/Env"
-import {neverNull, promiseMap} from "@tutao/tutanota-utils"
-import {MailFolderType, MailReportType} from "../../api/common/TutanotaConstants"
-import {getElementId} from "../../api/common/utils/EntityUtils"
-import {reportMailsAutomatically} from "./MailReportDialog"
-import {DataFile} from "../../api/common/DataFile";
-import {TranslationKey} from "../../misc/LanguageViewModel"
-import {FileController} from "../../file/FileController"
+import type { MailModel } from "../model/MailModel"
+import type { File as TutanotaFile, Mail, MailFolder } from "../../api/entities/tutanota/TypeRefs.js"
+import { createMail } from "../../api/entities/tutanota/TypeRefs.js"
+import { LockedError, PreconditionFailedError } from "../../api/common/error/RestError"
+import { Dialog } from "../../gui/base/Dialog"
+import { locator } from "../../api/main/MainLocator"
+import { getFolderIcon, getIndentedFolderNameForDropdown, getMoveTargetFolderSystems } from "../model/MailUtils"
+import { AllIcons } from "../../gui/base/Icon"
+import { Icons } from "../../gui/base/icons/Icons"
+import type { InlineImages } from "./MailViewer"
+import { isApp, isDesktop } from "../../api/common/Env"
+import { assertNotNull, neverNull, noOp, promiseMap } from "@tutao/tutanota-utils"
+import { MailFolderType, MailReportType } from "../../api/common/TutanotaConstants"
+import { getElementId, getListId } from "../../api/common/utils/EntityUtils"
+import { reportMailsAutomatically } from "./MailReportDialog"
+import { DataFile } from "../../api/common/DataFile"
+import { TranslationKey } from "../../misc/LanguageViewModel"
+import { FileController } from "../../file/FileController"
+import { DomRectReadOnlyPolyfilled, Dropdown, PosRect } from "../../gui/base/Dropdown.js"
+import { ButtonSize } from "../../gui/base/ButtonSize.js"
+import { modal } from "../../gui/base/Modal.js"
+import { assertSystemFolderOfType, isOfTypeOrSubfolderOf, isSpamOrTrashFolder } from "../../api/common/mail/CommonMailUtils.js"
 
-export function showDeleteConfirmationDialog(mails: ReadonlyArray<Mail>): Promise<boolean> {
-	let groupedMails = mails.reduce(
-		(all, mail) => {
-			locator.mailModel.isFinalDelete(locator.mailModel.getMailFolder(mail._id[0])) ? all.trash.push(mail) : all.move.push(mail)
-			return all
-		},
-		{
-			trash: [] as Mail[],
-			move: [] as Mail[],
-		},
-	)
+export async function showDeleteConfirmationDialog(mails: ReadonlyArray<Mail>): Promise<boolean> {
+	let trashMails: Mail[] = []
+	let moveMails: Mail[] = []
+	for (let mail of mails) {
+		const folder = locator.mailModel.getMailFolder(mail._id[0])
+		const mailboxDetail = await locator.mailModel.getMailboxDetailsForMailListId(getListId(mail))
+		if (mailboxDetail == null) {
+			continue
+		}
+		const isFinalDelete = folder && isSpamOrTrashFolder(mailboxDetail.folders, folder)
+		isFinalDelete ? trashMails.push(mail) : moveMails.push(mail)
+	}
+
 	let confirmationTextId: TranslationKey | null = null
 
-	if (groupedMails.trash.length > 0) {
-		if (groupedMails.move.length > 0) {
+	if (trashMails.length > 0) {
+		if (moveMails.length > 0) {
 			confirmationTextId = "finallyDeleteSelectedEmails_msg"
 		} else {
 			confirmationTextId = "finallyDeleteEmails_msg"
@@ -49,13 +55,13 @@ export function showDeleteConfirmationDialog(mails: ReadonlyArray<Mail>): Promis
  * @return whether emails were deleted
  */
 export function promptAndDeleteMails(mailModel: MailModel, mails: ReadonlyArray<Mail>, onConfirm: () => void): Promise<boolean> {
-	return showDeleteConfirmationDialog(mails).then(confirmed => {
+	return showDeleteConfirmationDialog(mails).then((confirmed) => {
 		if (confirmed) {
 			onConfirm()
 			return mailModel
 				.deleteMails(mails)
 				.then(() => true)
-				.catch(e => {
+				.catch((e) => {
 					//LockedError should no longer be thrown!?!
 					if (e instanceof PreconditionFailedError || e instanceof LockedError) {
 						return Dialog.message("operationStillActive_msg").then(() => false)
@@ -70,33 +76,39 @@ export function promptAndDeleteMails(mailModel: MailModel, mails: ReadonlyArray<
 }
 
 interface MoveMailsParams {
-	mailModel: MailModel;
-	mails: ReadonlyArray<Mail>;
-	targetMailFolder: MailFolder;
-	isReportable?: boolean;
+	mailModel: MailModel
+	mails: ReadonlyArray<Mail>
+	targetMailFolder: MailFolder
+	isReportable?: boolean
 }
 
 /**
  * Moves the mails and reports them as spam if the user or settings allow it.
  * @return whether mails were actually moved
  */
-export function moveMails({mailModel, mails, targetMailFolder, isReportable = true}: MoveMailsParams): Promise<boolean> {
+export async function moveMails({ mailModel, mails, targetMailFolder, isReportable = true }: MoveMailsParams): Promise<boolean> {
+	const details = await mailModel.getMailboxDetailsForMailListId(targetMailFolder.mails)
+	if (details == null) {
+		return false
+	}
+	const system = details.folders
 	return mailModel
 		.moveMails(mails, targetMailFolder)
-		.then(() => {
-			if (targetMailFolder.folderType === MailFolderType.SPAM && isReportable) {
-				const reportableMails = mails.map(mail => {
+		.then(async () => {
+			if (isOfTypeOrSubfolderOf(system, targetMailFolder, MailFolderType.SPAM) && isReportable) {
+				const reportableMails = mails.map((mail) => {
 					// mails have just been moved
 					const reportableMail = createMail(mail)
 					reportableMail._id = [targetMailFolder.mails, getElementId(mail)]
 					return reportableMail
 				})
-				reportMailsAutomatically(MailReportType.SPAM, mailModel, reportableMails)
+				const mailboxDetails = await mailModel.getMailboxDetailsForMailGroup(assertNotNull(targetMailFolder._ownerGroup))
+				await reportMailsAutomatically(MailReportType.SPAM, mailModel, mailboxDetails, reportableMails)
 			}
 
 			return true
 		})
-		.catch(e => {
+		.catch((e) => {
 			//LockedError should no longer be thrown!?!
 			if (e instanceof LockedError || e instanceof PreconditionFailedError) {
 				return Dialog.message("operationStillActive_msg").then(() => false)
@@ -106,14 +118,17 @@ export function moveMails({mailModel, mails, targetMailFolder, isReportable = tr
 		})
 }
 
-export function archiveMails(mails: Mail[]): Promise<any> {
+export function archiveMails(mails: Mail[]): Promise<void> {
 	if (mails.length > 0) {
 		// assume all mails in the array belong to the same Mailbox
-		return locator.mailModel.getMailboxFolders(mails[0]).then(folders => moveMails({
-			mailModel: locator.mailModel,
-			mails: mails,
-			targetMailFolder: getArchiveFolder(folders)
-		}))
+		return locator.mailModel.getMailboxFolders(mails[0]).then((folders) => {
+			folders &&
+				moveMails({
+					mailModel: locator.mailModel,
+					mails: mails,
+					targetMailFolder: assertSystemFolderOfType(folders, MailFolderType.ARCHIVE),
+				})
+		})
 	} else {
 		return Promise.resolve()
 	}
@@ -122,11 +137,14 @@ export function archiveMails(mails: Mail[]): Promise<any> {
 export function moveToInbox(mails: Mail[]): Promise<any> {
 	if (mails.length > 0) {
 		// assume all mails in the array belong to the same Mailbox
-		return locator.mailModel.getMailboxFolders(mails[0]).then(folders => moveMails({
-			mailModel: locator.mailModel,
-			mails: mails,
-			targetMailFolder: getInboxFolder(folders)
-		}))
+		return locator.mailModel.getMailboxFolders(mails[0]).then((folders) => {
+			folders &&
+				moveMails({
+					mailModel: locator.mailModel,
+					mails: mails,
+					targetMailFolder: assertSystemFolderOfType(folders, MailFolderType.INBOX),
+				})
+		})
 	} else {
 		return Promise.resolve()
 	}
@@ -136,7 +154,7 @@ export function getMailFolderIcon(mail: Mail): AllIcons {
 	let folder = locator.mailModel.getMailFolder(mail._id[0])
 
 	if (folder) {
-		return getFolderIcon(folder)()
+		return getFolderIcon(folder)
 	} else {
 		return Icons.Folder
 	}
@@ -154,7 +172,7 @@ export function replaceCidsWithInlineImages(
 		imageElements.push(...shadowImageElements)
 	}
 	const elementsWithCid: HTMLElement[] = []
-	imageElements.forEach(imageElement => {
+	imageElements.forEach((imageElement) => {
 		const cid = imageElement.getAttribute("cid")
 
 		if (cid) {
@@ -170,9 +188,9 @@ export function replaceCidsWithInlineImages(
 					let timeoutId: TimeoutID | null
 					let startCoords:
 						| {
-						x: number
-						y: number
-					}
+								x: number
+								y: number
+						  }
 						| null
 						| undefined
 					imageElement.addEventListener("touchstart", (e: TouchEvent) => {
@@ -215,7 +233,7 @@ export function replaceCidsWithInlineImages(
 export function replaceInlineImagesWithCids(dom: HTMLElement): HTMLElement {
 	const domClone = dom.cloneNode(true) as HTMLElement
 	const inlineImages: Array<HTMLElement> = Array.from(domClone.querySelectorAll("img[cid]"))
-	inlineImages.forEach(inlineImage => {
+	inlineImages.forEach((inlineImage) => {
 		const cid = inlineImage.getAttribute("cid")
 		inlineImage.setAttribute("src", "cid:" + (cid || ""))
 		inlineImage.removeAttribute("cid")
@@ -270,9 +288,9 @@ export function revokeInlineImages(inlineImages: InlineImages): void {
 export async function loadInlineImages(fileController: FileController, attachments: Array<TutanotaFile>, referencedCids: Array<string>): Promise<InlineImages> {
 	const filesToLoad = getReferencedAttachments(attachments, referencedCids)
 	const inlineImages = new Map()
-	return promiseMap(filesToLoad, async file => {
-		let dataFile = await fileController.downloadAndDecrypt(file)
-		const {htmlSanitizer} = await import("../../misc/HtmlSanitizer")
+	return promiseMap(filesToLoad, async (file) => {
+		let dataFile = await fileController.getAsDataFile(file)
+		const { htmlSanitizer } = await import("../../misc/HtmlSanitizer")
 		dataFile = htmlSanitizer.sanitizeInlineAttachment(dataFile)
 		const inlineImageReference = createInlineImageReference(dataFile, neverNull(file.cid))
 		inlineImages.set(inlineImageReference.cid, inlineImageReference)
@@ -280,5 +298,30 @@ export async function loadInlineImages(fileController: FileController, attachmen
 }
 
 export function getReferencedAttachments(attachments: Array<TutanotaFile>, referencedCids: Array<string>): Array<TutanotaFile> {
-	return attachments.filter(file => referencedCids.find(rcid => file.cid === rcid))
+	return attachments.filter((file) => referencedCids.find((rcid) => file.cid === rcid))
+}
+
+export async function showMoveMailsDropdown(
+	model: MailModel,
+	origin: PosRect,
+	mails: Mail[],
+	opts?: { width?: number; withBackground?: boolean; onSelected?: () => unknown },
+): Promise<void> {
+	const { width = 300, withBackground = false, onSelected = noOp } = opts ?? {}
+	const folders = await getMoveTargetFolderSystems(model, mails)
+	if (folders.length === 0) return
+	const folderButtons = folders.map((f) => ({
+		label: () => getIndentedFolderNameForDropdown(f),
+		click: () => {
+			onSelected()
+			moveMails({ mailModel: model, mails: mails, targetMailFolder: f.folder })
+		},
+		icon: getFolderIcon(f.folder),
+		size: ButtonSize.Compact,
+	}))
+
+	const dropdown = new Dropdown(() => folderButtons, width)
+
+	dropdown.setOrigin(new DomRectReadOnlyPolyfilled(origin.left, origin.top, origin.width, 0))
+	modal.displayUnique(dropdown, withBackground)
 }

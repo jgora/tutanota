@@ -1,6 +1,6 @@
 //@bundleInto:common-min
 
-import {TutanotaError} from "./TutanotaError"
+import { TutanotaError } from "./TutanotaError"
 
 export class ConnectionError extends TutanotaError {
 	static CODE: number = 0
@@ -47,6 +47,14 @@ export class MethodNotAllowedError extends TutanotaError {
 
 	constructor(msg: string) {
 		super("MethodNotAllowedError", msg)
+	}
+}
+
+export class RequestTimeoutError extends TutanotaError {
+	static CODE: number = 408
+
+	constructor(msg: string) {
+		super("RequestTimeoutError", msg)
 	}
 }
 
@@ -249,6 +257,9 @@ export function handleRestError(errorCode: number, path?: string, errorId?: stri
 
 		case PayloadTooLargeError.CODE:
 			return new PayloadTooLargeError(message)
+
+		case RequestTimeoutError.CODE:
+			return new RequestTimeoutError(message)
 
 		default:
 			return new ResourceError(message)

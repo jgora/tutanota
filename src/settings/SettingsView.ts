@@ -1,65 +1,68 @@
-import m, {Children, Component, Vnode} from "mithril"
+import m, { Children, Component, Vnode, VnodeDOM } from "mithril"
 import stream from "mithril/stream"
-import {assertMainOrNode, isApp, isDesktop, isIOSApp, isTutanotaDomain} from "../api/common/Env"
-import {ColumnType, ViewColumn} from "../gui/base/ViewColumn"
-import {ViewSlider} from "../gui/nav/ViewSlider.js"
-import {SettingsFolder} from "./SettingsFolder"
-import {lang} from "../misc/LanguageViewModel"
-import type {CurrentView} from "../gui/Header.js"
-import {header} from "../gui/Header.js"
-import {LoginSettingsViewer} from "./LoginSettingsViewer"
-import {GlobalSettingsViewer} from "./GlobalSettingsViewer"
-import {DesktopSettingsViewer} from "./DesktopSettingsViewer"
-import {MailSettingsViewer} from "./MailSettingsViewer"
-import {UserListView} from "./UserListView"
-import type {ReceivedGroupInvitation, User} from "../api/entities/sys/TypeRefs.js"
-import {CustomerInfoTypeRef, UserTypeRef} from "../api/entities/sys/TypeRefs.js"
-import {logins} from "../api/main/LoginController"
-import {GroupListView} from "./GroupListView"
-import {ContactFormListView} from "./contactform/ContactFormListView.js"
-import {WhitelabelSettingsViewer} from "./whitelabel/WhitelabelSettingsViewer"
-import {Icons} from "../gui/base/icons/Icons"
-import {theme} from "../gui/theme"
-import {FeatureType, GroupType} from "../api/common/TutanotaConstants"
-import {BootIcons} from "../gui/base/icons/BootIcons"
-import {locator} from "../api/main/MainLocator"
-import {WhitelabelChildrenListView} from "./WhitelabelChildrenListView"
-import {SubscriptionViewer} from "../subscription/SubscriptionViewer"
-import {PaymentViewer} from "../subscription/PaymentViewer"
-import type {EntityUpdateData} from "../api/main/EventController"
-import {isUpdateForTypeRef} from "../api/main/EventController"
-import {showUserImportDialog} from "./UserViewer"
-import {LazyLoaded, partition, promiseMap} from "@tutao/tutanota-utils"
-import {getAvailableDomains} from "./AddUserDialog"
-import {AppearanceSettingsViewer} from "./AppearanceSettingsViewer"
-import type {NavButtonAttrs} from "../gui/base/NavButtonN"
-import {NavButtonColor} from "../gui/base/NavButtonN";
-import {Dialog} from "../gui/base/Dialog"
-import {AboutDialog} from "./AboutDialog"
-import {navButtonRoutes, SETTINGS_PREFIX} from "../misc/RouteChange"
-import {size} from "../gui/size"
-import {FolderColumnView} from "../gui/FolderColumnView.js"
-import {getEtId, isSameId} from "../api/common/utils/EntityUtils"
-import {TemplateListView} from "./TemplateListView"
-import {KnowledgeBaseListView} from "./KnowledgeBaseListView"
-import {loadTemplateGroupInstances} from "../templates/model/TemplatePopupModel"
-import type {TemplateGroupInstance} from "../templates/model/TemplateGroupModel"
-import {showGroupSharingDialog} from "../sharing/view/GroupSharingDialog"
-import {createMoreActionButtonAttrs, getConfirmation} from "../gui/base/GuiUtils"
-import {SidebarSection} from "../gui/SidebarSection"
-import {ReceivedGroupInvitationsModel} from "../sharing/model/ReceivedGroupInvitationsModel"
-import {getDefaultGroupName, getSharedGroupName, isSharedGroupOwner} from "../sharing/GroupUtils"
-import {DummyTemplateListView} from "./DummyTemplateListView"
-import {SettingsFolderRow} from "./SettingsFolderRow"
-import {isCustomizationEnabledForCustomer} from "../api/common/utils/Utils"
-import {showProgressDialog} from "../gui/dialogs/ProgressDialog"
-import {TextFieldN} from "../gui/base/TextFieldN"
-import {createGroupSettings, createUserAreaGroupDeleteData} from "../api/entities/tutanota/TypeRefs.js"
-import {GroupInvitationFolderRow} from "../sharing/view/GroupInvitationFolderRow"
-import {TemplateGroupService} from "../api/entities/tutanota/Services"
-import {attachDropdown} from "../gui/base/DropdownN.js"
-import {exportUserCsv} from "./UserDataExporter.js"
-import {ButtonType} from "../gui/base/ButtonN.js"
+import { assertMainOrNode, isApp, isDesktop, isIOSApp, isTutanotaDomain } from "../api/common/Env"
+import { ColumnType, ViewColumn } from "../gui/base/ViewColumn"
+import { ViewSlider } from "../gui/nav/ViewSlider.js"
+import { SettingsFolder } from "./SettingsFolder"
+import { lang } from "../misc/LanguageViewModel"
+import { BaseHeaderAttrs, header } from "../gui/Header.js"
+import { LoginSettingsViewer } from "./login/LoginSettingsViewer.js"
+import { GlobalSettingsViewer } from "./GlobalSettingsViewer"
+import { DesktopSettingsViewer } from "./DesktopSettingsViewer"
+import { MailSettingsViewer } from "./MailSettingsViewer"
+import { UserListView } from "./UserListView"
+import type { ReceivedGroupInvitation, User } from "../api/entities/sys/TypeRefs.js"
+import { CustomerInfoTypeRef, UserTypeRef } from "../api/entities/sys/TypeRefs.js"
+import { logins } from "../api/main/LoginController"
+import { GroupListView } from "./groups/GroupListView.js"
+import { ContactFormListView } from "./contactform/ContactFormListView.js"
+import { WhitelabelSettingsViewer } from "./whitelabel/WhitelabelSettingsViewer"
+import { Icons } from "../gui/base/icons/Icons"
+import { theme } from "../gui/theme"
+import { FeatureType, GroupType } from "../api/common/TutanotaConstants"
+import { BootIcons } from "../gui/base/icons/BootIcons"
+import { locator } from "../api/main/MainLocator"
+import { WhitelabelChildrenListView } from "./WhitelabelChildrenListView"
+import { SubscriptionViewer } from "../subscription/SubscriptionViewer"
+import { PaymentViewer } from "../subscription/PaymentViewer"
+import type { EntityUpdateData } from "../api/main/EventController"
+import { isUpdateForTypeRef } from "../api/main/EventController"
+import { showUserImportDialog } from "./UserViewer"
+import { LazyLoaded, partition, promiseMap } from "@tutao/tutanota-utils"
+import { AppearanceSettingsViewer } from "./AppearanceSettingsViewer"
+import type { NavButtonAttrs } from "../gui/base/NavButton.js"
+import { NavButtonColor } from "../gui/base/NavButton.js"
+import { Dialog } from "../gui/base/Dialog"
+import { AboutDialog } from "./AboutDialog"
+import { navButtonRoutes, SETTINGS_PREFIX } from "../misc/RouteChange"
+import { size } from "../gui/size"
+import { FolderColumnView } from "../gui/FolderColumnView.js"
+import { getEtId, isSameId } from "../api/common/utils/EntityUtils"
+import { TemplateListView } from "./TemplateListView"
+import { KnowledgeBaseListView } from "./KnowledgeBaseListView"
+import { loadTemplateGroupInstances } from "../templates/model/TemplatePopupModel"
+import type { TemplateGroupInstance } from "../templates/model/TemplateGroupModel"
+import { showGroupSharingDialog } from "../sharing/view/GroupSharingDialog"
+import { createMoreActionButtonAttrs, getConfirmation } from "../gui/base/GuiUtils"
+import { SidebarSection } from "../gui/SidebarSection"
+import { ReceivedGroupInvitationsModel } from "../sharing/model/ReceivedGroupInvitationsModel"
+import { getDefaultGroupName, getSharedGroupName, isSharedGroupOwner } from "../sharing/GroupUtils"
+import { DummyTemplateListView } from "./DummyTemplateListView"
+import { SettingsFolderRow } from "./SettingsFolderRow"
+import { isCustomizationEnabledForCustomer } from "../api/common/utils/Utils"
+import { showProgressDialog } from "../gui/dialogs/ProgressDialog"
+import { TextField } from "../gui/base/TextField.js"
+import { createGroupSettings, createUserAreaGroupDeleteData } from "../api/entities/tutanota/TypeRefs.js"
+import { GroupInvitationFolderRow } from "../sharing/view/GroupInvitationFolderRow"
+import { TemplateGroupService } from "../api/entities/tutanota/Services"
+import { attachDropdown } from "../gui/base/Dropdown.js"
+import { exportUserCsv } from "./UserDataExporter.js"
+import { IconButton } from "../gui/base/IconButton.js"
+import { BottomNav } from "../gui/nav/BottomNav.js"
+import { getAvailableDomains } from "./mailaddress/MailAddressesUtils.js"
+import { DrawerMenuAttrs } from "../gui/nav/DrawerMenu.js"
+import { BaseTopLevelView } from "../gui/BaseTopLevelView.js"
+import { TopLevelAttrs, TopLevelView } from "../TopLevelView.js"
 
 assertMainOrNode()
 
@@ -70,14 +73,17 @@ export interface UpdatableSettingsViewer extends Component {
 
 /** UI component shown in the third column of settings. Not actually a Mithril component. */
 export interface UpdatableSettingsDetailsViewer {
-	// not the same as Component.view
-	view(): Children
+	renderView(): Children
 
 	entityEventsReceived(updates: ReadonlyArray<EntityUpdateData>): Promise<unknown>
 }
 
-export class SettingsView implements CurrentView {
-	readonly view: CurrentView["view"]
+export interface SettingsViewAttrs extends TopLevelAttrs {
+	drawerAttrs: DrawerMenuAttrs
+	header: BaseHeaderAttrs
+}
+
+export class SettingsView extends BaseTopLevelView implements TopLevelView<SettingsViewAttrs> {
 	viewSlider: ViewSlider
 	private readonly _settingsFoldersColumn: ViewColumn
 	private readonly _settingsColumn: ViewColumn
@@ -94,7 +100,8 @@ export class SettingsView implements CurrentView {
 	_customDomains: LazyLoaded<string[]>
 	_templateInvitations: ReceivedGroupInvitationsModel
 
-	constructor() {
+	constructor(vnode: Vnode<SettingsViewAttrs>) {
+		super()
 		this._userFolders = [
 			new SettingsFolder(
 				"login_label",
@@ -115,7 +122,7 @@ export class SettingsView implements CurrentView {
 				() => Icons.Palette,
 				"appearance",
 				() => new AppearanceSettingsViewer(),
-				undefined
+				undefined,
 			),
 		]
 
@@ -132,7 +139,7 @@ export class SettingsView implements CurrentView {
 						})
 						return desktopSettingsViewer
 					},
-					undefined
+					undefined,
 				),
 			)
 		}
@@ -233,7 +240,7 @@ export class SettingsView implements CurrentView {
 
 		this._templateFolders = []
 
-		this._makeTemplateFolders().then(folders => {
+		this._makeTemplateFolders().then((folders) => {
 			this._templateFolders = folders
 			m.redraw()
 		})
@@ -257,7 +264,7 @@ export class SettingsView implements CurrentView {
 		)
 		this._knowledgeBaseFolders = []
 
-		this._makeKnowledgeBaseFolders().then(folders => {
+		this._makeKnowledgeBaseFolders().then((folders) => {
 			this._knowledgeBaseFolders = folders
 			m.redraw()
 		})
@@ -275,13 +282,14 @@ export class SettingsView implements CurrentView {
 					this._templateInvitations.dispose()
 				},
 				view: () => {
-					const [ownTemplates, sharedTemplates] = partition(this._templateFolders, folder =>
+					const [ownTemplates, sharedTemplates] = partition(this._templateFolders, (folder) =>
 						isSharedGroupOwner(folder.data.group, logins.getUserController().user),
 					)
 
 					const templateInvitations = this._templateInvitations.invitations()
 
 					return m(FolderColumnView, {
+						drawer: vnode.attrs.drawerAttrs,
 						button: null,
 						content: m(".flex.flex-grow.col", [
 							m(
@@ -292,39 +300,39 @@ export class SettingsView implements CurrentView {
 								[
 									this._renderSidebarSectionChildren(this._userFolders),
 									ownTemplates.length > 0
-										? ownTemplates.map(folder => this._renderTemplateFolderRow(folder))
+										? ownTemplates.map((folder) => this._renderTemplateFolderRow(folder))
 										: m(SettingsFolderRow, {
-											mainButtonAttrs: this._createSettingsFolderNavButton(this._dummyTemplateFolder),
-										}),
-									sharedTemplates.map(folder => this._renderTemplateFolderRow(folder)),
+												mainButtonAttrs: this._createSettingsFolderNavButton(this._dummyTemplateFolder),
+										  }),
+									sharedTemplates.map((folder) => this._renderTemplateFolderRow(folder)),
 								],
 							),
 							logins.isUserLoggedIn() && logins.getUserController().isGlobalOrLocalAdmin()
 								? m(
-									SidebarSection,
-									{
-										name: "adminSettings_label",
-									},
-									this._renderSidebarSectionChildren(this._adminFolders),
-								)
+										SidebarSection,
+										{
+											name: "adminSettings_label",
+										},
+										this._renderSidebarSectionChildren(this._adminFolders),
+								  )
 								: null,
 							templateInvitations.length > 0
 								? m(
-									SidebarSection,
-									{
-										name: "templateGroupInvitations_label",
-									},
-									templateInvitations.map(invitation => this._renderTemplateInvitationFolderRow(invitation)),
-								)
+										SidebarSection,
+										{
+											name: "templateGroupInvitations_label",
+										},
+										templateInvitations.map((invitation) => this._renderTemplateInvitationFolderRow(invitation)),
+								  )
 								: null,
 							this._knowledgeBaseFolders.length > 0
 								? m(
-									SidebarSection,
-									{
-										name: "knowledgebase_label",
-									},
-									this._renderSidebarSectionChildren(this._knowledgeBaseFolders),
-								)
+										SidebarSection,
+										{
+											name: "knowledgebase_label",
+										},
+										this._renderSidebarSectionChildren(this._knowledgeBaseFolders),
+								  )
 								: null,
 							isTutanotaDomain() ? this._aboutThisSoftwareLink() : null,
 						]),
@@ -339,7 +347,9 @@ export class SettingsView implements CurrentView {
 		)
 		this._settingsColumn = new ViewColumn(
 			{
-				view: () => m(this._getCurrentViewer()),
+				// the CSS improves the situation on devices with notches (no control elements
+				// are concealed), but there's still room for improvement for scrollbars
+				view: () => m(".mlr-safe-inset.fill-absolute", m(this._getCurrentViewer())),
 			},
 			ColumnType.Background,
 			400,
@@ -348,27 +358,45 @@ export class SettingsView implements CurrentView {
 		)
 		this._settingsDetailsColumn = new ViewColumn(
 			{
-				view: () => (this.detailsViewer ? this.detailsViewer.view() : m("")),
+				view: () => m(".mlr-safe-inset.fill-absolute", this.detailsViewer ? this.detailsViewer.renderView() : m("")),
 			},
 			ColumnType.Background,
 			600,
 			2400,
 			() => lang.get("settings_label"),
 		)
-		this.viewSlider = new ViewSlider(header, [this._settingsFoldersColumn, this._settingsColumn, this._settingsDetailsColumn], "SettingsView")
+		this.viewSlider = new ViewSlider([this._settingsFoldersColumn, this._settingsColumn, this._settingsDetailsColumn], "SettingsView")
 
-		this.view = (): Vnode<any> => {
-			return m("#settings.main-view", m(this.viewSlider))
-		}
-
-		locator.eventController.addEntityListener(updates => {
-			return this.entityEventsReceived(updates)
-		})
 		this._customDomains = new LazyLoaded(() => {
-			return getAvailableDomains(true)
+			return getAvailableDomains(locator.entityClient, logins, true)
 		})
 
 		this._customDomains.getAsync().then(() => m.redraw())
+	}
+
+	oncreate(vnode: Vnode<SettingsViewAttrs>) {
+		locator.eventController.addEntityListener(this.entityListener)
+	}
+
+	onremove(vnode: VnodeDOM<SettingsViewAttrs>) {
+		locator.eventController.removeEntityListener(this.entityListener)
+	}
+
+	private entityListener = (updates: EntityUpdateData[]) => {
+		return this.entityEventsReceived(updates)
+	}
+
+	view({ attrs }: Vnode<SettingsViewAttrs>): Children {
+		return m(
+			"#settings.main-view",
+			m(this.viewSlider, {
+				header: m(header, {
+					viewSlider: this.viewSlider,
+					...attrs.header,
+				}),
+				bottomNav: m(BottomNav),
+			}),
+		)
 	}
 
 	_createSettingsFolderNavButton(folder: SettingsFolder<unknown>): NavButtonAttrs {
@@ -378,6 +406,7 @@ export class SettingsView implements CurrentView {
 			href: folder.url,
 			colors: NavButtonColor.Nav,
 			click: () => this.viewSlider.focus(this._settingsColumn),
+			persistentBackground: true,
 		}
 	}
 
@@ -386,30 +415,32 @@ export class SettingsView implements CurrentView {
 		const isGroupOwner = isSharedGroupOwner(instance.group, getEtId(logins.getUserController().user))
 		return m(SettingsFolderRow, {
 			mainButtonAttrs: this._createSettingsFolderNavButton(folder),
-			extraButtonAttrs: createMoreActionButtonAttrs(() => [
-				isGroupOwner
-					? {
-						label: "delete_action",
-						click: () =>
-							this._deleteTemplateGroup(folder.data),
-						icon: () => Icons.Trash,
-					}
-					: {
-						label: "leaveGroup_action",
-						click: () => this._leaveTemplateGroup(folder.data),
-						icon: () => Icons.Trash,
+			extraButton: m(
+				IconButton,
+				createMoreActionButtonAttrs(() => [
+					isGroupOwner
+						? {
+								label: "delete_action",
+								click: () => this._deleteTemplateGroup(folder.data),
+								icon: Icons.Trash,
+						  }
+						: {
+								label: "leaveGroup_action",
+								click: () => this._leaveTemplateGroup(folder.data),
+								icon: Icons.Trash,
+						  },
+					{
+						label: "sharing_label",
+						click: () => showGroupSharingDialog(folder.data.groupInfo, true),
+						icon: Icons.ContactImport,
 					},
-				{
-					label: "sharing_label",
-					click: () => showGroupSharingDialog(folder.data.groupInfo, true),
-					icon: () => Icons.ContactImport,
-				},
-				{
-					label: "rename_action",
-					click: () => showRenameTemplateListDialog(folder.data),
-					icon: () => Icons.Edit,
-				},
-			]),
+					{
+						label: "rename_action",
+						click: () => showRenameTemplateListDialog(folder.data),
+						icon: Icons.Edit,
+					},
+				]),
+			),
 		})
 	}
 
@@ -423,9 +454,12 @@ export class SettingsView implements CurrentView {
 		return getConfirmation("confirmDeleteTemplateGroup_msg").confirmed(() =>
 			showProgressDialog(
 				"pleaseWait_msg",
-				locator.serviceExecutor.delete(TemplateGroupService, createUserAreaGroupDeleteData({
-					group: templateInfo.groupInfo.group,
-				}))
+				locator.serviceExecutor.delete(
+					TemplateGroupService,
+					createUserAreaGroupDeleteData({
+						group: templateInfo.groupInfo.group,
+					}),
+				),
 			),
 		)
 	}
@@ -441,39 +475,36 @@ export class SettingsView implements CurrentView {
 		return m(
 			"",
 			folders
-				.filter(folder => folder.isVisible())
-				.map(folder => {
+				.filter((folder) => folder.isVisible())
+				.map((folder) => {
 					const canImportUsers = !isApp() && this._customDomains.isLoaded() && this._customDomains.getLoaded().length > 0
 
 					const buttonAttrs = this._createSettingsFolderNavButton(folder)
 
 					return m(SettingsFolderRow, {
 						mainButtonAttrs: buttonAttrs,
-						extraButtonAttrs:
+						extraButton:
 							canImportUsers && folder.path === "users"
-								? attachDropdown({
-									mainButtonAttrs: {
-										label: "more_label",
-										icon: () => Icons.More,
-									},
-									childAttrs: () => [
-										{
-											label: "importUsers_action",
-											click: () => showUserImportDialog(this._customDomains.getLoaded()),
-											type: ButtonType.Dropdown
-										},
-										{
-											label: "exportUsers_action",
-											click: () => exportUserCsv(
-												locator.entityClient,
-												locator.userManagementFacade,
-												logins,
-												locator.fileController
-											),
-											type: ButtonType.Dropdown
-										},
-									]
-								})
+								? m(
+										IconButton,
+										attachDropdown({
+											mainButtonAttrs: {
+												title: "more_label",
+												icon: Icons.More,
+											},
+											childAttrs: () => [
+												{
+													label: "importUsers_action",
+													click: () => showUserImportDialog(this._customDomains.getLoaded()),
+												},
+												{
+													label: "exportUsers_action",
+													click: () =>
+														exportUserCsv(locator.entityClient, locator.userManagementFacade, logins, locator.fileController),
+												},
+											],
+										}),
+								  )
 								: null,
 					})
 				}),
@@ -492,12 +523,12 @@ export class SettingsView implements CurrentView {
 	/**
 	 * Notifies the current view about changes of the url within its scope.
 	 */
-	updateUrl(args: Record<string, any>, requestedPath: string) {
+	onNewUrl(args: Record<string, any>, requestedPath: string) {
 		if (!args.folder) {
 			this._setUrl(this._userFolders[0].url)
 		} else if (args.folder || !m.route.get().startsWith("/settings")) {
 			// ensure that current viewer will be reinitialized
-			const folder = this._allSettingsFolders().find(folder => folder.url === requestedPath)
+			const folder = this._allSettingsFolders().find((folder) => folder.url === requestedPath)
 
 			if (!folder) {
 				this._setUrl(this._userFolders[0].url)
@@ -522,11 +553,11 @@ export class SettingsView implements CurrentView {
 	}
 
 	_getUserOwnedTemplateSettingsFolder(): SettingsFolder<unknown> {
-		return this._templateFolders.find(folder => isSharedGroupOwner(folder.data.group, logins.getUserController().user)) || this._dummyTemplateFolder
+		return this._templateFolders.find((folder) => isSharedGroupOwner(folder.data.group, logins.getUserController().user)) || this._dummyTemplateFolder
 	}
 
 	_allSettingsFolders(): ReadonlyArray<SettingsFolder<unknown>> {
-		const hasOwnTemplates = this._templateFolders.some(folder => isSharedGroupOwner(folder.data.group, logins.getUserController().user))
+		const hasOwnTemplates = this._templateFolders.some((folder) => isSharedGroupOwner(folder.data.group, logins.getUserController().user))
 
 		return [
 			...this._userFolders,
@@ -543,7 +574,7 @@ export class SettingsView implements CurrentView {
 	}
 
 	_isGlobalOrLocalAdmin(user: User): boolean {
-		return user.memberships.find(m => m.groupType === GroupType.Admin || m.groupType === GroupType.LocalAdmin) != null
+		return user.memberships.find((m) => m.groupType === GroupType.Admin || m.groupType === GroupType.LocalAdmin) != null
 	}
 
 	focusSettingsDetailsColumn() {
@@ -551,12 +582,12 @@ export class SettingsView implements CurrentView {
 	}
 
 	entityEventsReceived<T>(updates: ReadonlyArray<EntityUpdateData>): Promise<unknown> {
-		return promiseMap(updates, update => {
+		return promiseMap(updates, (update) => {
 			if (isUpdateForTypeRef(UserTypeRef, update) && isSameId(update.instanceId, logins.getUserController().user._id)) {
 				const user = logins.getUserController().user
 
 				// the user admin status might have changed
-				if (!this._isGlobalOrLocalAdmin(user) && this._currentViewer && this._adminFolders.find(f => f.isActive())) {
+				if (!this._isGlobalOrLocalAdmin(user) && this._currentViewer && this._adminFolders.find((f) => f.isActive())) {
 					this._setUrl(this._userFolders[0].url)
 				}
 
@@ -642,7 +673,7 @@ export class SettingsView implements CurrentView {
 		const templateMemberships = (logins.getUserController() && logins.getUserController().getTemplateMemberships()) || []
 		return promiseMap(
 			await loadTemplateGroupInstances(templateMemberships, locator.entityClient),
-			groupInstance =>
+			(groupInstance) =>
 				new SettingsFolder(
 					() => getSharedGroupName(groupInstance.groupInfo, true),
 					() => Icons.ListAlt,
@@ -663,7 +694,7 @@ export class SettingsView implements CurrentView {
 			const templateMemberships = (logins.getUserController() && logins.getUserController().getTemplateMemberships()) || []
 			return promiseMap(
 				await loadTemplateGroupInstances(templateMemberships, locator.entityClient),
-				groupInstance =>
+				(groupInstance) =>
 					new SettingsFolder(
 						() => getSharedGroupName(groupInstance.groupInfo, true),
 						() => Icons.Book,
@@ -688,7 +719,7 @@ function showRenameTemplateListDialog(instance: TemplateGroupInstance) {
 		allowOkWithReturn: true,
 		child: {
 			view: () =>
-				m(TextFieldN, {
+				m(TextField, {
 					value: name(),
 					oninput: name,
 					label: "templateGroupName_label",
@@ -696,8 +727,8 @@ function showRenameTemplateListDialog(instance: TemplateGroupInstance) {
 		},
 		okAction: (dialog: Dialog) => {
 			dialog.close()
-			const {userSettingsGroupRoot} = logins.getUserController()
-			const existingGroupSettings = userSettingsGroupRoot.groupSettings.find(gc => gc.group === instance.groupInfo.group)
+			const { userSettingsGroupRoot } = logins.getUserController()
+			const existingGroupSettings = userSettingsGroupRoot.groupSettings.find((gc) => gc.group === instance.groupInfo.group)
 			const newName = name()
 
 			if (existingGroupSettings) {

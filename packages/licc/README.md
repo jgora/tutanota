@@ -4,12 +4,16 @@ usage info: type `licc --help`
 
 ## output
 
-there are three kinds of json files `licc` understands. they are distinguished by their top-level `type` property.
+there are four kinds of json files `licc` understands. they are distinguished by their top-level `type` property.
 
 ### structs
 
 `"type": "struct"` definitions are simply generated into the output directory as a single source file of the
 platform-appropriate language.
+
+### enums
+
+`"type": "enum"` definitions are generated similarly to structs
 
 ### facades
 
@@ -49,8 +53,9 @@ know the difference between a generated struct and such a reexport).
 ## definition syntax
 
 the schema format is described in `lib/common.ts`.
-each schema is a JSON file with a single data type or facade definition.
-as discussed above, the type (`struct`, `facade` or `typeref`) is given by the `type` property of the contained json
+each schema is a JSON5 file with a single data type or facade definition.
+as discussed above, the type (`struct`, `enum`, `facade` or `typeref`) is given by the `type` property of the contained
+json5
 object.
 facades must have a `senders` and a `receivers` property listing the appropriate platforms.
 
@@ -61,36 +66,60 @@ good job to validate type syntax.
 
 struct fields are given as an object with `"fieldName": "fieldType"` properties.
 
-```json
+```json5
 {
-	"name": "Foo",
-	"type": "struct",
-	"doc": "optional doc comment that explains the type's purpose",
-	"fields": {
-		"fieldName": "fieldType",
+	name: "Foo",
+	type: "struct",
+	doc: "optional doc comment that explains the type's purpose",
+	fields: {
+		fieldName: "fieldType",
 		...
 	}
 }
 ```
 
+### enums
+
+```json5
+{
+	name: "QuuxEnum",
+	type: "enum",
+	doc: "optional doc comment that explains the type's purpose",
+	values: [
+		"Value1",
+		"Value2",
+		...
+	]
+}
+```
+
 ### facades
 
-```json
+```json5
 {
-	"name": "BarFacade",
-	"type": "facade",
-	"senders": ["web"],
-	"receivers": ["desktop", "ios"],
-	"doc": "optional doc comment explaining the scope of the facade",
-	"methods": {
+	name: "BarFacade",
+	type: "facade",
+	senders: [
+		"web"
+	],
+	receivers: [
+		"desktop",
+		"ios"
+	],
+	doc: "optional doc comment explaining the scope of the facade",
+	methods: {
 		"methodName": {
-			"doc": "optional comment explaining the contract and purpose of the method",
-			"arg": [
-				{"argName1": "argType1"},
-				{"argName2": "argType2"},
+			doc: "optional comment explaining the contract and purpose of the method",
+			arg: [
+				{
+					argName1: "argType1"
+				},
+				{
+					argName2: "argType2"
+				},
 				...
 			],
-			"ret": "returnType"
+			ret: "returnType"
 		},
 		...
 	}
@@ -101,13 +130,13 @@ Note: method arg must be given as a list of single-property objects as above to 
 
 ### typerefs
 
-```json
+```json5
 {
-	"name": "BazType",
-	"type": "typeref",
-	"location": {
-		"typescript": "../../src/somedir/BazType.js",
-		"kotlin": "de.tutao.tutanota.BazType"
+	name: "BazType",
+	type: "typeref",
+	location: {
+		typescript: "../../src/somedir/BazType.js",
+		kotlin: "de.tutao.tutanota.BazType"
 	}
 }
 ```

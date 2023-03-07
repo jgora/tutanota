@@ -1,23 +1,23 @@
-import m, {Children, Component, Vnode} from "mithril"
+import m, { Children, Component, Vnode } from "mithril"
 import stream from "mithril/stream"
-import {Dialog, DialogType} from "../../gui/base/Dialog"
-import {ButtonType} from "../../gui/base/ButtonN"
-import {isMailAddress} from "../../misc/FormatValidator"
-import {UserError} from "../../api/main/UserError"
-import {showUserError} from "../../misc/ErrorHandlerImpl"
-import {defaultSendMailModel} from "../editor/SendMailModel"
-import type {MailboxDetail} from "../model/MailModel"
-import {Keys, MailMethod, TabIndex} from "../../api/common/TutanotaConstants"
-import {getDefaultSender} from "../model/MailUtils"
-import {logins} from "../../api/main/LoginController"
-import {progressIcon} from "../../gui/base/Icon"
-import {Editor} from "../../gui/editor/Editor"
-import {RichTextToolbar} from "../../gui/base/RichTextToolbar"
-import {htmlSanitizer} from "../../misc/HtmlSanitizer"
-import {replaceInlineImagesWithCids} from "../view/MailGuiUtils"
-import {TextFieldN} from "../../gui/base/TextFieldN"
-import {DialogHeaderBarAttrs} from "../../gui/base/DialogHeaderBar";
-import Stream from "mithril/stream";
+import Stream from "mithril/stream"
+import { Dialog, DialogType } from "../../gui/base/Dialog"
+import { ButtonType } from "../../gui/base/Button.js"
+import { isMailAddress } from "../../misc/FormatValidator"
+import { UserError } from "../../api/main/UserError"
+import { showUserError } from "../../misc/ErrorHandlerImpl"
+import type { MailboxDetail } from "../model/MailModel"
+import { Keys, MailMethod, TabIndex } from "../../api/common/TutanotaConstants"
+import { getDefaultSender } from "../model/MailUtils"
+import { logins } from "../../api/main/LoginController"
+import { progressIcon } from "../../gui/base/Icon"
+import { Editor } from "../../gui/editor/Editor"
+import { htmlSanitizer } from "../../misc/HtmlSanitizer"
+import { replaceInlineImagesWithCids } from "../view/MailGuiUtils"
+import { TextField } from "../../gui/base/TextField.js"
+import { DialogHeaderBarAttrs } from "../../gui/base/DialogHeaderBar"
+import { RichTextToolbar } from "../../gui/base/RichTextToolbar.js"
+import { locator } from "../../api/main/MainLocator.js"
 
 type PressContact = {
 	email: string
@@ -30,6 +30,7 @@ export function openPressReleaseEditor(mailboxDetails: MailboxDetail): void {
 	}
 
 	async function send() {
+		const mailboxProperties = await locator.mailModel.getMailboxProperties(mailboxDetails.mailboxGroupRoot)
 		const body = pressRelease.bodyHtml()
 		const subject = pressRelease.subject()
 		let recipients
@@ -45,20 +46,23 @@ export function openPressReleaseEditor(mailboxDetails: MailboxDetail): void {
 		}
 
 		// We aren't using translation keys here because it's not a user facing feature
-		const choice = await Dialog.choice(() => `Really send the press release out to ${recipients.length} recipients?`, [
-			{
-				text: () => "Cancel",
-				value: "cancel",
-			},
-			{
-				text: () => "Just test",
-				value: "test",
-			},
-			{
-				text: () => "Yes please",
-				value: "send",
-			},
-		])
+		const choice = await Dialog.choice(
+			() => `Really send the press release out to ${recipients.length} recipients?`,
+			[
+				{
+					text: () => "Cancel",
+					value: "cancel",
+				},
+				{
+					text: () => "Just test",
+					value: "test",
+				},
+				{
+					text: () => "Yes please",
+					value: "send",
+				},
+			],
+		)
 
 		if (choice === "cancel") {
 			return
@@ -86,7 +90,7 @@ export function openPressReleaseEditor(mailboxDetails: MailboxDetail): void {
 						oncreate(vnode) {
 							// We need to delay so that the eelement is attached to the parent
 							setTimeout(() => {
-								(vnode.dom as HTMLElement).focus()
+								;(vnode.dom as HTMLElement).focus()
 							}, 10)
 						},
 					},
@@ -109,7 +113,9 @@ export function openPressReleaseEditor(mailboxDetails: MailboxDetail): void {
 			const bodyWithGreeting = `<p>${recipient.greeting},</p>${body}`
 
 			try {
-				const model = await defaultSendMailModel(mailboxDetails).initWithTemplate(
+				const mailboxProperties = await locator.mailModel.getMailboxProperties(mailboxDetails.mailboxGroupRoot)
+				const sendMailModel = await locator.sendMailModel(mailboxDetails, mailboxProperties)
+				const model = await sendMailModel.initWithTemplate(
 					{
 						to: [
 							{
@@ -186,7 +192,7 @@ function getValidRecipients(recipientsJSON: string): Array<PressContact> {
 		throw new UserError(() => "Recipients must be an array")
 	}
 
-	return parsed.map(({email, greeting}) => {
+	return parsed.map(({ email, greeting }) => {
 		if (typeof email !== "string" || !isMailAddress(email, false)) {
 			throw new UserError(() => `Not all provided recipients have an "email" field`)
 		}
@@ -211,10 +217,9 @@ export type PressReleaseFormAttrs = {
 
 export class PressReleaseForm implements Component<PressReleaseFormAttrs> {
 	editor: Editor
-	toolbar: RichTextToolbar
 
 	constructor(vnode: Vnode<PressReleaseFormAttrs>) {
-		const {bodyHtml} = vnode.attrs
+		const { bodyHtml } = vnode.attrs
 		this.editor = new Editor(
 			200,
 			(html, _) =>
@@ -226,11 +231,10 @@ export class PressReleaseForm implements Component<PressReleaseFormAttrs> {
 			this.editor.setHTML(bodyHtml())
 			this.editor.addChangeListener(() => bodyHtml(replaceInlineImagesWithCids(this.editor.getDOM()).innerHTML))
 		})
-		this.toolbar = new RichTextToolbar(this.editor)
 	}
 
 	view(vnode: Vnode<PressReleaseFormAttrs>): Children {
-		const {subject, recipientsJson} = vnode.attrs
+		const { subject, recipientsJson } = vnode.attrs
 		return m("", [
 			m("label.i.monospace", "Recipients JSON"),
 			m("textarea.full-width", {
@@ -241,12 +245,12 @@ export class PressReleaseForm implements Component<PressReleaseFormAttrs> {
 				oninput: (e: InputEvent) => recipientsJson((e.target as HTMLTextAreaElement).value),
 				value: recipientsJson(),
 			}),
-			m(TextFieldN, {
+			m(TextField, {
 				label: "subject_label",
 				value: subject(),
 				oninput: subject,
 			}),
-			m(this.toolbar),
+			m(RichTextToolbar, { editor: this.editor }),
 			m(".border-top", m(this.editor)),
 		])
 	}

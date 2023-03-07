@@ -1,18 +1,19 @@
-import {CacheStorage, Range} from "./EntityRestCache"
-import {ProgrammingError} from "../../common/error/ProgrammingError"
-import {ListElementEntity, SomeEntity} from "../../common/EntityTypes"
-import {TypeRef} from "@tutao/tutanota-utils"
-import {OfflineStorage} from "../offline/OfflineStorage.js"
-import {WorkerImpl} from "../WorkerImpl"
-import {uint8ArrayToKey} from "@tutao/tutanota-crypto"
-import {EphemeralCacheStorage} from "./EphemeralCacheStorage"
-import {EntityRestClient} from "./EntityRestClient.js"
-import {CustomCacheHandlerMap} from "./CustomCacheHandler.js"
+import { CacheStorage, LastUpdateTime, Range } from "./DefaultEntityRestCache.js"
+import { ProgrammingError } from "../../common/error/ProgrammingError"
+import { ListElementEntity, SomeEntity } from "../../common/EntityTypes"
+import { TypeRef } from "@tutao/tutanota-utils"
+import { OfflineStorage, OfflineStorageInitArgs } from "../offline/OfflineStorage.js"
+import { WorkerImpl } from "../WorkerImpl"
+import { EphemeralCacheStorage, EphemeralStorageInitArgs } from "./EphemeralCacheStorage"
+import { EntityRestClient } from "./EntityRestClient.js"
+import { CustomCacheHandlerMap } from "./CustomCacheHandler.js"
 
-interface OfflineStorageInitArgs {
-	userId: Id
-	databaseKey: Uint8Array
-	timeRangeDays: number | null
+export interface EphemeralStorageArgs extends EphemeralStorageInitArgs {
+	type: "ephemeral"
+}
+
+export type OfflineStorageArgs = OfflineStorageInitArgs & {
+	type: "offline"
 }
 
 interface CacheStorageInitReturn {
@@ -22,9 +23,13 @@ interface CacheStorageInitReturn {
 	isNewOfflineDb: boolean
 }
 
-export interface LateInitializedCacheStorage extends CacheStorage {
-	initialize(args: OfflineStorageInitArgs | null): Promise<CacheStorageInitReturn>;
+export interface CacheStorageLateInitializer {
+	initialize(args: OfflineStorageArgs | EphemeralStorageArgs): Promise<CacheStorageInitReturn>
+
+	deInitialize(): Promise<void>
 }
+
+type SomeStorage = OfflineStorage | EphemeralCacheStorage
 
 /**
  * This is necessary so that we can release offline storage mode without having to rewrite the credentials handling system. Since it's possible that
@@ -33,19 +38,15 @@ export interface LateInitializedCacheStorage extends CacheStorage {
  * remove the initialize parameter from the LoginFacade, and tidy up the WorkerLocator init
  *
  * Create a proxy to a cache storage object.
- * It will be uninitialized, and unusable until {@method LateInitializedCacheStorage.initializeCacheStorage} has been called on the returned object
+ * It will be uninitialized, and unusable until {@method CacheStorageLateInitializer.initializeCacheStorage} has been called on the returned object
  * Once it is initialized, then it is safe to use
  * @param factory A factory function to get a CacheStorage implementation when initialize is called
- * @return {LateInitializedCacheStorage} The uninitialized proxy and a function to initialize it
+ * @return {CacheStorageLateInitializer} The uninitialized proxy and a function to initialize it
  */
-export class LateInitializedCacheStorageImpl implements LateInitializedCacheStorage {
-	private _inner: CacheStorage | null = null
+export class LateInitializedCacheStorageImpl implements CacheStorageLateInitializer, CacheStorage {
+	private _inner: SomeStorage | null = null
 
-	constructor(
-		private readonly worker: WorkerImpl,
-		private readonly offlineStorageProvider: () => Promise<null | OfflineStorage>,
-	) {
-	}
+	constructor(private readonly worker: WorkerImpl, private readonly offlineStorageProvider: () => Promise<null | OfflineStorage>) {}
 
 	private get inner(): CacheStorage {
 		if (this._inner == null) {
@@ -55,27 +56,33 @@ export class LateInitializedCacheStorageImpl implements LateInitializedCacheStor
 		return this._inner
 	}
 
-	async initialize(args: OfflineStorageInitArgs | null): Promise<CacheStorageInitReturn> {
+	async initialize(args: OfflineStorageArgs | EphemeralStorageArgs): Promise<CacheStorageInitReturn> {
 		// We might call this multiple times.
 		// This happens when persistent credentials login fails and we need to start with new cache for new login.
-		const {storage, isPersistent, isNewOfflineDb} = await this.getStorage(args)
+		const { storage, isPersistent, isNewOfflineDb } = await this.getStorage(args)
 		this._inner = storage
 		return {
 			isPersistent,
-			isNewOfflineDb
+			isNewOfflineDb,
 		}
 	}
 
-	private async getStorage(args: OfflineStorageInitArgs | null): Promise<{storage: CacheStorage, isPersistent: boolean, isNewOfflineDb: boolean}> {
-		if (args != null) {
+	async deInitialize(): Promise<void> {
+		this._inner?.deinit()
+	}
+
+	private async getStorage(
+		args: OfflineStorageArgs | EphemeralStorageArgs,
+	): Promise<{ storage: SomeStorage; isPersistent: boolean; isNewOfflineDb: boolean }> {
+		if (args.type === "offline") {
 			try {
 				const storage = await this.offlineStorageProvider()
 				if (storage != null) {
-					const isNewOfflineDb = await storage.init(args.userId, uint8ArrayToKey(args.databaseKey), args.timeRangeDays)
+					const isNewOfflineDb = await storage.init(args)
 					return {
 						storage,
 						isPersistent: true,
-						isNewOfflineDb
+						isNewOfflineDb,
 					}
 				}
 			} catch (e) {
@@ -84,10 +91,13 @@ export class LateInitializedCacheStorageImpl implements LateInitializedCacheStor
 				this.worker.sendError(e)
 			}
 		}
+		// both "else" case and fallback for unavailable storage and error cases
+		const storage = new EphemeralCacheStorage()
+		await storage.init(args)
 		return {
-			storage: new EphemeralCacheStorage(),
+			storage,
 			isPersistent: false,
-			isNewOfflineDb: false
+			isNewOfflineDb: false,
 		}
 	}
 
@@ -107,8 +117,8 @@ export class LateInitializedCacheStorageImpl implements LateInitializedCacheStor
 		return this.inner.getLastBatchIdForGroup(groupId)
 	}
 
-	getLastUpdateTime(): Promise<number | null> {
-		return this.inner.getLastUpdateTime()
+	async getLastUpdateTime(): Promise<LastUpdateTime> {
+		return this._inner ? this.inner.getLastUpdateTime() : { type: "uninitialized" }
 	}
 
 	getRangeForList<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id): Promise<Range | null> {
@@ -149,7 +159,6 @@ export class LateInitializedCacheStorageImpl implements LateInitializedCacheStor
 
 	setNewRangeForList<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id, lower: Id, upper: Id): Promise<void> {
 		return this.inner.setNewRangeForList(typeRef, listId, lower, upper)
-
 	}
 
 	setUpperRangeForList<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id, id: Id): Promise<void> {
@@ -158,5 +167,34 @@ export class LateInitializedCacheStorageImpl implements LateInitializedCacheStor
 
 	getCustomCacheHandlerMap(entityRestClient: EntityRestClient): CustomCacheHandlerMap {
 		return this.inner.getCustomCacheHandlerMap(entityRestClient)
+	}
+
+	getUserId(): Id {
+		return this.inner.getUserId()
+	}
+
+	async deleteAllOwnedBy(owner: Id): Promise<void> {
+		return this.inner.deleteAllOwnedBy(owner)
+	}
+
+	clearExcludedData(): Promise<void> {
+		return this.inner.clearExcludedData()
+	}
+
+	/**
+	 * We want to lock the access to the "ranges" db when updating / reading the
+	 * offline available mail list ranges for each mail list (referenced using the listId)
+	 * @param listId the mail list that we want to lock
+	 */
+	lockRangesDbAccess(listId: Id): Promise<void> {
+		return this.inner.lockRangesDbAccess(listId)
+	}
+
+	/**
+	 * This is the counterpart to the function "lockRangesDbAccess(listId)"
+	 * @param listId the mail list that we want to unlock
+	 */
+	unlockRangesDbAccess(listId: Id): Promise<void> {
+		return this.inner.unlockRangesDbAccess(listId)
 	}
 }

@@ -1,17 +1,19 @@
-import {assertWorkerOrNode, getHttpOrigin, isAdminClient, isWorker} from "../../common/Env"
-import {ConnectionError, handleRestError, PayloadTooLargeError, ServiceUnavailableError, TooManyRequestsError} from "../../common/error/RestError"
-import {HttpMethod, MediaType} from "../../common/EntityFunctions"
-import {assertNotNull, typedEntries, uint8ArrayToArrayBuffer} from "@tutao/tutanota-utils"
-import {SuspensionHandler} from "../SuspensionHandler"
-import {REQUEST_SIZE_LIMIT_DEFAULT, REQUEST_SIZE_LIMIT_MAP} from "../../common/TutanotaConstants"
-import {SuspensionError} from "../../common/error/SuspensionError"
+import { assertWorkerOrNode, getApiOrigin, isAdminClient, isAndroidApp, isWebClient, isWorker } from "../../common/Env"
+import { ConnectionError, handleRestError, PayloadTooLargeError, ServiceUnavailableError, TooManyRequestsError } from "../../common/error/RestError"
+import { HttpMethod, MediaType } from "../../common/EntityFunctions"
+import { assertNotNull, typedEntries, uint8ArrayToArrayBuffer } from "@tutao/tutanota-utils"
+import { SuspensionHandler } from "../SuspensionHandler"
+import { REQUEST_SIZE_LIMIT_DEFAULT, REQUEST_SIZE_LIMIT_MAP } from "../../common/TutanotaConstants"
+import { SuspensionError } from "../../common/error/SuspensionError.js"
 
 assertWorkerOrNode()
 
-interface ProgressListener {
-	upload(percent: number): void;
+const TAG = "[RestClient]"
 
-	download(percent: number): void;
+interface ProgressListener {
+	upload(percent: number): void
+
+	download(percent: number): void
 }
 
 export const enum SuspensionBehavior {
@@ -20,15 +22,15 @@ export const enum SuspensionBehavior {
 }
 
 export interface RestClientOptions {
-	body?: string | Uint8Array,
-	responseType?: MediaType,
-	progressListener?: ProgressListener,
-	baseUrl?: string,
-	headers?: Dict,
-	queryParams?: Dict,
-	noCORS?: boolean,
+	body?: string | Uint8Array
+	responseType?: MediaType
+	progressListener?: ProgressListener
+	baseUrl?: string
+	headers?: Dict
+	queryParams?: Dict
+	noCORS?: boolean
 	/** Default is to suspend all requests on rate limit. */
-	suspensionBehavior?: SuspensionBehavior,
+	suspensionBehavior?: SuspensionBehavior
 }
 
 /**
@@ -40,23 +42,21 @@ export interface RestClientOptions {
  * upload progress with fetch (see https://stackoverflow.com/a/69400632)
  */
 export class RestClient {
-	private readonly url: string
 	private id: number
 	private suspensionHandler: SuspensionHandler
 	// accurate to within a few seconds, depending on network speed
 	private serverTimeOffsetMs: number | null = null
 
 	constructor(suspensionHandler: SuspensionHandler) {
-		this.url = getHttpOrigin()
 		this.id = 0
 		this.suspensionHandler = suspensionHandler
 	}
 
-	request(
-		path: string,
-		method: HttpMethod,
-		options: RestClientOptions = {},
-	): Promise<any | null> {
+	request(path: string, method: HttpMethod, options: RestClientOptions = {}): Promise<any | null> {
+		// @ts-ignore
+		const debug = typeof self !== "undefined" && self.debug
+		const verbose = isWorker() && debug
+
 		this.checkRequestSizeLimit(path, method, options.body ?? null)
 
 		if (this.suspensionHandler.isSuspended()) {
@@ -76,7 +76,8 @@ export class RestClient {
 					options.queryParams["cv"] = env.versionNumber
 				}
 
-				const url = addParamsToUrl(new URL((options.baseUrl ?? this.url) + path), options.queryParams)
+				const origin = options.baseUrl ?? getApiOrigin()
+				const url = addParamsToUrl(new URL(origin + path), options.queryParams)
 				const xhr = new XMLHttpRequest()
 				xhr.open(method, url.toString())
 
@@ -88,8 +89,10 @@ export class RestClient {
 					const res = {
 						timeoutId: 0 as TimeoutID,
 						abortFunction: () => {
-							console.log(`${this.id}: ${String(new Date())} aborting ` + String(res.timeoutId))
-							xhr.abort()
+							if (this.usingTimeoutAbort()) {
+								console.log(TAG, `${this.id}: ${String(new Date())} aborting ` + String(res.timeoutId))
+								xhr.abort()
+							}
 						},
 					}
 					return res
@@ -99,17 +102,14 @@ export class RestClient {
 				let timeout = setTimeout(t.abortFunction, env.timeout)
 				t.timeoutId = timeout
 
-				// self.debug doesn't typecheck in the fdroid build, but it does when running locally due to devDependencies
-				// @ts-ignore
-				if (isWorker() && self.debug) {
-					console.log(`${this.id}: set initial timeout ${String(timeout)} of ${env.timeout}`)
+				if (verbose) {
+					console.log(TAG, `${this.id}: set initial timeout ${String(timeout)} of ${env.timeout}`)
 				}
 
 				xhr.onload = () => {
 					// XMLHttpRequestProgressEvent, but not needed
-					// @ts-ignore
-					if (isWorker() && self.debug) {
-						console.log(`${this.id}: ${String(new Date())} finished request. Clearing Timeout ${String(timeout)}.`)
+					if (verbose) {
+						console.log(TAG, `${this.id}: ${String(new Date())} finished request. Clearing Timeout ${String(timeout)}.`)
 					}
 
 					clearTimeout(timeout)
@@ -132,13 +132,9 @@ export class RestClient {
 						} else if (isSuspensionResponse(xhr.status, suspensionTime)) {
 							this.suspensionHandler.activateSuspensionIfInactive(Number(suspensionTime))
 
-							resolve(
-								this.suspensionHandler.deferRequest(() =>
-									this.request(path, method, options),
-								),
-							)
+							resolve(this.suspensionHandler.deferRequest(() => this.request(path, method, options)))
 						} else {
-							console.log("failed request", method, url.toString(), xhr.status, xhr.statusText, options.headers, options.body)
+							logFailedRequest(method, url, xhr, options)
 							reject(handleRestError(xhr.status, `| ${method} ${path}`, xhr.getResponseHeader("Error-Id"), xhr.getResponseHeader("Precondition")))
 						}
 					}
@@ -146,16 +142,15 @@ export class RestClient {
 
 				xhr.onerror = function () {
 					clearTimeout(timeout)
-					console.log("failed to request", method, url, options.headers, options.body)
+					logFailedRequest(method, url, xhr, options)
 					reject(handleRestError(xhr.status, ` | ${method} ${path}`, xhr.getResponseHeader("Error-Id"), xhr.getResponseHeader("Precondition")))
 				}
 
 				// don't add an EventListener for non-CORS requests, otherwise it would not meet the 'CORS-Preflight simple request' requirements
 				if (!options.noCORS) {
 					xhr.upload.onprogress = (pe: ProgressEvent) => {
-						// @ts-ignore
-						if (isWorker() && self.debug) {
-							console.log(`${this.id}: ${String(new Date())} upload progress. Clearing Timeout ${String(timeout)}`, pe)
+						if (verbose) {
+							console.log(TAG, `${this.id}: ${String(new Date())} upload progress. Clearing Timeout ${String(timeout)}`, pe)
 						}
 
 						clearTimeout(timeout)
@@ -163,9 +158,8 @@ export class RestClient {
 						timeout = setTimeout(t.abortFunction, env.timeout)
 						t.timeoutId = timeout
 
-						// @ts-ignore
-						if (isWorker() && self.debug) {
-							console.log(`${this.id}: set new timeout ${String(timeout)} of ${env.timeout}`)
+						if (verbose) {
+							console.log(TAG, `${this.id}: set new timeout ${String(timeout)} of ${env.timeout}`)
 						}
 
 						if (options.progressListener != null && pe.lengthComputable) {
@@ -173,12 +167,32 @@ export class RestClient {
 							options.progressListener.upload((1 / pe.total) * pe.loaded)
 						}
 					}
+
+					xhr.upload.ontimeout = (e) => {
+						if (verbose) {
+							console.log(TAG, `${this.id}: ${String(new Date())} upload timeout. calling error handler.`, e)
+						}
+						xhr.onerror?.(e)
+					}
+
+					xhr.upload.onerror = (e) => {
+						if (verbose) {
+							console.log(TAG, `${this.id}: ${String(new Date())} upload error. calling error handler.`, e)
+						}
+						xhr.onerror?.(e)
+					}
+
+					xhr.upload.onabort = (e) => {
+						if (verbose) {
+							console.log(TAG, `${this.id}: ${String(new Date())} upload aborted. calling error handler.`, e)
+						}
+						xhr.onerror?.(e)
+					}
 				}
 
 				xhr.onprogress = (pe: ProgressEvent) => {
-					// @ts-ignore
-					if (isWorker() && self.debug) {
-						console.log(`${this.id}: ${String(new Date())} download progress. Clearing Timeout ${String(timeout)}`, pe)
+					if (verbose) {
+						console.log(TAG, `${this.id}: ${String(new Date())} download progress. Clearing Timeout ${String(timeout)}`, pe)
 					}
 
 					clearTimeout(timeout)
@@ -186,9 +200,8 @@ export class RestClient {
 					timeout = setTimeout(t.abortFunction, env.timeout)
 					t.timeoutId = timeout
 
-					// @ts-ignore
-					if (isWorker() && self.debug) {
-						console.log(`${this.id}: set new timeout ${String(timeout)} of ${env.timeout}`)
+					if (verbose) {
+						console.log(TAG, `${this.id}: set new timeout ${String(timeout)} of ${env.timeout}`)
 					}
 
 					if (options.progressListener != null && pe.lengthComputable) {
@@ -209,6 +222,11 @@ export class RestClient {
 				}
 			})
 		}
+	}
+
+	/** We only need to track timeout directly here on some platforms. Other platforms do it inside their network driver. */
+	private usingTimeoutAbort() {
+		return isWebClient() || isAndroidApp()
 	}
 
 	private saveServerTimeOffsetFromRequest(xhr: XMLHttpRequest) {
@@ -259,14 +277,11 @@ export class RestClient {
 		}
 	}
 
-	private setHeaders(
-		xhr: XMLHttpRequest,
-		options: RestClientOptions
-	) {
+	private setHeaders(xhr: XMLHttpRequest, options: RestClientOptions) {
 		if (options.headers == null) {
 			options.headers = {}
 		}
-		const {headers, body, responseType} = options
+		const { headers, body, responseType } = options
 
 		// don't add custom and content-type headers for non-CORS requests, otherwise it would not meet the 'CORS-Preflight simple request' requirements
 		if (!options.noCORS) {
@@ -302,4 +317,18 @@ export function addParamsToUrl(url: URL, urlParams: Dict): URL {
 
 export function isSuspensionResponse(statusCode: number, suspensionTimeNumberString: string | null): boolean {
 	return Number(suspensionTimeNumberString) > 0 && (statusCode === TooManyRequestsError.CODE || statusCode === ServiceUnavailableError.CODE)
+}
+
+function logFailedRequest(method: HttpMethod, url: URL, xhr: XMLHttpRequest, options: RestClientOptions): void {
+	const args: Array<unknown> = [TAG, "failed request", method, url.toString(), xhr.status, xhr.statusText]
+	if (options.headers != null) {
+		args.push(Object.keys(options.headers))
+	}
+	if (options.body != null) {
+		const logBody = "string" === typeof options.body ? `[${options.body.length} characters]` : `[${options.body.length} bytes]`
+		args.push(logBody)
+	} else {
+		args.push("no body")
+	}
+	console.log(...args)
 }

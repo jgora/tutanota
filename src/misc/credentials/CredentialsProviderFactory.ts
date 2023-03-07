@@ -1,18 +1,16 @@
-import type {CredentialsAndDatabaseKey, CredentialsEncryption, ICredentialsProvider, PersistentCredentials} from "./CredentialsProvider"
-import {CredentialsProvider} from "./CredentialsProvider"
-import {deviceConfig} from "../DeviceConfig"
-import {isApp, isDesktop, isOfflineStorageAvailable} from "../../api/common/Env"
-import type {DeviceEncryptionFacade} from "../../api/worker/facades/DeviceEncryptionFacade"
-import {CredentialsKeyMigrator, CredentialsKeyMigratorStub} from "./CredentialsKeyMigrator"
-import {CredentialsKeyProvider} from "./CredentialsKeyProvider"
-import {NativeCredentialsEncryption} from "./NativeCredentialsEncryption"
-import type {ExposedNativeInterface, NativeInterface} from "../../native/common/NativeInterface"
-import {assertNotNull} from "@tutao/tutanota-utils"
-import {DatabaseKeyFactory} from "./DatabaseKeyFactory"
-import {exposeRemote} from "../../api/common/WorkerProxy"
-import {OfflineDbFacade} from "../../desktop/db/OfflineDbFacade"
-import {InterWindowEventBus} from "../../native/common/InterWindowEventBus"
-import {InterWindowEventTypes} from "../../native/common/InterWindowEventTypes"
+import type { CredentialsAndDatabaseKey, CredentialsEncryption, PersistentCredentials } from "./CredentialsProvider.js"
+import { CredentialsProvider } from "./CredentialsProvider.js"
+import { deviceConfig } from "../DeviceConfig"
+import { isApp, isDesktop } from "../../api/common/Env"
+import type { DeviceEncryptionFacade } from "../../api/worker/facades/DeviceEncryptionFacade"
+import { CredentialsKeyProvider } from "./CredentialsKeyProvider"
+import { NativeCredentialsEncryption } from "./NativeCredentialsEncryption"
+import type { NativeInterface } from "../../native/common/NativeInterface"
+import { assertNotNull } from "@tutao/tutanota-utils"
+import { DatabaseKeyFactory } from "./DatabaseKeyFactory"
+import { DefaultCredentialsKeyMigrator, StubCredentialsKeyMigrator } from "./CredentialsKeyMigrator.js"
+import { InterWindowEventFacadeSendDispatcher } from "../../native/common/generatedipc/InterWindowEventFacadeSendDispatcher.js"
+import { SqlCipherFacade } from "../../native/common/generatedipc/SqlCipherFacade.js"
 
 export function usingKeychainAuthentication(): boolean {
 	return isApp() || isDesktop()
@@ -26,41 +24,35 @@ export function hasKeychainAuthenticationOptions(): boolean {
  * Factory method for credentials provider that will return an instance injected with the implementations appropriate for the platform.
  * @param deviceEncryptionFacade
  * @param nativeApp: If {@code usingKeychainAuthentication} would return true, this _must not_ be null
- * @param eventBus
+ * @param sqlCipherFacade
+ * @param interWindowEventSender
  */
 export async function createCredentialsProvider(
 	deviceEncryptionFacade: DeviceEncryptionFacade,
 	nativeApp: NativeInterface | null,
-	eventBus: InterWindowEventBus<InterWindowEventTypes> | null,
-): Promise<ICredentialsProvider> {
+	sqlCipherFacade: SqlCipherFacade | null,
+	interWindowEventSender: InterWindowEventFacadeSendDispatcher | null,
+): Promise<CredentialsProvider> {
 	if (usingKeychainAuthentication()) {
-		const {NativeCredentialsFacadeSendDispatcher} = await import( "../../native/common/generatedipc/NativeCredentialsFacadeSendDispatcher.js")
+		const { NativeCredentialsFacadeSendDispatcher } = await import("../../native/common/generatedipc/NativeCredentialsFacadeSendDispatcher.js")
+		const { SqlCipherFacadeSendDispatcher } = await import("../../native/common/generatedipc/SqlCipherFacadeSendDispatcher.js")
 		const nativeCredentials = new NativeCredentialsFacadeSendDispatcher(assertNotNull(nativeApp))
 		const credentialsKeyProvider = new CredentialsKeyProvider(nativeCredentials, deviceConfig, deviceEncryptionFacade)
 		const credentialsEncryption = new NativeCredentialsEncryption(credentialsKeyProvider, deviceEncryptionFacade, nativeCredentials)
-		const credentialsKeyMigrator = new CredentialsKeyMigrator(nativeCredentials)
-		let offlineDbFacade: OfflineDbFacade | null
-		if (isOfflineStorageAvailable()) {
-			const remoteInterface = exposeRemote<ExposedNativeInterface>(
-				(request) => assertNotNull(nativeApp).invokeNative(request.requestType, request.args)
-			)
-			offlineDbFacade = remoteInterface.offlineDbFacade
-		} else {
-			offlineDbFacade = null
-		}
+		const credentialsKeyMigrator = new DefaultCredentialsKeyMigrator(nativeCredentials)
 		return new CredentialsProvider(
 			credentialsEncryption,
 			deviceConfig,
 			credentialsKeyMigrator,
 			new DatabaseKeyFactory(deviceEncryptionFacade),
-			offlineDbFacade,
-			isDesktop() ? eventBus : null,
+			sqlCipherFacade,
+			isDesktop() ? interWindowEventSender : null,
 		)
 	} else {
 		return new CredentialsProvider(
 			new CredentialsEncryptionStub(),
 			deviceConfig,
-			new CredentialsKeyMigratorStub(),
+			new StubCredentialsKeyMigrator(),
 			new DatabaseKeyFactory(deviceEncryptionFacade),
 			null,
 			null,
@@ -75,8 +67,8 @@ export async function createCredentialsProvider(
  */
 
 class CredentialsEncryptionStub implements CredentialsEncryption {
-	async encrypt({credentials, databaseKey}: CredentialsAndDatabaseKey): Promise<PersistentCredentials> {
-		const {encryptedPassword} = credentials
+	async encrypt({ credentials, databaseKey }: CredentialsAndDatabaseKey): Promise<PersistentCredentials> {
+		const { encryptedPassword } = credentials
 
 		if (encryptedPassword == null) {
 			throw new Error("Trying to encrypt non-persistent credentials")
@@ -90,7 +82,7 @@ class CredentialsEncryptionStub implements CredentialsEncryption {
 			},
 			encryptedPassword,
 			accessToken: credentials.accessToken,
-			databaseKey: null
+			databaseKey: null,
 		}
 	}
 
@@ -103,7 +95,7 @@ class CredentialsEncryptionStub implements CredentialsEncryption {
 				userId: encryptedCredentials.credentialInfo.userId,
 				type: encryptedCredentials.credentialInfo.type,
 			},
-			databaseKey: null
+			databaseKey: null,
 		}
 	}
 

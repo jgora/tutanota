@@ -1,12 +1,21 @@
 /**
  * This is a wrapper for commonly used crypto functions, easier to inject/swap implementations and test.
  */
-import forge from "node-forge"
 import crypto from "crypto"
-import {InstanceMapper} from "../api/worker/crypto/InstanceMapper"
-import type {TypeModel} from "../api/common/EntityTypes"
-import type {Base64} from "@tutao/tutanota-utils"
-import {aes128Decrypt, aes256Decrypt, aes256Encrypt, aes256RandomKey, base64ToKey, decrypt256Key, random, uint8ArrayToKey} from "@tutao/tutanota-crypto"
+import { InstanceMapper } from "../api/worker/crypto/InstanceMapper"
+import type { TypeModel } from "../api/common/EntityTypes"
+import type { Base64 } from "@tutao/tutanota-utils"
+import {
+	aes128Decrypt,
+	aes128Encrypt,
+	aes256Decrypt,
+	aes256Encrypt,
+	aes256RandomKey,
+	base64ToKey,
+	decrypt256Key,
+	random,
+	uint8ArrayToKey,
+} from "@tutao/tutanota-crypto"
 
 // the prng throws if it doesn't have enough entropy
 // it may be called very early, so we need to seed it
@@ -28,6 +37,8 @@ const seed = () => {
 seed()
 
 export interface CryptoFunctions {
+	aes128Encrypt(key: Aes128Key, bytes: Uint8Array, iv: Uint8Array, usePadding: boolean, useMac: boolean): Uint8Array
+
 	aes128Decrypt(key: Aes128Key, encryptedBytes: Uint8Array, usePadding: boolean): Uint8Array
 
 	aes256Encrypt(key: Aes256Key, bytes: Uint8Array, iv: Uint8Array, usePadding: boolean, useMac: boolean): Uint8Array
@@ -40,11 +51,7 @@ export interface CryptoFunctions {
 
 	base64ToKey(base64: Base64): BitArray
 
-	publicKeyFromPem(
-		pem: string,
-	): {
-		verify: (arg0: string, arg1: string) => boolean
-	}
+	verifySignature(pubKeyPem: string, data: Uint8Array, signature: Uint8Array): boolean
 
 	randomBytes(nbrOfBytes: number): Uint8Array
 
@@ -55,6 +62,9 @@ export interface CryptoFunctions {
 
 const mapper = new InstanceMapper()
 export const cryptoFns: CryptoFunctions = {
+	aes128Encrypt(key: Aes128Key, bytes: Uint8Array, iv: Uint8Array, usePadding: boolean, useMac: boolean): Uint8Array {
+		return aes128Encrypt(key, bytes, iv, usePadding, useMac)
+	},
 	aes128Decrypt(key: Aes128Key, encryptedBytes: Uint8Array, usePadding: boolean): Uint8Array {
 		return aes128Decrypt(key, encryptedBytes, usePadding)
 	},
@@ -79,12 +89,11 @@ export const cryptoFns: CryptoFunctions = {
 		return base64ToKey(base64)
 	},
 
-	publicKeyFromPem(
-		pem: string,
-	): {
-		verify: (arg0: string, arg1: string) => boolean
-	} {
-		return forge.pki.publicKeyFromPem(pem)
+	/**
+	 * verify a signature of some data with a given PEM-encoded spki public key
+	 */
+	verifySignature(pem: string, data: Uint8Array, signature: Uint8Array): boolean {
+		return crypto.verify("SHA512", data, pem, signature)
 	},
 
 	randomBytes(nbrOfBytes: number): Uint8Array {

@@ -1,17 +1,20 @@
-import m, {Children, Component} from "mithril"
-import {px, size} from "../../gui/size"
-import {ButtonN, ButtonType} from "../../gui/base/ButtonN"
-import {createMail} from "../../api/entities/tutanota/TypeRefs.js"
-import {createMailAddress} from "../../api/entities/tutanota/TypeRefs.js"
-import {MailRow} from "../../mail/view/MailRow"
-import {noOp} from "@tutao/tutanota-utils"
+import m, { Children, Component } from "mithril"
+import { px, size } from "../../gui/size"
+import { Button, ButtonType } from "../../gui/base/Button.js"
+import { createMail } from "../../api/entities/tutanota/TypeRefs.js"
+import { createMailAddress } from "../../api/entities/tutanota/TypeRefs.js"
+import { MailRow } from "../../mail/view/MailRow"
+import { noOp } from "@tutao/tutanota-utils"
+import { IconButton } from "../../gui/base/IconButton.js"
+import { Icons } from "../../gui/base/icons/Icons.js"
+import { ToggleButton } from "../../gui/base/ToggleButton.js"
 
-export const COMPONENT_PREVIEW_HEIGHT = 300
 export const BUTTON_WIDTH = 270
 
 export class CustomColorEditorPreview implements Component {
 	_mailRow: MailRow
 	_mailRow2: MailRow
+	private toggleSelected: boolean = false
 
 	constructor() {
 		this._mailRow = new MailRow(false)
@@ -23,7 +26,6 @@ export class CustomColorEditorPreview implements Component {
 			".editor-border.mt-l.flex.col",
 			{
 				style: {
-					height: px(COMPONENT_PREVIEW_HEIGHT),
 					alignItems: "center",
 				},
 			},
@@ -35,28 +37,35 @@ export class CustomColorEditorPreview implements Component {
 							width: px(BUTTON_WIDTH),
 						},
 					},
-					m(ButtonN, {
+					m(Button, {
 						label: "login_action",
 						click: noOp,
 						type: ButtonType.Login,
 					}),
 				),
 				m(".pt-m", [
-					m(ButtonN, {
-						style: {
-							width: px(BUTTON_WIDTH),
-						},
+					m(Button, {
 						label: () => "Secondary",
 						click: noOp,
 						type: ButtonType.Secondary,
 					}),
-					m(ButtonN, {
-						style: {
-							width: px(BUTTON_WIDTH),
-						},
+					m(Button, {
 						label: () => "Primary",
 						click: noOp,
 						type: ButtonType.Primary,
+					}),
+				]),
+				m(".pt-m", [
+					m(IconButton, {
+						title: () => "Icon button",
+						icon: Icons.Folder,
+						click: noOp,
+					}),
+					m(ToggleButton, {
+						title: () => "Toggle button",
+						icon: this.toggleSelected ? Icons.Lock : Icons.Unlock,
+						toggled: this.toggleSelected,
+						onToggled: () => (this.toggleSelected = !this.toggleSelected),
 					}),
 				]),
 				m(".pt-m", this.renderPreviewMailRow()),
@@ -96,13 +105,14 @@ export class CustomColorEditorPreview implements Component {
 			{
 				style: {
 					width: px(size.second_col_max_width),
+					height: px(size.list_row_height * 2),
 				},
 			},
 			[
 				m(
 					".list-row.pl.pr-l.odd-row.pt-m.pb-m",
 					{
-						oncreate: vnode => {
+						oncreate: (vnode) => {
 							this._mailRow.domElement = vnode.dom as HTMLElement
 							requestAnimationFrame(() => this._mailRow.update(mail, false))
 						},
@@ -112,7 +122,7 @@ export class CustomColorEditorPreview implements Component {
 				m(
 					".list-row.pl.pr-l.pt-m.pb-m",
 					{
-						oncreate: vnode => {
+						oncreate: (vnode) => {
 							this._mailRow2.domElement = vnode.dom as HTMLElement
 							requestAnimationFrame(() => this._mailRow2.update(mail2, true))
 						},

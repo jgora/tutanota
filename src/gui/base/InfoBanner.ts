@@ -1,15 +1,16 @@
-import {AllIcons, Icon} from "./Icon"
-import m, {Children, Component, Vnode} from "mithril"
-import {theme} from "../theme"
-import type {InfoLink, TranslationKey} from "../../misc/LanguageViewModel"
-import {lang} from "../../misc/LanguageViewModel"
-import type {ButtonAttrs} from "./ButtonN"
-import {ButtonN, ButtonType} from "./ButtonN"
-import {NavButtonN} from "./NavButtonN"
-import {isNotNull, mapNullable} from "@tutao/tutanota-utils"
-import {Icons} from "./icons/Icons"
-import {ifAllowedTutanotaLinks} from "./GuiUtils"
-import type {lazy} from "@tutao/tutanota-utils"
+import { AllIcons, Icon } from "./Icon"
+import m, { Children, Component, Vnode } from "mithril"
+import { theme } from "../theme"
+import type { InfoLink, TranslationKey } from "../../misc/LanguageViewModel"
+import { lang } from "../../misc/LanguageViewModel"
+import type { ButtonAttrs } from "./Button.js"
+import { Button, ButtonType } from "./Button.js"
+import { NavButton } from "./NavButton.js"
+import type { lazy } from "@tutao/tutanota-utils"
+import { isNotNull, mapNullable } from "@tutao/tutanota-utils"
+import { Icons } from "./icons/Icons"
+import { ifAllowedTutanotaLinks } from "./GuiUtils"
+import { px, size } from "../size.js"
 
 const WARNING_RED = "#ca0606"
 
@@ -31,20 +32,22 @@ export interface InfoBannerAttrs {
  */
 export class InfoBanner implements Component<InfoBannerAttrs> {
 	view(vnode: Vnode<InfoBannerAttrs>): Children {
-		const {message, icon, helpLink, buttons, type} = vnode.attrs
+		const { message, icon, helpLink, buttons, type } = vnode.attrs
 		return m(
-			".info-banner.center-vertically.full-width.border-bottom.pr-s.pl.mt-xs" + // keep the distance to the bottom of the banner the same in the case that buttons aren't present
-			(buttons && buttons.length > 0 ? "" : ".pb-s"),
+			".info-banner.center-vertically.border-bottom.pr-s.pl.border-radius.mt-xs" + // keep the distance to the bottom of the banner the same in the case that buttons aren't present
+				(buttons && buttons.length > 0 ? "" : ".pb-s"),
 			{
 				style: {
 					border: `solid 2px ${type === BannerType.Warning ? WARNING_RED : theme.content_border}`,
 				},
 			},
 			[
-				m(".flex", [
-					m(".mt-s.mr-s", this.renderIcon(icon, type ?? null)),
-					m(".flex-grow", [
-						m(".mr.pt-s", [m(".small", lang.getMaybeLazy(message))]),
+				m(".mt-s.mr-s.abs", this.renderIcon(icon, type ?? null)), // absolute position makes the icon fixed to the top left corner of the banner
+				m(
+					"",
+					{ style: { "margin-left": px(size.icon_size_large + 1) } }, // allow room for the icon
+					[
+						m(".mr.pt-s", [m(".small.text-break", lang.getMaybeLazy(message))]),
 						m(
 							".flex.ml-negative-s",
 							{
@@ -59,11 +62,11 @@ export class InfoBanner implements Component<InfoBannerAttrs> {
 							[
 								m(".small", this.renderButtons(buttons || [])), // Push the help button all the way to the right
 								m(".flex-grow"),
-								mapNullable(helpLink, helpLink => this.renderHelpLink(helpLink)),
+								mapNullable(helpLink, (helpLink) => this.renderHelpLink(helpLink)),
 							],
 						),
-					]),
-				]),
+					],
+				),
 			],
 		)
 	}
@@ -79,11 +82,11 @@ export class InfoBanner implements Component<InfoBannerAttrs> {
 	}
 
 	renderButtons(buttons: ReadonlyArray<ButtonAttrs | null>): Children {
-		return buttons.filter(isNotNull).map(attrs => m(ButtonN, {...attrs, type: ButtonType.Secondary}))
+		return buttons.filter(isNotNull).map((attrs) => m(Button, { ...attrs, type: ButtonType.Secondary }))
 	}
 
 	renderHelpLink(helpLink: InfoLink): Children | null {
-		return ifAllowedTutanotaLinks(helpLink, link => {
+		return ifAllowedTutanotaLinks(helpLink, (link) => {
 			return m(
 				".button-content",
 				{
@@ -91,7 +94,7 @@ export class InfoBanner implements Component<InfoBannerAttrs> {
 						marginRight: "-10px",
 					},
 				},
-				m(NavButtonN, {
+				m(NavButton, {
 					icon: () => Icons.QuestionMark,
 					href: link,
 					small: true,

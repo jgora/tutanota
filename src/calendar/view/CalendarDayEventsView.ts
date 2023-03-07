@@ -1,10 +1,10 @@
-import m, {ChildArray, Children, Component, Vnode} from "mithril"
-import {theme} from "../../gui/theme"
-import {px, size} from "../../gui/size"
-import {DAY_IN_MILLIS, getEndOfDay, getStartOfDay} from "@tutao/tutanota-utils"
-import {numberRange} from "@tutao/tutanota-utils"
+import m, { ChildArray, Children, Component, Vnode } from "mithril"
+import { theme } from "../../gui/theme"
+import { px, size } from "../../gui/size"
+import { DAY_IN_MILLIS, downcast, getEndOfDay, getStartOfDay, mapNullable, neverNull, numberRange } from "@tutao/tutanota-utils"
 import {
 	eventEndsAfterDay,
+	EventLayoutMode,
 	eventStartsBefore,
 	expandEvent,
 	formatEventTime,
@@ -15,16 +15,15 @@ import {
 	layOutEvents,
 	TEMPORARY_EVENT_OPACITY,
 } from "../date/CalendarUtils"
-import {CalendarEventBubble} from "./CalendarEventBubble"
-import {downcast, mapNullable, neverNull} from "@tutao/tutanota-utils"
-import type {CalendarEvent} from "../../api/entities/tutanota/TypeRefs.js"
-import {logins} from "../../api/main/LoginController"
-import {Time} from "../../api/common/utils/Time"
-import {getPosAndBoundsFromMouseEvent} from "../../gui/base/GuiUtils"
-import {getTimeFromMousePos} from "./CalendarGuiUtils"
-import type {CalendarEventBubbleClickHandler} from "./CalendarViewModel"
-import type {GroupColors} from "./CalendarView"
-import {styles} from "../../gui/styles"
+import { CalendarEventBubble } from "./CalendarEventBubble"
+import type { CalendarEvent } from "../../api/entities/tutanota/TypeRefs.js"
+import { logins } from "../../api/main/LoginController"
+import { Time } from "../../api/common/utils/Time"
+import { getPosAndBoundsFromMouseEvent } from "../../gui/base/GuiUtils"
+import { getTimeFromMousePos } from "./CalendarGuiUtils"
+import type { CalendarEventBubbleClickHandler } from "./CalendarViewModel"
+import type { GroupColors } from "./CalendarView"
+import { styles } from "../../gui/styles"
 
 export type Attrs = {
 	onEventClicked: CalendarEventBubbleClickHandler
@@ -40,17 +39,17 @@ export type Attrs = {
 	isDragging: boolean
 	fullViewWidth?: number
 }
-export const calendarDayTimes: Array<Time> = numberRange(0, 23).map(number => new Time(number, 0))
+export const calendarDayTimes: Array<Time> = numberRange(0, 23).map((number) => new Time(number, 0))
 const allHoursHeight = size.calendar_hour_height * calendarDayTimes.length
 
 export class CalendarDayEventsView implements Component<Attrs> {
 	private _dayDom: HTMLElement | null = null
 
-	view({attrs}: Vnode<Attrs>): Children {
+	view({ attrs }: Vnode<Attrs>): Children {
 		return m(
 			".col.rel",
 			{
-				oncreate: vnode => {
+				oncreate: (vnode) => {
 					this._dayDom = vnode.dom as HTMLElement
 					m.redraw()
 				},
@@ -61,7 +60,7 @@ export class CalendarDayEventsView implements Component<Attrs> {
 				},
 			},
 			[
-				calendarDayTimes.map(time =>
+				calendarDayTimes.map((time) =>
 					m(".calendar-hour.flex.cursor-pointer", {
 						onclick: (e: MouseEvent) => {
 							e.stopPropagation()
@@ -115,7 +114,7 @@ export class CalendarDayEventsView implements Component<Attrs> {
 	}
 
 	_renderEvents(attrs: Attrs, events: Array<CalendarEvent>): Children {
-		return layOutEvents(events, getTimeZone(), columns => this._renderColumns(attrs, columns), false)
+		return layOutEvents(events, getTimeZone(), (columns) => this._renderColumns(attrs, columns), EventLayoutMode.TimeBasedColumn)
 	}
 
 	_renderEvent(attrs: Attrs, ev: CalendarEvent, columnIndex: number, columns: Array<Array<CalendarEvent>>, columnWidth: number): Children {
@@ -124,11 +123,10 @@ export class CalendarDayEventsView implements Component<Attrs> {
 		const startOfEvent = eventStartsBefore(attrs.day, zone, ev) ? getStartOfDay(attrs.day) : ev.startTime
 		const endOfEvent = eventEndsAfterDay(attrs.day, zone, ev) ? getEndOfDay(attrs.day) : ev.endTime
 		const startTime = (startOfEvent.getHours() * 60 + startOfEvent.getMinutes()) * 60 * 1000
-		const height = ((endOfEvent.getTime() - startOfEvent.getTime()) / (1000 * 60 * 60)) * size.calendar_hour_height
+		const height = ((endOfEvent.getTime() - startOfEvent.getTime()) / (1000 * 60 * 60)) * size.calendar_hour_height - size.calendar_event_border
 		const fullViewWidth = attrs.fullViewWidth
 		const maxWidth = fullViewWidth != null ? px(styles.isDesktopLayout() ? fullViewWidth / 2 : fullViewWidth) : "none"
 		const colSpan = expandEvent(ev, columnIndex, columns)
-		const padding = 2
 		return m(
 			".abs.darker-hover",
 			{
@@ -147,12 +145,12 @@ export class CalendarDayEventsView implements Component<Attrs> {
 			},
 			m(CalendarEventBubble, {
 				text: ev.summary,
-				secondLineText: mapNullable(getTimeTextFormatForLongEvent(ev, attrs.day, attrs.day, zone), option => formatEventTime(ev, option)),
+				secondLineText: mapNullable(getTimeTextFormatForLongEvent(ev, attrs.day, attrs.day, zone), (option) => formatEventTime(ev, option)),
 				color: getEventColor(ev, attrs.groupColors),
-				click: domEvent => attrs.onEventClicked(ev, domEvent),
-				height: height - padding,
+				click: (domEvent) => attrs.onEventClicked(ev, domEvent),
+				height: height - size.calendar_day_event_padding,
 				hasAlarm: hasAlarmsForTheUser(logins.getUserController().user, ev),
-				verticalPadding: padding,
+				verticalPadding: size.calendar_day_event_padding,
 				fadeIn: !attrs.isTemporaryEvent(ev),
 				opacity: attrs.isTemporaryEvent(ev) ? TEMPORARY_EVENT_OPACITY : 1,
 				enablePointerEvents: !attrs.isTemporaryEvent(ev) && !attrs.isDragging,
@@ -163,7 +161,7 @@ export class CalendarDayEventsView implements Component<Attrs> {
 	_renderColumns(attrs: Attrs, columns: Array<Array<CalendarEvent>>): ChildArray {
 		const columnWidth = neverNull(this._dayDom).clientWidth / columns.length
 		return columns.map((column, index) => {
-			return column.map(event => {
+			return column.map((event) => {
 				return this._renderEvent(attrs, event, index, columns, Math.floor(columnWidth))
 			})
 		})
