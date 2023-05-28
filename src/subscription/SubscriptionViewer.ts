@@ -5,7 +5,6 @@ import type { AccountingInfo, Booking, Customer, CustomerInfo, GiftCard, OrderPr
 import {
 	AccountingInfoTypeRef,
 	BookingTypeRef,
-	CustomerInfoTypeRef,
 	CustomerTypeRef,
 	GiftCardTypeRef,
 	GroupInfoTypeRef,
@@ -13,7 +12,6 @@ import {
 	UserTypeRef,
 } from "../api/entities/sys/TypeRefs.js"
 import { assertNotNull, downcast, incrementDate, neverNull, noOp, ofClass, promiseMap } from "@tutao/tutanota-utils"
-import { logins } from "../api/main/LoginController"
 import { lang, TranslationKey } from "../misc/LanguageViewModel"
 import { Icons } from "../gui/base/icons/Icons"
 import { asPaymentInterval, formatPrice, formatPriceDataWithInfo, PaymentInterval, PriceAndConfigProvider } from "./PriceUtils"
@@ -94,11 +92,11 @@ export class SubscriptionViewer implements UpdatableSettingsViewer {
 	private _giftCardsExpanded: Stream<boolean>
 
 	constructor() {
-		const isPremiumPredicate = () => logins.getUserController().isPremiumAccount()
+		const isPremiumPredicate = () => locator.logins.getUserController().isPremiumAccount()
 
 		const deleteAccountExpanded = stream(false)
 		this._giftCards = new Map()
-		loadGiftCards(assertNotNull(logins.getUserController().user.customer)).then((giftCards) => {
+		loadGiftCards(assertNotNull(locator.logins.getUserController().user.customer)).then((giftCards) => {
 			giftCards.forEach((giftCard) => this._giftCards.set(elementIdPart(giftCard._id), giftCard))
 		})
 		this._giftCardsExpanded = stream<boolean>(false)
@@ -112,7 +110,7 @@ export class SubscriptionViewer implements UpdatableSettingsViewer {
 					oninput: this._subscriptionFieldValue,
 					disabled: true,
 					injectionsRight: () =>
-						logins.getUserController().isFreeAccount()
+						locator.logins.getUserController().isFreeAccount()
 							? m(IconButton, {
 									title: "upgrade_action",
 									click: showUpgradeWizard,
@@ -359,11 +357,10 @@ export class SubscriptionViewer implements UpdatableSettingsViewer {
 		}
 
 		locator.entityClient
-			.load(CustomerTypeRef, neverNull(logins.getUserController().user.customer))
+			.load(CustomerTypeRef, neverNull(locator.logins.getUserController().user.customer))
 			.then((customer) => {
 				this._updateCustomerData(customer)
-
-				return locator.entityClient.load(CustomerInfoTypeRef, customer.customerInfo)
+				return locator.logins.getUserController().loadCustomerInfo()
 			})
 			.then((customerInfo) => {
 				this._customerInfo = customerInfo
@@ -395,7 +392,7 @@ export class SubscriptionViewer implements UpdatableSettingsViewer {
 
 	_showOrderAgreement(): boolean {
 		return (
-			logins.getUserController().isPremiumAccount() &&
+			locator.logins.getUserController().isPremiumAccount() &&
 			((this._customer != null && this._customer.businessUse) ||
 				(this._customer != null && (this._customer.orderProcessingAgreement != null || this._customer.orderProcessingAgreementNeeded)))
 		)
@@ -454,7 +451,7 @@ export class SubscriptionViewer implements UpdatableSettingsViewer {
 	}
 
 	_showPriceData(): boolean {
-		return logins.getUserController().isPremiumAccount()
+		return locator.logins.getUserController().isPremiumAccount()
 	}
 
 	_updatePriceInfo(): Promise<void> {
@@ -498,50 +495,54 @@ export class SubscriptionViewer implements UpdatableSettingsViewer {
 						"{endOfSubscriptionPeriod}": formatDate(this._periodEndDate),
 				  })
 				: ""
-		const accountType: AccountType = downcast(logins.getUserController().user.accountType)
+		const accountType: AccountType = downcast(locator.logins.getUserController().user.accountType)
 
 		this._subscriptionFieldValue(_getAccountTypeName(accountType, assertNotNull(this._currentSubscription)) + cancelledText)
 	}
 
 	_updateBookings(): Promise<void> {
-		return locator.entityClient.load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)).then((customer) => {
-			return locator.entityClient
-				.load(CustomerInfoTypeRef, customer.customerInfo)
-				.catch(
-					ofClass(NotFoundError, (e) => {
-						console.log("could not update bookings as customer info does not exist (moved between free/premium lists)")
-					}),
-				)
-				.then((customerInfo) => {
-					if (!customerInfo) {
-						return
-					}
+		return locator.logins
+			.getUserController()
+			.loadCustomer()
+			.then((customer) => {
+				return locator.logins
+					.getUserController()
+					.loadCustomerInfo()
+					.catch(
+						ofClass(NotFoundError, (e) => {
+							console.log("could not update bookings as customer info does not exist (moved between free/premium lists)")
+						}),
+					)
+					.then((customerInfo) => {
+						if (!customerInfo) {
+							return
+						}
 
-					this._customerInfo = customerInfo
-					return locator.entityClient
-						.loadRange(BookingTypeRef, neverNull(customerInfo.bookings).items, GENERATED_MAX_ID, 1, true)
-						.then(async (bookings) => {
-							const priceAndConfigProvider = await PriceAndConfigProvider.getInitializedInstance(null)
-							this._lastBooking = bookings.length > 0 ? bookings[bookings.length - 1] : null
-							this._customer = customer
-							this._isCancelled = customer.canceledPremiumAccount
-							this._currentSubscription = priceAndConfigProvider.getSubscriptionType(this._lastBooking, customer, customerInfo)
+						this._customerInfo = customerInfo
+						return locator.entityClient
+							.loadRange(BookingTypeRef, neverNull(customerInfo.bookings).items, GENERATED_MAX_ID, 1, true)
+							.then(async (bookings) => {
+								const priceAndConfigProvider = await PriceAndConfigProvider.getInitializedInstance(null)
+								this._lastBooking = bookings.length > 0 ? bookings[bookings.length - 1] : null
+								this._customer = customer
+								this._isCancelled = customer.canceledPremiumAccount
+								this._currentSubscription = priceAndConfigProvider.getSubscriptionType(this._lastBooking, customer, customerInfo)
 
-							this._updateSubscriptionField(this._isCancelled)
+								this._updateSubscriptionField(this._isCancelled)
 
-							return Promise.all([
-								this._updateUserField(),
-								this._updateStorageField(customer, customerInfo),
-								this._updateAliasField(customer, customerInfo),
-								this._updateGroupsField(),
-								this._updateWhitelabelField(),
-								this._updateSharingField(),
-								this._updateBusinessFeatureField(),
-								this._updateContactFormsField(),
-							]).then(() => m.redraw())
-						})
-				})
-		})
+								return Promise.all([
+									this._updateUserField(),
+									this._updateStorageField(customer, customerInfo),
+									this._updateAliasField(customer, customerInfo),
+									this._updateGroupsField(),
+									this._updateWhitelabelField(),
+									this._updateSharingField(),
+									this._updateBusinessFeatureField(),
+									this._updateContactFormsField(),
+								]).then(() => m.redraw())
+							})
+					})
+			})
 	}
 
 	_updateUserField(): Promise<void> {

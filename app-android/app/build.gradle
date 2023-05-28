@@ -11,8 +11,8 @@ android {
 		applicationId "de.tutao.tutanota"
 		minSdkVersion 23
 		targetSdkVersion 31
-		versionCode 396200
-		versionName "3.110.0"
+		versionCode 396211
+		versionName "3.112.6"
 		testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
 		javaCompileOptions {
@@ -78,6 +78,8 @@ android {
 
 	buildTypes.each {
 		it.buildConfigField 'String', 'FILE_PROVIDER_AUTHORITY', '"' + it.manifestPlaceholders['contentProviderAuthority'] + '"'
+		// keep in sync with src/native/main/NativePushServiceApp.ts
+		it.buildConfigField 'String', "SYS_MODEL_VERSION", '"85"'
 	}
 
 	compileOptions {
@@ -91,6 +93,11 @@ android {
 	}
 	lint {
 		disable 'MissingTranslation'
+	}
+
+	sourceSets {
+		// Adds exported schema location as test app assets.
+		androidTest.assets.srcDirs += files("$projectDir/schemas".toString())
 	}
 
 	namespace 'de.tutao.tutanota'
@@ -113,10 +120,11 @@ dependencies {
 	//noinspection GradleDependency
 	implementation 'commons-io:commons-io:2.5'
 
-	implementation 'androidx.core:core-ktx:1.8.0'
+	implementation "androidx.core:core-ktx:1.8.0"
 	implementation "androidx.activity:activity-ktx:$activity_version"
 	implementation "androidx.browser:browser:1.3.0"
 	implementation "androidx.biometric:biometric:1.1.0"
+	implementation "androidx.core:core-splashscreen:1.0.0"
 
 	if (file("../libs/android-database-sqlcipher-4.5.0.aar").exists()) {
 		implementation fileTree(include: ['*.aar'], dir: '../libs')
@@ -155,4 +163,5 @@ dependencies {
 	androidTestImplementation 'androidx.test:rules:1.4.0'
 	androidTestImplementation "org.mockito:mockito-android:4.5.1"
 	androidTestImplementation 'org.codehaus.jackson:jackson-mapper-asl:1.9.2'
+	androidTestImplementation 'androidx.room:room-testing:2.4.2'
 }

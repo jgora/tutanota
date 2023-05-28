@@ -1,8 +1,14 @@
 import type { Hex } from "@tutao/tutanota-utils"
-import { neverNull } from "@tutao/tutanota-utils"
-import type { AccountingInfo, Customer, CustomerInfo, UpgradePriceServiceReturn } from "../api/entities/sys/TypeRefs.js"
-import { AccountingInfoTypeRef, createUpgradePriceServiceData, CustomerInfoTypeRef, CustomerTypeRef } from "../api/entities/sys/TypeRefs.js"
-import { logins } from "../api/main/LoginController"
+import { ofClass } from "@tutao/tutanota-utils"
+import {
+	AccountingInfo,
+	AccountingInfoTypeRef,
+	createReferralCodeGetIn,
+	createUpgradePriceServiceData,
+	Customer,
+	CustomerInfo,
+	UpgradePriceServiceReturn,
+} from "../api/entities/sys/TypeRefs.js"
 import type { InvoiceData, PaymentData } from "../api/common/TutanotaConstants"
 import { Const, getPaymentMethodType, PaymentMethodType as PaymentMethod } from "../api/common/TutanotaConstants"
 import { getByAbbreviation } from "../api/common/CountryList"
@@ -19,11 +25,13 @@ import { SignupPage, SignupPageAttrs } from "./SignupPage"
 import { assertMainOrNode } from "../api/common/Env"
 import { locator } from "../api/main/MainLocator"
 import { StorageBehavior } from "../misc/UsageTestModel"
-import { UpgradePriceService } from "../api/entities/sys/Services.js"
+import { ReferralCodeService, UpgradePriceService } from "../api/entities/sys/Services.js"
 import { FeatureListProvider, SelectedSubscriptionOptions, SubscriptionType } from "./FeatureListProvider"
 import { UpgradeType } from "./SubscriptionUtils"
-import { asPaymentInterval, PaymentInterval, PriceAndConfigProvider } from "./PriceUtils"
 import { UpgradeConfirmSubscriptionPage } from "./UpgradeConfirmSubscriptionPage.js"
+import { asPaymentInterval, PaymentInterval, PriceAndConfigProvider } from "./PriceUtils"
+import { UserError } from "../api/main/UserError.js"
+import { PreconditionFailedError } from "../api/common/error/RestError.js"
 
 assertMainOrNode()
 export type SubscriptionParameters = {
@@ -56,6 +64,8 @@ export type UpgradeSubscriptionData = {
 	currentSubscription: SubscriptionType | null
 	subscriptionParameters: SubscriptionParameters | null
 	featureListProvider: FeatureListProvider
+	referralCode: string | null
+	referralCodeMsg: TranslationKey | null
 }
 
 export function loadUpgradePrices(registrationDataId: string | null): Promise<UpgradePriceServiceReturn> {
@@ -66,22 +76,19 @@ export function loadUpgradePrices(registrationDataId: string | null): Promise<Up
 	return locator.serviceExecutor.get(UpgradePriceService, data)
 }
 
-function loadCustomerAndInfo(): Promise<{
+async function loadCustomerAndInfo(): Promise<{
 	customer: Customer
 	customerInfo: CustomerInfo
 	accountingInfo: AccountingInfo
 }> {
-	return locator.entityClient.load(CustomerTypeRef, neverNull(logins.getUserController().user.customer)).then((customer) =>
-		locator.entityClient.load(CustomerInfoTypeRef, customer.customerInfo).then((customerInfo) =>
-			locator.entityClient.load(AccountingInfoTypeRef, customerInfo.accountingInfo).then((accountingInfo) => {
-				return {
-					customer,
-					customerInfo,
-					accountingInfo,
-				}
-			}),
-		),
-	)
+	const customer = await locator.logins.getUserController().loadCustomer()
+	const customerInfo = await locator.logins.getUserController().loadCustomerInfo()
+	const accountingInfo = await locator.entityClient.load(AccountingInfoTypeRef, customerInfo.accountingInfo)
+	return {
+		customer,
+		customerInfo,
+		accountingInfo,
+	}
 }
 
 export async function showUpgradeWizard(): Promise<void> {
@@ -117,6 +124,8 @@ export async function showUpgradeWizard(): Promise<void> {
 		subscriptionParameters: null,
 		planPrices: priceDataProvider,
 		featureListProvider: featureListProvider,
+		referralCode: null,
+		referralCodeMsg: null,
 	}
 	const wizardPages = [
 		wizardPageWrapper(UpgradeSubscriptionPage, new UpgradeSubscriptionPageAttrs(upgradeData)),
@@ -127,7 +136,11 @@ export async function showUpgradeWizard(): Promise<void> {
 	wizardBuilder.dialog.show()
 }
 
-export async function loadSignupWizard(subscriptionParameters: SubscriptionParameters | null, registrationDataId: string | null): Promise<void> {
+export async function loadSignupWizard(
+	subscriptionParameters: SubscriptionParameters | null,
+	registrationDataId: string | null,
+	referralCode: string | null,
+): Promise<void> {
 	const usageTestModel = locator.usageTestModel
 
 	usageTestModel.setStorageBehavior(StorageBehavior.Ephemeral)
@@ -136,6 +149,28 @@ export async function loadSignupWizard(subscriptionParameters: SubscriptionParam
 	const priceDataProvider = await PriceAndConfigProvider.getInitializedInstance(registrationDataId)
 	const prices = priceDataProvider.getRawPricingData()
 	const featureListProvider = await FeatureListProvider.getInitializedInstance()
+	let referralCodeMsg: TranslationKey | null = null
+	if (referralCode != null) {
+		await locator.serviceExecutor
+			.get(ReferralCodeService, createReferralCodeGetIn({ referralCode }))
+			.then(() => {
+				referralCodeMsg = "referralSignup_msg"
+			})
+			.catch(
+				ofClass(PreconditionFailedError, (e) => {
+					referralCode = null // set to null to make sure the invalid code is not used
+					// display a message to the user about the invalid code
+					referralCodeMsg = "referralSignupInvalid_msg"
+				}),
+			)
+	}
+
+	const campaignInfoTextId = prices.messageTextId ? assertTranslation(prices.messageTextId) : null
+
+	if (referralCode != null && registrationDataId != null) {
+		throw new UserError("referralSignupCampaignError_msg")
+	}
+
 	const signupData: UpgradeSubscriptionData = {
 		options: {
 			businessUse: stream(prices.business),
@@ -157,12 +192,14 @@ export async function loadSignupWizard(subscriptionParameters: SubscriptionParam
 		customer: null,
 		newAccountData: null,
 		registrationDataId,
-		campaignInfoTextId: prices.messageTextId ? assertTranslation(prices.messageTextId) : null,
+		campaignInfoTextId,
 		upgradeType: UpgradeType.Signup,
 		planPrices: priceDataProvider,
 		currentSubscription: null,
 		subscriptionParameters: subscriptionParameters,
 		featureListProvider: featureListProvider,
+		referralCode,
+		referralCodeMsg,
 	}
 
 	const invoiceAttrs = new InvoiceAndPaymentDataPageAttrs(signupData)
@@ -174,8 +211,8 @@ export async function loadSignupWizard(subscriptionParameters: SubscriptionParam
 		wizardPageWrapper(UpgradeCongratulationsPage, new UpgradeCongratulationsPageAttrs(signupData)),
 	]
 	const wizardBuilder = createWizardDialog(signupData, wizardPages, async () => {
-		if (logins.isUserLoggedIn()) {
-			await logins.logout(false)
+		if (locator.logins.isUserLoggedIn()) {
+			await locator.logins.logout(false)
 		}
 
 		if (signupData.newAccountData) {

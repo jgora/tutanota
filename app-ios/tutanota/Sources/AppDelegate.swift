@@ -7,8 +7,9 @@ class AppDelegate : UIResponder,
   var window: UIWindow?
 
   private var pushTokenCallback: ResponseCallback<String>?
-  private let userPreferences = UserPreferenceFacade()
+  private let notificationStorage = NotificationStorage()
   private var alarmManager: AlarmManager!
+  private var notificationsHandler: NotificationsHandler!
   private var viewController: ViewController!
 
   func registerForPushNotifications() async throws -> String {
@@ -36,15 +37,26 @@ class AppDelegate : UIResponder,
 
     let keychainManager = KeychainManager(keyGenerator: KeyGenerator())
 
-    self.alarmManager = AlarmManager(keychainManager: keychainManager, userPreference: userPreferences)
+    let alarmModel = AlarmModel(dateProvider: SystemDateProvider())
+    self.alarmManager = AlarmManager(
+      alarmPersistor: AlarmPreferencePersistor(
+        notificationsStorage: self.notificationStorage,
+        keychainManager: keychainManager
+      ),
+      alarmCryptor: KeychainAlarmCryptor(keychainManager: keychainManager),
+      alarmScheduler: SystemAlarmScheduler(),
+      alarmCalculator: alarmModel
+    )
+    self.notificationsHandler = NotificationsHandler(alarmManager: self.alarmManager, notificationStorage: self.notificationStorage)
     self.window = UIWindow(frame: UIScreen.main.bounds)
     let credentialsEncryption = IosNativeCredentialsFacade(keychainManager: keychainManager)
     self.viewController = ViewController(
       crypto: IosNativeCryptoFacade(),
       themeManager: ThemeManager(),
       keychainManager: keychainManager,
-      userPreferences: userPreferences,
-      alarmManager: self.alarmManager,
+      notificationStorage: notificationStorage,
+      alarmManager: alarmManager,
+      notificaionsHandler: notificationsHandler,
       credentialsEncryption: credentialsEncryption,
       blobUtils: BlobUtil()
     )
@@ -105,7 +117,7 @@ class AppDelegate : UIResponder,
 
       let contentAvailable = apsDict["content-available"]
       if contentAvailable as? Int == 1 {
-        self.alarmManager.fetchMissedNotifications { result in
+        self.notificationsHandler.fetchMissedNotifications { result in
           TUTSLog("Fetched missed notification after notification \(String(describing: result))")
           switch result {
           case .success():

@@ -5,7 +5,7 @@ import { theme } from "../../gui/theme.js"
 import { styles } from "../../gui/styles.js"
 import { ExpanderPanel } from "../../gui/base/Expander.js"
 import { File as TutanotaFile } from "../../api/entities/tutanota/TypeRefs.js"
-import { BannerType, InfoBanner } from "../../gui/base/InfoBanner.js"
+import { BannerType, InfoBanner } from "./InfoBanner.js"
 import { Icons } from "../../gui/base/icons/Icons.js"
 import { EventBanner } from "./EventBanner.js"
 import { RecipientButton } from "../../gui/base/RecipientButton.js"
@@ -146,7 +146,7 @@ export class MailViewerHeader implements Component<MailViewerHeaderAttrs> {
 							},
 							hoverText: folderInfo.name,
 						}),
-						m(".small.font-weight-600.selectable", { style: { color: theme.content_button } }, [
+						m(".small.font-weight-600.selectable.no-wrap", { style: { color: theme.content_button } }, [
 							m(".noprint", dateTime), // show the short date when viewing
 							m(".noscreen", dateTimeFull), // show the date with year when printing
 						]),
@@ -279,7 +279,7 @@ export class MailViewerHeader implements Component<MailViewerHeaderAttrs> {
 	private renderDetails(attrs: MailViewerHeaderAttrs, { bubbleMenuWidth }: { bubbleMenuWidth: number }): Children {
 		const { viewModel, createMailAddressContextButtons } = attrs
 		const envelopeSender = viewModel.getDifferentEnvelopeSender()
-		return m("." + mailViewerPadding() + liveDataAttrs(), [
+		return m("." + mailViewerPadding(), liveDataAttrs(), [
 			m(
 				".mt-s",
 				m(".small.b", lang.get("from_label")),
@@ -465,7 +465,7 @@ export class MailViewerHeader implements Component<MailViewerHeaderAttrs> {
 			attachments.forEach((attachment) => (totalAttachmentSize += Number(attachment.size)))
 
 			return [
-				m(".flex" + liveDataAttrs() + "." + mailViewerMargin(), [
+				m(".flex" + "." + mailViewerMargin(), liveDataAttrs(), [
 					attachmentCount === 1
 						? // If we have exactly one attachment, just show the attachment
 						  this.renderAttachmentContainer(viewModel, attachments)

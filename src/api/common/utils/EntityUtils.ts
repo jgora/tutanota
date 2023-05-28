@@ -209,7 +209,10 @@ export function create<T>(typeModel: TypeModel, typeRef: TypeRef<T>): T {
 		if (association.cardinality === Cardinality.Any) {
 			i[associationName] = []
 		} else {
-			i[associationName] = null // set to null even if the cardinality is One
+			// set to null even if the cardinality is One. we could think about calling create recursively,
+			// but that would require us to resolve type refs (async) and recursively merge the result with
+			// the provided values
+			i[associationName] = null
 		}
 	}
 
@@ -330,4 +333,27 @@ export function assertIsEntity<T extends SomeEntity>(entity: SomeEntity, type: T
 
 export function assertIsEntity2<T extends SomeEntity>(type: TypeRef<T>): (entity: SomeEntity) => entity is T {
 	return (e): e is T => assertIsEntity(e, type)
+}
+
+/**
+ * Remove some hidden technical fields from the entity.
+ *
+ * Only use for new entities, the {@param entity} won't be usable for updates anymore after this.
+ */
+export function removeTechnicalFields<E extends SomeEntity>(entity: E) {
+	// we want to restrict outer function to entity types but internally we also want to handle aggregates
+	function _removeTechnicalFields(erased: Record<string, any>) {
+		for (const key of Object.keys(erased)) {
+			if (key.startsWith("_finalEncrypted") || key.startsWith("_defaultEncrypted") || key.startsWith("_errors")) {
+				delete erased[key]
+			} else {
+				const value = erased[key]
+				if (value instanceof Object) {
+					_removeTechnicalFields(value)
+				}
+			}
+		}
+	}
+
+	_removeTechnicalFields(entity)
 }

@@ -5,7 +5,7 @@ import type { UserController, UserControllerInitData } from "./UserController"
 import { getWhitelabelCustomizations } from "../../misc/WhitelabelCustomizations"
 import { NotFoundError } from "../common/error/RestError"
 import { client } from "../../misc/ClientDetector"
-import type { LoginFacade } from "../worker/facades/LoginFacade"
+import type { LoginFacade, NewSessionData } from "../worker/facades/LoginFacade"
 import { ResumeSessionErrorReason } from "../worker/facades/LoginFacade"
 import type { Credentials } from "../../misc/credentials/Credentials"
 import { FeatureType } from "../common/TutanotaConstants"
@@ -30,53 +30,7 @@ export type LoggedInEvent = {
 
 export type ResumeSessionResult = { type: "success" } | { type: "error"; reason: ResumeSessionErrorReason }
 
-export interface LoginController {
-	createSession(username: string, password: string, sessionType: SessionType, databaseKey?: Uint8Array | null): Promise<Credentials>
-
-	createExternalSession(userId: Id, password: string, salt: Uint8Array, clientIdentifier: string, sessionType: SessionType): Promise<Credentials>
-
-	/**
-	 * Resume an existing session using stored credentials, may or may not unlock a persistent local database
-	 * @param credentials: The stored credentials and optional database key for the offline db
-	 * @param externalUserSalt
-	 * @param offlineTimeRangeDays: the user configured time range for their offline storage, used to initialize the offline db
-	 */
-	resumeSession(
-		credentials: CredentialsAndDatabaseKey,
-		externalUserSalt: Uint8Array | null,
-		offlineTimeRangeDays: number | null,
-	): Promise<ResumeSessionResult>
-
-	isUserLoggedIn(): boolean
-
-	isFullyLoggedIn(): boolean
-
-	isAtLeastPartiallyLoggedIn(): boolean
-
-	waitForPartialLogin(): Promise<void>
-
-	waitForFullLogin(): Promise<void>
-
-	isInternalUserLoggedIn(): boolean
-
-	isGlobalAdminUserLoggedIn(): boolean
-
-	getUserController(): UserController
-
-	isEnabled(feature: FeatureType): boolean
-
-	isWhitelabel(): boolean
-
-	logout(sync: boolean): Promise<void>
-
-	deleteOldSession(credentials: Credentials): Promise<void>
-
-	addPostLoginAction(handler: IPostLoginAction): void
-
-	retryAsyncLogin(): Promise<void>
-}
-
-export class LoginControllerImpl implements LoginController {
+export class LoginController {
 	private userController: UserController | null = null
 	private customizations: NumberString[] | null = null
 	private partialLogin: DeferredObject<void> = defer()
@@ -111,15 +65,17 @@ export class LoginControllerImpl implements LoginController {
 		return locator.loginFacade
 	}
 
-	async createSession(username: string, password: string, sessionType: SessionType, databaseKey: Uint8Array | null): Promise<Credentials> {
+	/**
+	 * create a new session and set up stored credentials and offline database, if applicable.
+	 * @param username the mail address being used to log in
+	 * @param password the password given to log in
+	 * @param sessionType whether to store the credentials in local storage
+	 * @param databaseKey if given, will use this key for the offline database. if not, will force a new database to be created and generate a key.
+	 */
+	async createSession(username: string, password: string, sessionType: SessionType, databaseKey: Uint8Array | null = null): Promise<NewSessionData> {
 		const loginFacade = await this.getLoginFacade()
-		const { user, credentials, sessionId, userGroupInfo } = await loginFacade.createSession(
-			username,
-			password,
-			client.getIdentifier(),
-			sessionType,
-			databaseKey,
-		)
+		const newSessionData = await loginFacade.createSession(username, password, client.getIdentifier(), sessionType, databaseKey)
+		const { user, credentials, sessionId, userGroupInfo } = newSessionData
 		await this.onPartialLoginSuccess(
 			{
 				user,
@@ -130,7 +86,7 @@ export class LoginControllerImpl implements LoginController {
 			},
 			sessionType,
 		)
-		return credentials
+		return newSessionData
 	}
 
 	addPostLoginAction(handler: IPostLoginAction) {
@@ -177,6 +133,12 @@ export class LoginControllerImpl implements LoginController {
 		return credentials
 	}
 
+	/**
+	 * Resume an existing session using stored credentials, may or may not unlock a persistent local database
+	 * @param credentials: The stored credentials and optional database key for the offline db
+	 * @param externalUserSalt
+	 * @param offlineTimeRangeDays: the user configured time range for their offline storage, used to initialize the offline db
+	 */
 	async resumeSession(
 		{ credentials, databaseKey }: CredentialsAndDatabaseKey,
 		externalUserSalt?: Uint8Array | null,
@@ -297,9 +259,3 @@ export class LoginControllerImpl implements LoginController {
 		await loginFacade.retryAsyncLogin()
 	}
 }
-
-const loginController = new LoginControllerImpl()
-export const logins: LoginController = loginController
-
-// Should be called elsewhere later e.g. in mainLocator
-loginController.init()

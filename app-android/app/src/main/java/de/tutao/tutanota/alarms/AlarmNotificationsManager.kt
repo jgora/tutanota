@@ -39,7 +39,7 @@ class AlarmNotificationsManager(
 			if (pushIdentifierSessionKey != null) {
 				val pushIdentifierSessionEncSessionKey =
 						encNotificationSessionKey.pushIdentifierSessionEncSessionKey.base64ToBytes()
-				return crypto.decryptKey(pushIdentifierSessionKey, pushIdentifierSessionEncSessionKey)
+				return crypto.decryptKey(encryptionKey =pushIdentifierSessionKey, encryptedKeyWithoutIV = pushIdentifierSessionEncSessionKey)
 			}
 		} catch (e: UnrecoverableEntryException) {
 			Log.w(TAG, "could not decrypt session key", e)
@@ -190,11 +190,12 @@ class AlarmNotificationsManager(
 		val interval = repeatRule.interval
 		val endType = repeatRule.endType
 		val endValue = repeatRule.endValue
+		val excludedDates = repeatRule.excludedDates
 		val alarmTrigger: AlarmTrigger = alarmNotification.alarmInfo.trigger
 		AlarmModel.iterateAlarmOccurrences(
 				Date(),
 				timeZone, eventStart, eventEnd, frequency, interval, endType,
-				endValue, alarmTrigger, TimeZone.getDefault(), callback
+				endValue, alarmTrigger, TimeZone.getDefault(), excludedDates, callback
 		)
 	}
 

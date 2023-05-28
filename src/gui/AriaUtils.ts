@@ -32,7 +32,7 @@ export const enum AriaLiveRegions {
 	Timer = "timer",
 }
 
-const enum AriaWindow {
+export const enum AriaWindow {
 	AlertDialog = "alertdialog",
 	Dialog = "dialog",
 }
@@ -46,18 +46,23 @@ const enum AriaLiveData {
 	Assertive = "assertive",
 }
 
-export function dialogAttrs(labeledBy: string, describedBy: string): string {
-	return `[role="${AriaWindow.Dialog}"][aria-modal=true][aria-labelledby="${labeledBy}"][aria-describedby="${describedBy}"]`
+export function liveDataAttrs(): Record<string, string> {
+	return {
+		"aria-live": AriaLiveData.Polite,
+		"aria-atomic": "true",
+	}
 }
 
-export function liveDataAttrs(): string {
-	return `[aria-live="${AriaLiveData.Polite}"][aria-atomic=true]`
-}
-
-export function landmarkAttrs(role: AriaLandmarks, label?: string): string {
-	// We disable outline for landmarks. Outlines are useful as a visual clue for users who use keyboard navigation (or similar). Landmarks
-	// are screen reader function and can only be focused using special landmark menu, they are not in the tab index. This makes them
-	// redundant.
-	// As they are big elements which receive focus automatically we would like to avoid showing them when we don't have to.
-	return `.hide-outline[role="${role}"][tabindex="${TabIndex.Programmatic}"]` + (label ? `[aria-label="${label}"]` : "")
+/**
+ * construct spreadable landmark attributes for screen readers.
+ * return value includes a hide-outline class that will be overridden if the selector
+ * used to construct the element contains other classes.
+ */
+export function landmarkAttrs(role: AriaLandmarks, label?: string): Record<string, string | undefined> {
+	return {
+		class: "hide-outline",
+		role,
+		tabindex: TabIndex.Programmatic,
+		"aria-label": label,
+	}
 }

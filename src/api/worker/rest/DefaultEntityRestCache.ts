@@ -22,6 +22,7 @@ import { firstBiggerThanSecond, GENERATED_MAX_ID, GENERATED_MIN_ID, getElementId
 import { ProgrammingError } from "../../common/error/ProgrammingError"
 import { assertWorkerOrNode } from "../../common/Env"
 import type { ListElementEntity, SomeEntity, TypeModel } from "../../common/EntityTypes"
+import { ElementEntity } from "../../common/EntityTypes"
 import { EntityUpdateData } from "../../main/EventController"
 import { QueuedBatch } from "../EventQueue.js"
 import { ENTITY_EVENT_BATCH_EXPIRE_MS } from "../EventBusClient"
@@ -90,6 +91,9 @@ export type LastUpdateTime = { type: "recorded"; time: number } | { type: "never
  *
  * Separate from the rest of the cache as a narrow interface to not expose the whole storage for cases where we want to only get the cached part of the list to
  * display it even if we can't load the full page from the server or need some metadata.
+ *
+ * also exposes functions to repair an outdated cache in case we can't access the server without getting a new version of a cached entity
+ * (mainly password changes)
  */
 export interface ExposedCacheStorage {
 	/**
@@ -111,6 +115,13 @@ export interface ExposedCacheStorage {
 	getLastUpdateTime(): Promise<LastUpdateTime>
 
 	clearExcludedData(): Promise<void>
+
+	/**
+	 * remove an ElementEntity from the cache by typeRef and Id.
+	 * the exposed interface is intentionally more narrow than the internal cacheStorage because
+	 * we must maintain the integrity of our list ranges.
+	 * */
+	deleteIfExists<T extends ElementEntity>(typeRef: TypeRef<T>, listId: null, id: Id): Promise<void>
 }
 
 export interface CacheStorage extends ExposedCacheStorage {
@@ -124,8 +135,6 @@ export interface CacheStorage extends ExposedCacheStorage {
 	 * customId types that don't have a custom handler don't get served from the cache
 	 */
 	getCustomCacheHandlerMap(entityRestClient: EntityRestClient): CustomCacheHandlerMap
-
-	deleteIfExists<T extends SomeEntity>(typeRef: TypeRef<T>, listId: Id | null, id: Id): Promise<void>
 
 	isElementIdInCacheRange<T extends ListElementEntity>(typeRef: TypeRef<T>, listId: Id, id: Id): Promise<boolean>
 
@@ -157,6 +166,8 @@ export interface CacheStorage extends ExposedCacheStorage {
 	 * Retrieve the least processed batch id for a given group.
 	 */
 	getLastBatchIdForGroup(groupId: Id): Promise<Id | null>
+
+	deleteIfExists<T extends SomeEntity>(typeRef: TypeRef<T>, listId: Id | null, id: Id): Promise<void>
 
 	purgeStorage(): Promise<void>
 
@@ -667,6 +678,7 @@ export class DefaultEntityRestCache implements EntityRestCache {
 		return otherEventUpdates.concat(flat(postMultipleEventUpdates))
 	}
 
+	/** Returns {null} when the update should be skipped. */
 	private async processCreateEvent(typeRef: TypeRef<any>, update: EntityUpdate, batch: ReadonlyArray<EntityUpdate>): Promise<EntityUpdate | null> {
 		// do not return undefined to avoid implicit returns
 		const { instanceId, instanceListId } = getUpdateInstanceId(update)
@@ -689,7 +701,13 @@ export class DefaultEntityRestCache implements EntityRestCache {
 					.load(typeRef, [instanceListId, instanceId])
 					.then((entity) => this.storage.put(entity))
 					.then(() => update)
-					.catch((e) => this._handleProcessingError(e))
+					.catch((e) => {
+						if (isExpectedErrorForSynchronization(e)) {
+							return null
+						} else {
+							throw e
+						}
+					})
 			} else {
 				return update
 			}
@@ -698,12 +716,20 @@ export class DefaultEntityRestCache implements EntityRestCache {
 		}
 	}
 
+	/** Returns {null} when the update should be skipped. */
 	private async processUpdateEvent(typeRef: TypeRef<SomeEntity>, update: EntityUpdate): Promise<EntityUpdate | null> {
 		const { instanceId, instanceListId } = getUpdateInstanceId(update)
 		const cached = await this.storage.get(typeRef, instanceListId, instanceId)
 		// No need to try to download something that's not there anymore
 		if (cached != null) {
 			try {
+				// in case this is an update for the user instance: if the password changed we'll be logged out at this point
+				// if we don't catch the expected NotAuthenticated Error that results from trying to load anything with
+				// the old user.
+				// Letting the NotAuthenticatedError propagate to the main thread instead of trying to handle it ourselves
+				// or throwing out the update drops us onto the login page and into the session recovery flow if the user
+				// clicks their saved credentials again, but lets them still use offline login if they try to use the
+				// outdated credentials while not connected to the internet.
 				const newEntity = await this.entityRestClient.load(typeRef, collapseId(instanceListId, instanceId))
 				if (isSameTypeRef(typeRef, UserTypeRef)) {
 					await this.handleUpdatedUser(cached, newEntity)
@@ -711,7 +737,15 @@ export class DefaultEntityRestCache implements EntityRestCache {
 				await this.storage.put(newEntity)
 				return update
 			} catch (e) {
-				return this._handleProcessingError(e)
+				// If the entity is not there anymore we should evict it from the cache and not keep the outdated/nonexisting instance around.
+				// Even for list elements this should be safe as the instance is not there anymore and is definitely not in this version
+				if (isExpectedErrorForSynchronization(e)) {
+					console.log(`Instance not found when processing update for ${JSON.stringify(update)}, deleting from the cache.`)
+					await this.storage.deleteIfExists(typeRef, instanceListId, instanceId)
+					return null
+				} else {
+					throw e
+				}
 			}
 		}
 		return update
@@ -735,17 +769,6 @@ export class DefaultEntityRestCache implements EntityRestCache {
 	}
 
 	/**
-	 * @returns {null} to avoid implicit returns where it is called
-	 */
-	private _handleProcessingError(e: Error): null {
-		if (e instanceof NotFoundError || e instanceof NotAuthorizedError) {
-			return null
-		} else {
-			throw e
-		}
-	}
-
-	/**
 	 *
 	 * @returns {Array<Id>} the ids that are in cache range and therefore should be cached
 	 */
@@ -758,6 +781,14 @@ export class DefaultEntityRestCache implements EntityRestCache {
 		}
 		return ret
 	}
+}
+
+/**
+ * Returns whether the error is expected for the cases where our local state might not be up-to-date with the server yet. E.g. we might be processing an update
+ * for the instance that was already deleted. Normally this would be optimized away but it might still happen due to timing.
+ */
+function isExpectedErrorForSynchronization(e: Error): boolean {
+	return e instanceof NotFoundError || e instanceof NotAuthorizedError
 }
 
 export function expandId(id: Id | IdTuple): { listId: Id | null; elementId: Id } {

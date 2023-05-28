@@ -248,7 +248,7 @@ export function getMailboxName(logins: LoginController, mailboxDetails: MailboxD
 	if (!logins.isInternalUserLoggedIn()) {
 		return lang.get("mailbox_label")
 	} else if (isUserMailbox(mailboxDetails)) {
-		return logins.getUserController().props.defaultSender ?? logins.getUserController().userGroupInfo.mailAddress ?? lang.get("mailbox_label")
+		return getDefaultSender(logins, mailboxDetails)
 	} else {
 		return getGroupInfoDisplayName(assertNotNull(mailboxDetails.mailGroupInfo, "mailboxDetails without mailGroupInfo?"))
 	}

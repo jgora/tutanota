@@ -5,15 +5,14 @@ import { ColumnType, ViewColumn } from "../gui/base/ViewColumn"
 import { ViewSlider } from "../gui/nav/ViewSlider.js"
 import { SettingsFolder } from "./SettingsFolder"
 import { lang } from "../misc/LanguageViewModel"
-import { BaseHeaderAttrs, header } from "../gui/Header.js"
+import { BaseHeaderAttrs } from "../gui/Header.js"
 import { LoginSettingsViewer } from "./login/LoginSettingsViewer.js"
 import { GlobalSettingsViewer } from "./GlobalSettingsViewer"
 import { DesktopSettingsViewer } from "./DesktopSettingsViewer"
 import { MailSettingsViewer } from "./MailSettingsViewer"
 import { UserListView } from "./UserListView"
 import type { ReceivedGroupInvitation, User } from "../api/entities/sys/TypeRefs.js"
-import { CustomerInfoTypeRef, UserTypeRef } from "../api/entities/sys/TypeRefs.js"
-import { logins } from "../api/main/LoginController"
+import { CustomerInfoTypeRef, CustomerTypeRef, UserTypeRef } from "../api/entities/sys/TypeRefs.js"
 import { GroupListView } from "./groups/GroupListView.js"
 import { ContactFormListView } from "./contactform/ContactFormListView.js"
 import { WhitelabelSettingsViewer } from "./whitelabel/WhitelabelSettingsViewer"
@@ -63,6 +62,8 @@ import { getAvailableDomains } from "./mailaddress/MailAddressesUtils.js"
 import { DrawerMenuAttrs } from "../gui/nav/DrawerMenu.js"
 import { BaseTopLevelView } from "../gui/BaseTopLevelView.js"
 import { TopLevelAttrs, TopLevelView } from "../TopLevelView.js"
+import { ReferralSettingsViewer } from "./ReferralSettingsViewer.js"
+import { LoginController } from "../api/main/LoginController.js"
 
 assertMainOrNode()
 
@@ -81,6 +82,7 @@ export interface UpdatableSettingsDetailsViewer {
 export interface SettingsViewAttrs extends TopLevelAttrs {
 	drawerAttrs: DrawerMenuAttrs
 	header: BaseHeaderAttrs
+	logins: LoginController
 }
 
 export class SettingsView extends BaseTopLevelView implements TopLevelView<SettingsViewAttrs> {
@@ -90,11 +92,13 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 	private readonly _settingsDetailsColumn: ViewColumn
 	private readonly _userFolders: SettingsFolder<unknown>[]
 	private readonly _adminFolders: SettingsFolder<unknown>[]
+	private readonly logins: LoginController
 	private _templateFolders: SettingsFolder<TemplateGroupInstance>[]
 	private readonly _dummyTemplateFolder: SettingsFolder<unknown>
 	private _knowledgeBaseFolders: SettingsFolder<unknown>[]
 	private _selectedFolder: SettingsFolder<unknown>
 	private _currentViewer: UpdatableSettingsViewer | null = null
+	private showBusinessSettings: stream<boolean> = stream(false)
 	detailsViewer: UpdatableSettingsDetailsViewer | null = null // the component for the details column. can be set by settings views
 
 	_customDomains: LazyLoaded<string[]>
@@ -102,6 +106,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 
 	constructor(vnode: Vnode<SettingsViewAttrs>) {
 		super()
+		this.logins = vnode.attrs.logins
 		this._userFolders = [
 			new SettingsFolder(
 				"login_label",
@@ -145,99 +150,6 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 		}
 
 		this._adminFolders = []
-
-		this._adminFolders.push(
-			new SettingsFolder(
-				"adminUserList_action",
-				() => BootIcons.Contacts,
-				"users",
-				() => new UserListView(this),
-				undefined,
-			),
-		)
-
-		if (!logins.isEnabled(FeatureType.WhitelabelChild)) {
-			this._adminFolders.push(
-				new SettingsFolder(
-					"groups_label",
-					() => Icons.People,
-					"groups",
-					() => new GroupListView(this),
-					undefined,
-				),
-			)
-		}
-
-		if (logins.getUserController().isGlobalAdmin()) {
-			this._adminFolders.push(
-				new SettingsFolder(
-					"globalSettings_label",
-					() => BootIcons.Settings,
-					"global",
-					() => new GlobalSettingsViewer(),
-					undefined,
-				),
-			)
-
-			if (!logins.isEnabled(FeatureType.WhitelabelChild) && !isIOSApp()) {
-				this._adminFolders.push(
-					new SettingsFolder(
-						"whitelabel_label",
-						() => Icons.Wand,
-						"whitelabel",
-						() => new WhitelabelSettingsViewer(locator.entityClient),
-						undefined,
-					),
-				)
-
-				if (logins.isEnabled(FeatureType.WhitelabelParent)) {
-					this._adminFolders.push(
-						new SettingsFolder(
-							"whitelabelAccounts_label",
-							() => Icons.People,
-							"whitelabelaccounts",
-							() => new WhitelabelChildrenListView(this),
-							undefined,
-						),
-					)
-				}
-			}
-		}
-
-		if (!logins.isEnabled(FeatureType.WhitelabelChild)) {
-			this._adminFolders.push(
-				new SettingsFolder(
-					"contactForms_label",
-					() => Icons.Chat,
-					"contactforms",
-					() => new ContactFormListView(this),
-					undefined,
-				),
-			)
-
-			if (logins.getUserController().isGlobalAdmin()) {
-				this._adminFolders.push(
-					new SettingsFolder<void>(
-						"adminSubscription_action",
-						() => BootIcons.Premium,
-						"subscription",
-						() => new SubscriptionViewer(),
-						undefined,
-					).setIsVisibleHandler(() => !isIOSApp() || !logins.getUserController().isFreeAccount()),
-				)
-
-				this._adminFolders.push(
-					new SettingsFolder<void>(
-						"adminPayment_action",
-						() => Icons.Cash,
-						"invoice",
-						() => new PaymentViewer(),
-						undefined,
-					).setIsVisibleHandler(() => !logins.getUserController().isFreeAccount()),
-				)
-			}
-		}
-
 		this._templateFolders = []
 
 		this._makeTemplateFolders().then((folders) => {
@@ -270,7 +182,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 		})
 
 		this._selectedFolder = this._userFolders[0]
-		this._templateInvitations = new ReceivedGroupInvitationsModel(GroupType.Template, locator.eventController, locator.entityClient, logins)
+		this._templateInvitations = new ReceivedGroupInvitationsModel(GroupType.Template, locator.eventController, locator.entityClient, this.logins)
 
 		this._templateInvitations.invitations.map(() => m.redraw())
 
@@ -283,7 +195,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 				},
 				view: () => {
 					const [ownTemplates, sharedTemplates] = partition(this._templateFolders, (folder) =>
-						isSharedGroupOwner(folder.data.group, logins.getUserController().user),
+						isSharedGroupOwner(folder.data.group, this.logins.getUserController().user),
 					)
 
 					const templateInvitations = this._templateInvitations.invitations()
@@ -307,7 +219,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 									sharedTemplates.map((folder) => this._renderTemplateFolderRow(folder)),
 								],
 							),
-							logins.isUserLoggedIn() && logins.getUserController().isGlobalOrLocalAdmin()
+							this.logins.isUserLoggedIn() && this.logins.getUserController().isGlobalOrLocalAdmin()
 								? m(
 										SidebarSection,
 										{
@@ -334,7 +246,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 										this._renderSidebarSectionChildren(this._knowledgeBaseFolders),
 								  )
 								: null,
-							isTutanotaDomain() ? this._aboutThisSoftwareLink() : null,
+							isTutanotaDomain(location.hostname) ? this._aboutThisSoftwareLink() : null,
 						]),
 						ariaLabel: "settings_label",
 					})
@@ -368,14 +280,122 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 		this.viewSlider = new ViewSlider([this._settingsFoldersColumn, this._settingsColumn, this._settingsDetailsColumn], "SettingsView")
 
 		this._customDomains = new LazyLoaded(() => {
-			return getAvailableDomains(locator.entityClient, logins, true)
+			return getAvailableDomains(locator.entityClient, this.logins, true)
 		})
 
 		this._customDomains.getAsync().then(() => m.redraw())
 	}
 
-	oncreate(vnode: Vnode<SettingsViewAttrs>) {
+	private async populateAdminFolders() {
+		await this.updateShowBusinessSettings()
+
+		this._adminFolders.push(
+			new SettingsFolder(
+				"adminUserList_action",
+				() => BootIcons.Contacts,
+				"users",
+				() => new UserListView(this),
+				undefined,
+			),
+		)
+
+		if (!this.logins.isEnabled(FeatureType.WhitelabelChild)) {
+			this._adminFolders.push(
+				new SettingsFolder(
+					"groups_label",
+					() => Icons.People,
+					"groups",
+					() => new GroupListView(this),
+					undefined,
+				),
+			)
+		}
+
+		if (this.logins.getUserController().isGlobalAdmin()) {
+			this._adminFolders.push(
+				new SettingsFolder(
+					"globalSettings_label",
+					() => BootIcons.Settings,
+					"global",
+					() => new GlobalSettingsViewer(),
+					undefined,
+				),
+			)
+
+			if (!this.logins.isEnabled(FeatureType.WhitelabelChild) && !isIOSApp()) {
+				this._adminFolders.push(
+					new SettingsFolder(
+						"whitelabel_label",
+						() => Icons.Wand,
+						"whitelabel",
+						() => new WhitelabelSettingsViewer(locator.entityClient, this.logins),
+						undefined,
+					),
+				)
+
+				if (this.logins.isEnabled(FeatureType.WhitelabelParent)) {
+					this._adminFolders.push(
+						new SettingsFolder(
+							"whitelabelAccounts_label",
+							() => Icons.People,
+							"whitelabelaccounts",
+							() => new WhitelabelChildrenListView(this),
+							undefined,
+						),
+					)
+				}
+			}
+		}
+
+		if (!this.logins.isEnabled(FeatureType.WhitelabelChild)) {
+			this._adminFolders.push(
+				new SettingsFolder(
+					"contactForms_label",
+					() => Icons.Chat,
+					"contactforms",
+					() => new ContactFormListView(this),
+					undefined,
+				),
+			)
+
+			if (this.logins.getUserController().isGlobalAdmin()) {
+				this._adminFolders.push(
+					new SettingsFolder<void>(
+						"adminSubscription_action",
+						() => BootIcons.Premium,
+						"subscription",
+						() => new SubscriptionViewer(),
+						undefined,
+					).setIsVisibleHandler(() => !isIOSApp() || !this.logins.getUserController().isFreeAccount()),
+				)
+
+				this._adminFolders.push(
+					new SettingsFolder<void>(
+						"adminPayment_action",
+						() => Icons.Cash,
+						"invoice",
+						() => new PaymentViewer(),
+						undefined,
+					),
+				)
+
+				this._adminFolders.push(
+					new SettingsFolder(
+						"referralSettings_label",
+						() => BootIcons.Share,
+						"referral",
+						() => new ReferralSettingsViewer(),
+						undefined,
+					).setIsVisibleHandler(() => !this.showBusinessSettings()),
+				)
+			}
+		}
+	}
+
+	async oncreate(vnode: Vnode<SettingsViewAttrs>) {
 		locator.eventController.addEntityListener(this.entityListener)
+
+		await this.populateAdminFolders()
 	}
 
 	onremove(vnode: VnodeDOM<SettingsViewAttrs>) {
@@ -390,7 +410,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 		return m(
 			"#settings.main-view",
 			m(this.viewSlider, {
-				header: m(header, {
+				header: m(locator.header, {
 					viewSlider: this.viewSlider,
 					...attrs.header,
 				}),
@@ -412,7 +432,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 
 	_renderTemplateFolderRow(folder: SettingsFolder<TemplateGroupInstance>): Children {
 		const instance = folder.data
-		const isGroupOwner = isSharedGroupOwner(instance.group, getEtId(logins.getUserController().user))
+		const isGroupOwner = isSharedGroupOwner(instance.group, getEtId(this.logins.getUserController().user))
 		return m(SettingsFolderRow, {
 			mainButtonAttrs: this._createSettingsFolderNavButton(folder),
 			extraButton: m(
@@ -446,7 +466,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 
 	private _leaveTemplateGroup(templateInfo: TemplateGroupInstance) {
 		return getConfirmation("confirmLeaveTemplateGroup_msg").confirmed(() =>
-			locator.groupManagementFacade.removeUserFromGroup(getEtId(logins.getUserController().user), templateInfo.groupInfo.group),
+			locator.groupManagementFacade.removeUserFromGroup(getEtId(this.logins.getUserController().user), templateInfo.groupInfo.group),
 		)
 	}
 
@@ -500,7 +520,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 												{
 													label: "exportUsers_action",
 													click: () =>
-														exportUserCsv(locator.entityClient, locator.userManagementFacade, logins, locator.fileController),
+														exportUserCsv(locator.entityClient, locator.userManagementFacade, this.logins, locator.fileController),
 												},
 											],
 										}),
@@ -553,11 +573,11 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 	}
 
 	_getUserOwnedTemplateSettingsFolder(): SettingsFolder<unknown> {
-		return this._templateFolders.find((folder) => isSharedGroupOwner(folder.data.group, logins.getUserController().user)) || this._dummyTemplateFolder
+		return this._templateFolders.find((folder) => isSharedGroupOwner(folder.data.group, this.logins.getUserController().user)) || this._dummyTemplateFolder
 	}
 
 	_allSettingsFolders(): ReadonlyArray<SettingsFolder<unknown>> {
-		const hasOwnTemplates = this._templateFolders.some((folder) => isSharedGroupOwner(folder.data.group, logins.getUserController().user))
+		const hasOwnTemplates = this._templateFolders.some((folder) => isSharedGroupOwner(folder.data.group, this.logins.getUserController().user))
 
 		return [
 			...this._userFolders,
@@ -581,10 +601,16 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 		this.viewSlider.focus(this._settingsDetailsColumn)
 	}
 
-	entityEventsReceived<T>(updates: ReadonlyArray<EntityUpdateData>): Promise<unknown> {
-		return promiseMap(updates, (update) => {
-			if (isUpdateForTypeRef(UserTypeRef, update) && isSameId(update.instanceId, logins.getUserController().user._id)) {
-				const user = logins.getUserController().user
+	private async updateShowBusinessSettings() {
+		this.showBusinessSettings((await this.logins.getUserController().loadCustomer()).businessUse === true)
+	}
+
+	async entityEventsReceived<T>(updates: ReadonlyArray<EntityUpdateData>): Promise<unknown> {
+		return promiseMap(updates, async (update) => {
+			if (isUpdateForTypeRef(CustomerTypeRef, update)) {
+				await this.updateShowBusinessSettings()
+			} else if (isUpdateForTypeRef(UserTypeRef, update) && isSameId(update.instanceId, this.logins.getUserController().user._id)) {
+				const user = this.logins.getUserController().user
 
 				// the user admin status might have changed
 				if (!this._isGlobalOrLocalAdmin(user) && this._currentViewer && this._adminFolders.find((f) => f.isActive())) {
@@ -592,7 +618,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 				}
 
 				// template group memberships may have changed
-				if (this._templateFolders.length !== logins.getUserController().getTemplateMemberships().length) {
+				if (this._templateFolders.length !== this.logins.getUserController().getTemplateMemberships().length) {
 					return Promise.all([this._makeTemplateFolders(), this._makeKnowledgeBaseFolders()]).then(([templates, knowledgeBases]) => {
 						this._templateFolders = templates
 						this._knowledgeBaseFolders = knowledgeBases
@@ -670,7 +696,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 	}
 
 	async _makeTemplateFolders(): Promise<Array<SettingsFolder<TemplateGroupInstance>>> {
-		const templateMemberships = (logins.getUserController() && logins.getUserController().getTemplateMemberships()) || []
+		const templateMemberships = (this.logins.getUserController() && this.logins.getUserController().getTemplateMemberships()) || []
 		return promiseMap(
 			await loadTemplateGroupInstances(templateMemberships, locator.entityClient),
 			(groupInstance) =>
@@ -681,17 +707,17 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 						folder: "templates",
 						id: getEtId(groupInstance.group),
 					},
-					() => new TemplateListView(this, groupInstance, locator.entityClient, logins),
+					() => new TemplateListView(this, groupInstance, locator.entityClient, this.logins),
 					groupInstance,
 				),
 		)
 	}
 
 	async _makeKnowledgeBaseFolders(): Promise<Array<SettingsFolder<void>>> {
-		const customer = await logins.getUserController().loadCustomer()
+		const customer = await this.logins.getUserController().loadCustomer()
 
 		if (isCustomizationEnabledForCustomer(customer, FeatureType.KnowledgeBase)) {
-			const templateMemberships = (logins.getUserController() && logins.getUserController().getTemplateMemberships()) || []
+			const templateMemberships = (this.logins.getUserController() && this.logins.getUserController().getTemplateMemberships()) || []
 			return promiseMap(
 				await loadTemplateGroupInstances(templateMemberships, locator.entityClient),
 				(groupInstance) =>
@@ -702,7 +728,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 							folder: "knowledgebase",
 							id: getEtId(groupInstance.group),
 						},
-						() => new KnowledgeBaseListView(this, locator.entityClient, logins, groupInstance.groupRoot, groupInstance.group),
+						() => new KnowledgeBaseListView(this, locator.entityClient, this.logins, groupInstance.groupRoot, groupInstance.group),
 						undefined,
 					),
 			)
@@ -714,6 +740,7 @@ export class SettingsView extends BaseTopLevelView implements TopLevelView<Setti
 
 function showRenameTemplateListDialog(instance: TemplateGroupInstance) {
 	const name = stream(getSharedGroupName(instance.groupInfo, true))
+	const logins = locator.logins
 	Dialog.showActionDialog({
 		title: () => lang.get("renameTemplateList_label"),
 		allowOkWithReturn: true,

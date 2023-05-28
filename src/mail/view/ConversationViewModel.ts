@@ -7,9 +7,10 @@ import { EntityClient } from "../../api/common/EntityClient.js"
 import { LoadingStateTracker } from "../../offline/LoadingState.js"
 import { EntityEventsListener, EntityUpdateData, EventController, isUpdateForTypeRef } from "../../api/main/EventController.js"
 import { ConversationType, MailFolderType, MailState, OperationType } from "../../api/common/TutanotaConstants.js"
-import { NotFoundError } from "../../api/common/error/RestError.js"
+import { NotAuthorizedError, NotFoundError } from "../../api/common/error/RestError.js"
 import { normalizeSubject } from "../model/MailUtils.js"
 import { isOfTypeOrSubfolderOf } from "../../api/common/mail/CommonMailUtils.js"
+import { MailModel } from "../model/MailModel.js"
 
 export type MailViewerViewModelFactory = (options: CreateMailViewerOptions) => MailViewerViewModel
 
@@ -18,7 +19,7 @@ export type SubjectItem = { type: "subject"; subject: string; id: string; entryI
 export type DeletedItem = { type: "deleted"; entryId: IdTuple }
 export type ConversationItem = MailItem | SubjectItem | DeletedItem
 
-interface ConversationPrefProvider {
+export interface ConversationPrefProvider {
 	getConversationViewShowOnlySelectedMail(): boolean
 }
 
@@ -36,6 +37,7 @@ export class ConversationViewModel {
 		private readonly entityClient: EntityClient,
 		private readonly eventController: EventController,
 		private readonly conversationPrefProvider: ConversationPrefProvider,
+		private readonly mailModel: MailModel,
 		private readonly onUiUpdate: () => unknown,
 	) {
 		this._primaryViewModel = viewModelFactory(options)
@@ -182,9 +184,25 @@ export class ConversationViewModel {
 			if (this.conversationPrefProvider.getConversationViewShowOnlySelectedMail()) {
 				this.conversation = this.conversationItemsForSelectedMailOnly()
 			} else {
-				const conversationEntries = await this.entityClient.loadAll(ConversationEntryTypeRef, listIdPart(this.primaryMail.conversationEntry))
-				const allMails = await this.loadMails(conversationEntries)
-				this.conversation = this.createConversationItems(conversationEntries, allMails)
+				// Catch errors but only for loading conversation entries.
+				// if success, proceed with loading mails
+				// otherwise do the error handling
+				this.conversation = await this.entityClient.loadAll(ConversationEntryTypeRef, listIdPart(this.primaryMail.conversationEntry)).then(
+					async (entries) => {
+						const allMails = await this.loadMails(entries)
+						return this.createConversationItems(entries, allMails)
+					},
+					async (e) => {
+						if (e instanceof NotAuthorizedError) {
+							// Most likely the conversation entry list does not exist anymore. The server does not distinguish between the case when the
+							// list does not exist and when we have no permission on it (and for good reasons, it prevents enumeration).
+							// Most often it happens when we are not fully synced with the server yet and the primary mail does not even exist.
+							return this.conversationItemsForSelectedMailOnly()
+						} else {
+							throw e
+						}
+					},
+				)
 			}
 		} finally {
 			this.onUiUpdate()
@@ -240,8 +258,8 @@ export class ConversationViewModel {
 	}
 
 	private async isInTrash(mail: Mail) {
-		const mailboxDetail = await this._primaryViewModel.mailModel.getMailboxDetailsForMail(mail)
-		const mailFolder = this._primaryViewModel.mailModel.getMailFolder(getListId(mail))
+		const mailboxDetail = await this.mailModel.getMailboxDetailsForMail(mail)
+		const mailFolder = this.mailModel.getMailFolder(getListId(mail))
 		return mailFolder && mailboxDetail && isOfTypeOrSubfolderOf(mailboxDetail.folders, mailFolder, MailFolderType.TRASH)
 	}
 

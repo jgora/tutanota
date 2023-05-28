@@ -1,6 +1,6 @@
 {
 	"name": "@tutao/licc",
-	"version": "3.110.0",
+	"version": "3.112.6",
 	"bin": {
 		"licc": "dist/cli.js"
 	},
@@ -8,7 +8,7 @@
 	"main": "index.js",
 	"type": "module",
 	"scripts": {
-		"build": "tsc -b",
+		"build": "npx tsc -b",
 		"test": "rm -rf ./test/build && tsc -b test && cd test/build && node test/Suite.js",
 		"preinstall": "node preinstall.js"
 	},
@@ -20,7 +20,7 @@
 		"zx": "6.1.0"
 	},
 	"devDependencies": {
-		"@tutao/tutanota-test-utils": "3.110.0",
+		"@tutao/tutanota-test-utils": "3.112.6",
 		"ospec": "https://github.com/tutao/ospec.git#0472107629ede33be4c4d19e89f237a6d7b0cb11"
 	}
 }

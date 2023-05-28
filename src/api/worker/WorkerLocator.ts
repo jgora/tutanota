@@ -207,6 +207,8 @@ export async function initLocator(worker: WorkerImpl, browserData: BrowserData) 
 		},
 	}
 
+	locator.deviceEncryptionFacade = new DeviceEncryptionFacade()
+	const { DatabaseKeyFactory } = await import("../../misc/credentials/DatabaseKeyFactory.js")
 	locator.login = new LoginFacade(
 		worker,
 		locator.restClient,
@@ -222,6 +224,7 @@ export async function initLocator(worker: WorkerImpl, browserData: BrowserData) 
 		locator.user,
 		locator.blobAccessToken,
 		locator.entropyFacade,
+		new DatabaseKeyFactory(locator.deviceEncryptionFacade),
 	)
 
 	locator.search = lazyMemoized(async () => {
@@ -317,6 +320,7 @@ export async function initLocator(worker: WorkerImpl, browserData: BrowserData) 
 			locator.instanceMapper,
 			locator.serviceExecutor,
 			locator.crypto,
+			mainInterface.infoMessageHandler,
 		)
 	})
 
@@ -369,7 +373,6 @@ export async function initLocator(worker: WorkerImpl, browserData: BrowserData) 
 		const { ContactFormFacade } = await import("./facades/lazy/ContactFormFacade.js")
 		return new ContactFormFacade(locator.restClient, locator.instanceMapper)
 	})
-	locator.deviceEncryptionFacade = new DeviceEncryptionFacade()
 }
 
 const RETRY_TIMOUT_AFTER_INIT_INDEXER_ERROR_MS = 30000

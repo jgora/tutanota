@@ -2,12 +2,11 @@ import m, { Children, Vnode, VnodeDOM } from "mithril"
 import { Dialog } from "../gui/base/Dialog"
 import { lang } from "../misc/LanguageViewModel"
 import { formatPriceWithInfo, getPaymentMethodName, PaymentInterval } from "./PriceUtils"
-import { createSwitchAccountTypeData } from "../api/entities/sys/TypeRefs.js"
+import { createSwitchAccountTypePostIn } from "../api/entities/sys/TypeRefs.js"
 import { AccountType, Const, PaidSubscriptionType, PaymentMethodTypeToName } from "../api/common/TutanotaConstants"
 import { showProgressDialog } from "../gui/dialogs/ProgressDialog"
 import type { UpgradeSubscriptionData } from "./UpgradeSubscriptionWizard"
 import { BadGatewayError, PreconditionFailedError } from "../api/common/error/RestError"
-import { logins } from "../api/main/LoginController"
 import { getPreconditionFailedPaymentMsg, UpgradeType } from "./SubscriptionUtils"
 import { Button, ButtonType } from "../gui/base/Button.js"
 import type { WizardPageAttrs, WizardPageN } from "../gui/base/WizardDialog.js"
@@ -36,10 +35,11 @@ export class UpgradeConfirmSubscriptionPage implements WizardPageN<UpgradeSubscr
 	}
 
 	private upgrade(data: UpgradeSubscriptionData) {
-		const serviceData = createSwitchAccountTypeData({
+		const serviceData = createSwitchAccountTypePostIn({
 			accountType: AccountType.PREMIUM,
 			subscriptionType: this.subscriptionTypeToPaidSubscriptionType(data.type),
 			date: Const.CURRENT_DATE,
+			referralCode: data.referralCode,
 		})
 		showProgressDialog(
 			"pleaseWait_msg",
@@ -166,8 +166,8 @@ export class UpgradeConfirmSubscriptionPage implements WizardPageN<UpgradeSubscr
 	private close(data: UpgradeSubscriptionData, dom: HTMLElement) {
 		let promise = Promise.resolve()
 
-		if (data.newAccountData && logins.isUserLoggedIn()) {
-			promise = logins.logout(false)
+		if (data.newAccountData && locator.logins.isUserLoggedIn()) {
+			promise = locator.logins.logout(false)
 		}
 
 		promise.then(() => {

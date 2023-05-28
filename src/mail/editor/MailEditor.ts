@@ -1,7 +1,7 @@
 import m, { Children, Component, Vnode } from "mithril"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
-import { Editor } from "../../gui/editor/Editor"
+import { Editor, ImagePasteEvent } from "../../gui/editor/Editor"
 import type { Attachment, InitAsResponseArgs, SendMailModel } from "./SendMailModel"
 import { Dialog } from "../../gui/base/Dialog"
 import { InfoLink, lang } from "../../misc/LanguageViewModel"
@@ -16,9 +16,7 @@ import {
 	LINE_BREAK,
 	RecipientField,
 } from "../model/MailUtils"
-import { PermissionError } from "../../api/common/error/PermissionError"
 import { locator } from "../../api/main/MainLocator"
-import { logins } from "../../api/main/LoginController"
 import { ALLOWED_IMAGE_FORMATS, ConversationType, FeatureType, Keys, MailMethod } from "../../api/common/TutanotaConstants"
 import { TooManyRequestsError } from "../../api/common/error/RestError"
 import type { DialogHeaderBarAttrs } from "../../gui/base/DialogHeaderBar"
@@ -54,7 +52,7 @@ import { KnowledgeBaseModel } from "../../knowledgebase/model/KnowledgeBaseModel
 import { styles } from "../../gui/styles"
 import { showMinimizedMailEditor } from "../view/MinimizedMailEditorOverlay"
 import { SaveErrorReason, SaveStatus, SaveStatusEnum } from "../model/MinimizedMailEditorViewModel"
-import { isTutanotaFile } from "../../api/common/utils/FileUtils"
+import { FileReference, isTutanotaFile } from "../../api/common/utils/FileUtils"
 import { parseMailtoUrl } from "../../misc/parsing/MailAddressParser"
 import { CancelledError } from "../../api/common/error/CancelledError"
 import { Shortcut } from "../../misc/KeyManager"
@@ -75,7 +73,7 @@ import { DialogInjectionRightAttrs } from "../../gui/base/DialogInjectionRight.j
 import { KnowledgebaseDialogContentAttrs } from "../../knowledgebase/view/KnowledgeBaseDialogContent.js"
 import { MailWrapper } from "../../api/common/MailWrapper.js"
 import { RecipientsSearchModel } from "../../misc/RecipientsSearchModel.js"
-import { DataFile } from "../../api/common/DataFile.js"
+import { createDataFile, DataFile } from "../../api/common/DataFile.js"
 
 export type MailEditorAttrs = {
 	model: SendMailModel
@@ -167,6 +165,27 @@ export class MailEditor implements Component<MailEditorAttrs> {
 			})
 			// since the editor is the source for the body text, the model won't know if the body has changed unless we tell it
 			this.editor.addChangeListener(() => model.setBody(replaceInlineImagesWithCids(this.editor.getDOM()).innerHTML))
+			this.editor.addEventListener("pasteImage", ({ detail }: ImagePasteEvent) => {
+				const items = Array.from(detail.clipboardData.items)
+				const imageItems = items.filter((item) => /image/.test(item.type))
+				if (!imageItems.length) {
+					return false
+				}
+				const file = imageItems[0]?.getAsFile()
+				if (file == null) {
+					return false
+				}
+				const reader = new FileReader()
+				reader.onload = () => {
+					if (reader.result == null || "string" === typeof reader.result) {
+						return
+					}
+					const newInlineImages = [createDataFile(file.name, file.type, new Uint8Array(reader.result))]
+					model.attachFiles(newInlineImages)
+					this.insertInlineImages(model, newInlineImages)
+				}
+				reader.readAsArrayBuffer(file)
+			})
 
 			if (a.templateModel) {
 				a.templateModel.init().then((templateModel) => {
@@ -279,7 +298,7 @@ export class MailEditor implements Component<MailEditorAttrs> {
 			icon: Icons.Attachment,
 			size: ButtonSize.Compact,
 		}
-		const plaintextFormatting = logins.getUserController().props.sendPlaintextOnly
+		const plaintextFormatting = locator.logins.getUserController().props.sendPlaintextOnly
 		this.editor.setCreatesLists(!plaintextFormatting)
 
 		const toolbarButton = () =>
@@ -316,7 +335,7 @@ export class MailEditor implements Component<MailEditorAttrs> {
 
 		let editCustomNotificationMailAttrs: IconButtonAttrs | null = null
 
-		if (logins.getUserController().isGlobalAdmin()) {
+		if (locator.logins.getUserController().isGlobalAdmin()) {
 			editCustomNotificationMailAttrs = attachDropdown({
 				mainButtonAttrs: {
 					title: "more_label",
@@ -328,7 +347,7 @@ export class MailEditor implements Component<MailEditorAttrs> {
 						label: "add_action",
 						click: () => {
 							import("../../settings/EditNotificationEmailDialog").then(({ showAddOrEditNotificationEmailDialog }) =>
-								showAddOrEditNotificationEmailDialog(logins.getUserController()),
+								showAddOrEditNotificationEmailDialog(locator.logins.getUserController()),
 							)
 						},
 					},
@@ -336,7 +355,7 @@ export class MailEditor implements Component<MailEditorAttrs> {
 						label: "edit_action",
 						click: () => {
 							import("../../settings/EditNotificationEmailDialog").then(({ showAddOrEditNotificationEmailDialog }) =>
-								showAddOrEditNotificationEmailDialog(logins.getUserController(), model.getSelectedNotificationLanguageCode()),
+								showAddOrEditNotificationEmailDialog(locator.logins.getUserController(), model.getSelectedNotificationLanguageCode()),
 							)
 						},
 					},
@@ -523,6 +542,10 @@ export class MailEditor implements Component<MailEditorAttrs> {
 	private async imageButtonClickHandler(model: SendMailModel, rect: DOMRect): Promise<void> {
 		const files = await chooseAndAttachFile(model, rect, ALLOWED_IMAGE_FORMATS)
 		if (!files || files.length === 0) return
+		return await this.insertInlineImages(model, files)
+	}
+
+	private async insertInlineImages(model: SendMailModel, files: ReadonlyArray<DataFile | FileReference>): Promise<void> {
 		for (const file of files) {
 			const img = createInlineImage(file as DataFile)
 			model.loadedInlineImages.set(img.cid, img)
@@ -640,12 +663,12 @@ export class MailEditor implements Component<MailEditorAttrs> {
 	private async getRecipientClickedContextButtons(recipient: ResolvableRecipient, field: RecipientField): Promise<DropdownChildAttrs[]> {
 		const { logins, entity, contactModel } = this.sendMailModel
 
-		const canEditBubbleRecipient = logins.getUserController().isInternalUser() && !logins.isEnabled(FeatureType.DisableContacts)
+		const canEditBubbleRecipient = locator.logins.getUserController().isInternalUser() && !locator.logins.isEnabled(FeatureType.DisableContacts)
 
 		const previousMail = this.sendMailModel.getPreviousMail()
 
 		const canRemoveBubble =
-			logins.getUserController().isInternalUser() &&
+			locator.logins.getUserController().isInternalUser() &&
 			(!previousMail || !previousMail.restrictions || previousMail.restrictions.participantGroupInfos.length === 0)
 
 		const createdContactReceiver = (contactElementId: Id) => {
@@ -681,7 +704,7 @@ export class MailEditor implements Component<MailEditorAttrs> {
 					click: () => {
 						// contact list
 						contactModel.contactListId().then((contactListId) => {
-							const newContact = createNewContact(logins.getUserController().user, recipient.address, recipient.name)
+							const newContact = createNewContact(locator.logins.getUserController().user, recipient.address, recipient.name)
 							import("../../contacts/ContactEditor").then(({ ContactEditor }) => {
 								new ContactEditor(entity, newContact, contactListId ?? undefined, createdContactReceiver).show()
 							})
@@ -841,19 +864,21 @@ async function createMailEditorDialog(model: SendMailModel, blockExternalContent
 		},
 	}
 	const templatePopupModel =
-		logins.isInternalUserLoggedIn() && client.isDesktopDevice() ? new TemplatePopupModel(locator.eventController, logins, locator.entityClient) : null
+		locator.logins.isInternalUserLoggedIn() && client.isDesktopDevice()
+			? new TemplatePopupModel(locator.eventController, locator.logins, locator.entityClient)
+			: null
 
 	const createKnowledgebaseButtonAttrs = async (editor: Editor) => {
-		if (logins.isInternalUserLoggedIn()) {
-			const customer = await logins.getUserController().loadCustomer()
+		if (locator.logins.isInternalUserLoggedIn()) {
+			const customer = await locator.logins.getUserController().loadCustomer()
 			// only create knowledgebase button for internal users with valid template group and enabled KnowledgebaseFeature
 			if (
 				styles.isDesktopLayout() &&
 				templatePopupModel &&
-				logins.getUserController().getTemplateMemberships().length > 0 &&
+				locator.logins.getUserController().getTemplateMemberships().length > 0 &&
 				isCustomizationEnabledForCustomer(customer, FeatureType.KnowledgeBase)
 			) {
-				const knowledgebaseModel = new KnowledgeBaseModel(locator.eventController, locator.entityClient, logins.getUserController())
+				const knowledgebaseModel = new KnowledgeBaseModel(locator.eventController, locator.entityClient, locator.logins.getUserController())
 				await knowledgebaseModel.init()
 
 				// make sure we dispose knowledbaseModel once the editor is closed
@@ -933,9 +958,9 @@ async function createMailEditorDialog(model: SendMailModel, blockExternalContent
 export async function newMailEditor(mailboxDetails: MailboxDetail): Promise<Dialog> {
 	// We check approval status so as to get a dialog informing the user that they cannot send mails
 	// but we still want to open the mail editor because they should still be able to contact sales@tutao.de
-	await checkApprovalStatus(logins, false)
+	await checkApprovalStatus(locator.logins, false)
 	const { appendEmailSignature } = await import("../signature/Signature")
-	const signature = appendEmailSignature("", logins.getUserController().props)
+	const signature = appendEmailSignature("", locator.logins.getUserController().props)
 	const detailsProperties = await getMailboxDetailsAndProperties(mailboxDetails)
 	return newMailEditorFromTemplate(detailsProperties.mailboxDetails, {}, "", signature)
 }
@@ -1011,7 +1036,7 @@ export async function newMailtoUrlMailEditor(mailtoUrl: string, confidential: bo
 		detailsProperties.mailboxDetails,
 		mailTo.recipients,
 		mailTo.subject || "",
-		appendEmailSignature(mailTo.body || "", logins.getUserController().props),
+		appendEmailSignature(mailTo.body || "", locator.logins.getUserController().props),
 		dataFiles,
 		confidential,
 		undefined,
@@ -1058,7 +1083,7 @@ export function getSupportMailSignature(): Promise<string> {
  * @returns {Promise<any>|Promise<R>|*}
  */
 export async function writeSupportMail(subject: string = "", mailboxDetails?: MailboxDetail) {
-	if (logins.getUserController().isPremiumAccount()) {
+	if (locator.logins.getUserController().isPremiumAccount()) {
 		const detailsProperties = await getMailboxDetailsAndProperties(mailboxDetails)
 		const recipients = {
 			to: [
@@ -1090,16 +1115,15 @@ export async function writeSupportMail(subject: string = "", mailboxDetails?: Ma
 
 /**
  * Create and show a new mail editor with an invite message
- * @param mailboxDetails
+ * @param referralLink
  * @returns {*}
  */
-export async function writeInviteMail(mailboxDetails?: MailboxDetail) {
-	const detailsProperties = await getMailboxDetailsAndProperties(mailboxDetails)
-	const username = logins.getUserController().userGroupInfo.name
+export async function writeInviteMail(referralLink: string) {
+	const detailsProperties = await getMailboxDetailsAndProperties(null)
+	const username = locator.logins.getUserController().userGroupInfo.name
 	const body = lang.get("invitationMailBody_msg", {
-		"{registrationLink}": "https://mail.tutanota.com/signup",
+		"{registrationLink}": referralLink,
 		"{username}": username,
-		"{githubLink}": "https://github.com/tutao/tutanota",
 	})
 	const dialog = await newMailEditorFromTemplate(detailsProperties.mailboxDetails, {}, lang.get("invitationMailSubject_msg"), body, [], false)
 	dialog.show()
@@ -1117,14 +1141,14 @@ export async function writeGiftCardMail(link: string, svg: SVGElement, mailboxDe
 	const bodyText = lang
 		.get("defaultShareGiftCardBody_msg", {
 			"{link}": '<a href="' + link + '">' + link + "</a>",
-			"{username}": logins.getUserController().userGroupInfo.name,
+			"{username}": locator.logins.getUserController().userGroupInfo.name,
 		})
 		.split("\n")
 		.join("<br />")
 	const subject = lang.get("defaultShareGiftCardSubject_msg")
 	locator
 		.sendMailModel(detailsProperties.mailboxDetails, detailsProperties.mailboxProperties)
-		.then((model) => model.initWithTemplate({}, subject, appendEmailSignature(bodyText, logins.getUserController().props), [], false))
+		.then((model) => model.initWithTemplate({}, subject, appendEmailSignature(bodyText, locator.logins.getUserController().props), [], false))
 		.then((model) => createMailEditorDialog(model, false))
 		.then((dialog) => dialog.show())
 }

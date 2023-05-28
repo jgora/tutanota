@@ -3,14 +3,7 @@ import { assertMainOrNode, isIOSApp } from "../api/common/Env"
 import { assertNotNull, neverNull, noOp, ofClass, promiseMap } from "@tutao/tutanota-utils"
 import { lang, TranslationKey } from "../misc/LanguageViewModel"
 import type { AccountingInfo, Booking, Customer, InvoiceInfo } from "../api/entities/sys/TypeRefs.js"
-import {
-	AccountingInfoTypeRef,
-	BookingTypeRef,
-	createDebitServicePutData,
-	CustomerInfoTypeRef,
-	CustomerTypeRef,
-	InvoiceInfoTypeRef,
-} from "../api/entities/sys/TypeRefs.js"
+import { AccountingInfoTypeRef, BookingTypeRef, createDebitServicePutData, CustomerTypeRef, InvoiceInfoTypeRef } from "../api/entities/sys/TypeRefs.js"
 import { HtmlEditor, HtmlEditorMode } from "../gui/editor/HtmlEditor"
 import { formatPrice, getPaymentMethodInfoText, getPaymentMethodName } from "./PriceUtils"
 import * as InvoiceDataDialog from "./InvoiceDataDialog"
@@ -32,9 +25,7 @@ import { getPreconditionFailedPaymentMsg } from "./SubscriptionUtils"
 import type { DialogHeaderBarAttrs } from "../gui/base/DialogHeaderBar"
 import { DialogHeaderBar } from "../gui/base/DialogHeaderBar"
 import { TextField } from "../gui/base/TextField.js"
-import { logins } from "../api/main/LoginController"
 import type { CustomerAccountPosting } from "../api/entities/accounting/TypeRefs"
-import { createCustomerAccountPosting } from "../api/entities/accounting/TypeRefs"
 import { ExpanderButton, ExpanderPanel } from "../gui/base/Expander"
 import { locator } from "../api/main/MainLocator"
 import { createNotAvailableForFreeClickHandler } from "../misc/SubscriptionDialogs"
@@ -83,12 +74,12 @@ export class PaymentViewer implements UpdatableSettingsViewer {
 				[this.renderInvoiceData(), this.renderPaymentMethod(), this._renderPostings(postingExpanded)],
 			)
 		}
-
-		locator.entityClient
-			.load(CustomerTypeRef, neverNull(logins.getUserController().user.customer))
+		locator.logins
+			.getUserController()
+			.loadCustomer()
 			.then((customer) => {
 				this._customer = customer
-				return locator.entityClient.load(CustomerInfoTypeRef, customer.customerInfo)
+				return locator.logins.getUserController().loadCustomerInfo()
 			})
 			.then((customerInfo) => locator.entityClient.load(AccountingInfoTypeRef, customerInfo.accountingInfo))
 			.then((accountingInfo) => {
@@ -128,7 +119,7 @@ export class PaymentViewer implements UpdatableSettingsViewer {
 					click: createNotAvailableForFreeClickHandler(
 						true,
 						() => this.changePaymentMethod(),
-						() => !isIOSApp() && logins.getUserController().isPremiumAccount(),
+						() => !isIOSApp() && locator.logins.getUserController().isPremiumAccount(),
 					),
 					icon: Icons.Edit,
 					size: ButtonSize.Compact,
@@ -257,7 +248,7 @@ export class PaymentViewer implements UpdatableSettingsViewer {
 				},
 			],
 			actionButtonAttrs:
-				posting.type === PostingType.UsageFee || posting.type === PostingType.Credit
+				posting.type === PostingType.UsageFee || posting.type === PostingType.Credit || posting.type === PostingType.SalesCommission
 					? {
 							title: "download_action",
 							icon: Icons.Download,
@@ -303,10 +294,9 @@ export class PaymentViewer implements UpdatableSettingsViewer {
 	}
 
 	_loadBookings(): Promise<void> {
-		return logins
+		return locator.logins
 			.getUserController()
-			.loadCustomer()
-			.then((customer) => locator.entityClient.load(CustomerInfoTypeRef, customer.customerInfo))
+			.loadCustomerInfo()
 			.then((customerInfo) => (customerInfo.bookings ? locator.entityClient.loadAll(BookingTypeRef, customerInfo.bookings.items) : []))
 			.then((bookings) => {
 				this._lastBooking = bookings[bookings.length - 1]
@@ -395,7 +385,7 @@ export class PaymentViewer implements UpdatableSettingsViewer {
 					click: createNotAvailableForFreeClickHandler(
 						true,
 						() => this.changeInvoiceData(),
-						() => logins.getUserController().isPremiumAccount(),
+						() => locator.logins.getUserController().isPremiumAccount(),
 					),
 					icon: Icons.Edit,
 					size: ButtonSize.Compact,
@@ -476,6 +466,9 @@ function getPostingTypeText(posting: CustomerAccountPosting): string {
 
 		case PostingType.GiftCard:
 			return Number(posting.amount) < 0 ? lang.get("boughtGiftCardPosting_label") : lang.get("redeemedGiftCardPosting_label")
+
+		case PostingType.SalesCommission:
+			return Number(posting.amount) < 0 ? lang.get("cancelledReferralCreditPosting_label") : lang.get("referralCreditPosting_label")
 
 		default:
 			return ""

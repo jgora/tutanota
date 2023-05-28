@@ -769,6 +769,7 @@ export type Customer = {
 	customizations: Feature[];
 	orderProcessingAgreement:  null | IdTuple;
 	properties:  null | Id;
+	referralCode:  null | Id;
 	rejectedSenders:  null | RejectedSendersRef;
 	serverProperties:  null | Id;
 	teamGroups: Id;
@@ -882,6 +883,7 @@ export type CustomerInfo = {
 	customer: Id;
 	domainInfos: DomainInfo[];
 	giftCards:  null | GiftCardsRef;
+	referredBy:  null | Id;
 	takeoverCustomer:  null | Id;
 	terminationRequest:  null | IdTuple;
 }
@@ -954,6 +956,18 @@ export type CustomerServerProperties = {
 	emailSenderList: EmailSenderListElement[];
 	whitelabelRegistrationDomains: StringWrapper[];
 	whitelistedDomains:  null | DomainsRef;
+}
+export const DateWrapperTypeRef: TypeRef<DateWrapper> = new TypeRef("sys", "DateWrapper")
+
+export function createDateWrapper(values?: Partial<DateWrapper>): DateWrapper {
+	return Object.assign(create(typeModels.DateWrapper, DateWrapperTypeRef), values)
+}
+
+export type DateWrapper = {
+	_type: TypeRef<DateWrapper>;
+
+	_id: Id;
+	date: Date;
 }
 export const DebitServicePutDataTypeRef: TypeRef<DebitServicePutData> = new TypeRef("sys", "DebitServicePutData")
 
@@ -2185,6 +2199,43 @@ export type RecoverCode = {
 	userEncRecoverCode: Uint8Array;
 	verifier: Uint8Array;
 }
+export const ReferralCodeGetInTypeRef: TypeRef<ReferralCodeGetIn> = new TypeRef("sys", "ReferralCodeGetIn")
+
+export function createReferralCodeGetIn(values?: Partial<ReferralCodeGetIn>): ReferralCodeGetIn {
+	return Object.assign(create(typeModels.ReferralCodeGetIn, ReferralCodeGetInTypeRef), values)
+}
+
+export type ReferralCodeGetIn = {
+	_type: TypeRef<ReferralCodeGetIn>;
+
+	_format: NumberString;
+
+	referralCode: Id;
+}
+export const ReferralCodePostInTypeRef: TypeRef<ReferralCodePostIn> = new TypeRef("sys", "ReferralCodePostIn")
+
+export function createReferralCodePostIn(values?: Partial<ReferralCodePostIn>): ReferralCodePostIn {
+	return Object.assign(create(typeModels.ReferralCodePostIn, ReferralCodePostInTypeRef), values)
+}
+
+export type ReferralCodePostIn = {
+	_type: TypeRef<ReferralCodePostIn>;
+
+	_format: NumberString;
+}
+export const ReferralCodePostOutTypeRef: TypeRef<ReferralCodePostOut> = new TypeRef("sys", "ReferralCodePostOut")
+
+export function createReferralCodePostOut(values?: Partial<ReferralCodePostOut>): ReferralCodePostOut {
+	return Object.assign(create(typeModels.ReferralCodePostOut, ReferralCodePostOutTypeRef), values)
+}
+
+export type ReferralCodePostOut = {
+	_type: TypeRef<ReferralCodePostOut>;
+
+	_format: NumberString;
+
+	referralCode: Id;
+}
 export const RegistrationCaptchaServiceDataTypeRef: TypeRef<RegistrationCaptchaServiceData> = new TypeRef("sys", "RegistrationCaptchaServiceData")
 
 export function createRegistrationCaptchaServiceData(values?: Partial<RegistrationCaptchaServiceData>): RegistrationCaptchaServiceData {
@@ -2313,6 +2364,8 @@ export type RepeatRule = {
 	frequency: NumberString;
 	interval: NumberString;
 	timeZone: string;
+
+	excludedDates: DateWrapper[];
 }
 export const ResetFactorsDeleteDataTypeRef: TypeRef<ResetFactorsDeleteData> = new TypeRef("sys", "ResetFactorsDeleteData")
 
@@ -2609,19 +2662,21 @@ export type StringWrapper = {
 	_id: Id;
 	value: string;
 }
-export const SwitchAccountTypeDataTypeRef: TypeRef<SwitchAccountTypeData> = new TypeRef("sys", "SwitchAccountTypeData")
+export const SwitchAccountTypePostInTypeRef: TypeRef<SwitchAccountTypePostIn> = new TypeRef("sys", "SwitchAccountTypePostIn")
 
-export function createSwitchAccountTypeData(values?: Partial<SwitchAccountTypeData>): SwitchAccountTypeData {
-	return Object.assign(create(typeModels.SwitchAccountTypeData, SwitchAccountTypeDataTypeRef), values)
+export function createSwitchAccountTypePostIn(values?: Partial<SwitchAccountTypePostIn>): SwitchAccountTypePostIn {
+	return Object.assign(create(typeModels.SwitchAccountTypePostIn, SwitchAccountTypePostInTypeRef), values)
 }
 
-export type SwitchAccountTypeData = {
-	_type: TypeRef<SwitchAccountTypeData>;
+export type SwitchAccountTypePostIn = {
+	_type: TypeRef<SwitchAccountTypePostIn>;
 
 	_format: NumberString;
 	accountType: NumberString;
 	date: null | Date;
 	subscriptionType: NumberString;
+
+	referralCode:  null | Id;
 }
 export const SystemKeysReturnTypeRef: TypeRef<SystemKeysReturn> = new TypeRef("sys", "SystemKeysReturn")
 

@@ -8,6 +8,7 @@ import AuthenticationServices
 class ViewController : UIViewController, WKNavigationDelegate, UIScrollViewDelegate {
   private let themeManager: ThemeManager
   private let alarmManager: AlarmManager
+  private let notificationsHandler: NotificationsHandler
   private var bridge: RemoteBridge!
   private var webView: WKWebView!
   private var sqlCipherFacade: IosSqlCipherFacade
@@ -19,13 +20,15 @@ class ViewController : UIViewController, WKNavigationDelegate, UIScrollViewDeleg
     crypto: IosNativeCryptoFacade,
     themeManager: ThemeManager,
     keychainManager: KeychainManager,
-    userPreferences: UserPreferenceFacade,
+    notificationStorage: NotificationStorage,
     alarmManager: AlarmManager,
+    notificaionsHandler: NotificationsHandler,
     credentialsEncryption: IosNativeCredentialsFacade,
     blobUtils:BlobUtil
   ) {
     self.themeManager = themeManager
     self.alarmManager = alarmManager
+    self.notificationsHandler = notificaionsHandler
     self.bridge = nil
     self.sqlCipherFacade = IosSqlCipherFacade()
 
@@ -61,7 +64,7 @@ class ViewController : UIViewController, WKNavigationDelegate, UIScrollViewDeleg
       themeFacade: IosThemeFacade(themeManager: themeManager, viewController: self),
       appDelegate: self.appDelegate,
       alarmManager: self.alarmManager,
-      userPreferences: userPreferences,
+      notificationStorage: notificationStorage,
       keychainManager: keychainManager,
       webAuthnFacade: IosWebauthnFacade(viewController: self),
       sqlCipherFacade: self.sqlCipherFacade
@@ -169,7 +172,7 @@ class ViewController : UIViewController, WKNavigationDelegate, UIScrollViewDeleg
 
     let theme = self.themeManager.currentThemeWithFallback
     self.applyTheme(theme)
-    self.alarmManager.initialize()
+    self.notificationsHandler.initialize()
 
 
     Task { @MainActor in

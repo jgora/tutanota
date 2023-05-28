@@ -23,6 +23,7 @@ import androidx.annotation.MainThread
 import androidx.annotation.RequiresPermission
 import androidx.browser.customtabs.CustomTabsIntent
 import androidx.core.content.ContextCompat
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.ViewCompat.setSystemGestureExclusionRects
 import androidx.core.view.doOnLayout
 import androidx.fragment.app.FragmentActivity
@@ -134,7 +135,10 @@ class MainActivity : FragmentActivity() {
 
 		themeFacade.applyCurrentTheme()
 
+		installSplashScreen()
+
 		super.onCreate(savedInstanceState)
+		actionBar?.hide()
 
 		mobileFacade = MobileFacadeSendDispatcher(ipcJson, remoteBridge)
 		commonNativeFacade = CommonNativeFacadeSendDispatcher(ipcJson, remoteBridge)

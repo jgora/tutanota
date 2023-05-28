@@ -1,8 +1,8 @@
 //@bundleInto:common-min
 
-// keep in sync with LaunchHtml.js meta tag title
 import { ProgrammingError } from "./error/ProgrammingError.js"
 
+// keep in sync with LaunchHtml.js meta tag title
 export const LOGIN_TITLE = "Mail. Done. Right. Tutanota Login & Sign up for an Ad-free Mailbox"
 export const Mode: Record<EnvMode, EnvMode> = Object.freeze({
 	Browser: "Browser",
@@ -38,16 +38,18 @@ export function getApiOrigin(): string {
 }
 
 /**
- * root used for gift cards and as the webauthn registered domain
+ * root used for gift cards, referral links, and as the webauthn registered domain
  */
 export function getWebRoot(): string {
-	let origin: string
-	if (env.staticUrl) {
-		origin = env.staticUrl
-	} else {
+	if (!env.staticUrl) {
 		return location.protocol + "//" + location.hostname + (location.port ? ":" + location.port : "")
 	}
-	return origin + (origin.includes("http://") || origin.includes("localhost") || origin.includes("local.tutanota.com") ? "/client/build" : "")
+
+	let origin = env.staticUrl
+	if (origin.startsWith("http://localhost:") || origin.startsWith("https://local.tutanota.com:")) {
+		origin += "/client/build"
+	}
+	return origin
 }
 
 export function getPaymentWebRoot(): string {
@@ -60,9 +62,9 @@ export function getPaymentWebRoot(): string {
 	}
 }
 
-export function isTutanotaDomain(): boolean {
+export function isTutanotaDomain(hostname: string): boolean {
 	// *.tutanota.com or without dots (e.g. localhost). otherwise it is a custom domain
-	return location.hostname.endsWith("tutanota.com") || location.hostname.indexOf(".") === -1
+	return hostname.endsWith("tutanota.com") || hostname.indexOf(".") === -1
 }
 
 export function isIOSApp(): boolean {

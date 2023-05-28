@@ -9,6 +9,7 @@ import { Keys, TabIndex } from "../../api/common/TutanotaConstants"
 import { isKeyPressed } from "../../misc/KeyManager"
 
 type SanitizerFn = (html: string, isPaste: boolean) => DocumentFragment
+export type ImagePasteEvent = CustomEvent<{ clipboardData: DataTransfer }>
 export type Style = "b" | "i" | "u" | "c" | "a"
 export type Alignment = "left" | "center" | "right" | "justify"
 export type Listing = "ol" | "ul"
@@ -117,6 +118,7 @@ export class Editor implements ImageHandler, Component {
 				createList(blocks, /^\*\s$/, false) // create an unordered list if a line is started with '* '
 			}
 		})
+
 		this.squire = squire
 
 		// Suppress paste events if pasting while disabled

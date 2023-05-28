@@ -20,7 +20,6 @@ import {
 	WhitelabelConfigTypeRef,
 } from "../../api/entities/sys/TypeRefs.js"
 import { getCustomMailDomains, getWhitelabelDomain } from "../../api/common/utils/Utils"
-import { logins } from "../../api/main/LoginController"
 import { InfoLink, lang } from "../../misc/LanguageViewModel"
 import { FeatureType, OperationType } from "../../api/common/TutanotaConstants"
 import { progressIcon } from "../../gui/base/Icon"
@@ -33,7 +32,6 @@ import { isWhitelabelActive } from "../../subscription/SubscriptionUtils"
 import { GENERATED_MAX_ID } from "../../api/common/utils/EntityUtils"
 import { WhitelabelBrandingDomainSettings } from "./WhitelabelBrandingDomainSettings"
 import { WhitelabelThemeSettings } from "./WhitelabelThemeSettings"
-import type { WhitelabelImprintAndPrivacySettingsAttrs } from "./WhitelabelImprintAndPrivacySettings"
 import { WhitelabelImprintAndPrivacySettings } from "./WhitelabelImprintAndPrivacySettings"
 import { WhitelabelRegistrationSettings, WhitelabelRegistrationSettingsAttrs } from "./WhitelabelRegistrationSettings"
 import { WhitelabelCustomMetaTagsSettings, WhitelabelCustomMetaTagsSettingsAttrs } from "./WhitelabelCustomMetaTagsSettings"
@@ -48,6 +46,7 @@ import { EntityClient } from "../../api/common/EntityClient"
 import { locator } from "../../api/main/MainLocator"
 import { SelectorItem, SelectorItemList } from "../../gui/base/DropDownSelector.js"
 import { BrandingDomainService } from "../../api/entities/sys/Services"
+import { LoginController } from "../../api/main/LoginController.js"
 
 assertMainOrNode()
 
@@ -61,16 +60,14 @@ export class WhitelabelSettingsViewer implements UpdatableSettingsViewer {
 	private _customerProperties: LazyLoaded<CustomerProperties>
 	private _lastBooking: Booking | null
 	private _entityClient: EntityClient
+	private _logins: LoginController
 
-	constructor(entityClient: EntityClient) {
+	constructor(entityClient: EntityClient, logins: LoginController) {
 		this.view = this.view.bind(this)
 		this._entityClient = entityClient
-		this._customer = new LazyLoaded(() => {
-			return locator.entityClient.load(CustomerTypeRef, neverNull(logins.getUserController().user.customer))
-		})
-		this._customerInfo = new LazyLoaded(() => {
-			return this._customer.getAsync().then((customer) => locator.entityClient.load(CustomerInfoTypeRef, customer.customerInfo))
-		})
+		this._logins = logins
+		this._customer = new LazyLoaded(() => locator.logins.getUserController().loadCustomer())
+		this._customerInfo = new LazyLoaded(() => locator.logins.getUserController().loadCustomerInfo())
 		this._customerProperties = new LazyLoaded(() =>
 			this._customer.getAsync().then((customer) => locator.entityClient.load(CustomerPropertiesTypeRef, neverNull(customer.properties))),
 		)
@@ -259,6 +256,7 @@ export class WhitelabelSettingsViewer implements UpdatableSettingsViewer {
 		const whitelabelActive = isWhitelabelActive(this._lastBooking)
 		const whitelabelStatusSettingsAttrs = {
 			isWhitelabelActive: whitelabelActive,
+			logins: this._logins,
 		}
 		return m(WhitelabelStatusSettings, whitelabelStatusSettingsAttrs)
 	}

@@ -73,6 +73,7 @@ export class UpgradeSubscriptionPage implements WizardPageN<UpgradeSubscriptionD
 			m(SubscriptionSelector, {
 				options: data.options,
 				campaignInfoTextId: data.campaignInfoTextId,
+				referralCodeMsg: data.referralCodeMsg,
 				boxWidth: 230,
 				boxHeight: 270,
 				isInitialUpgrade: data.upgradeType !== UpgradeType.Switch,
@@ -275,6 +276,6 @@ export class UpgradeSubscriptionPageAttrs implements WizardPageAttrs<UpgradeSubs
 	}
 
 	isEnabled(): boolean {
-		return isTutanotaDomain() && !(isApp() && client.isIos())
+		return isTutanotaDomain(location.hostname) && !(isApp() && client.isIos())
 	}
 }

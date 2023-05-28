@@ -10,7 +10,7 @@ import { showProgressDialog } from "../gui/dialogs/ProgressDialog"
 import { windowFacade } from "../misc/WindowFacade"
 import { DeviceType } from "../misc/ClientConstants"
 import { Button, ButtonType } from "../gui/base/Button.js"
-import { BaseHeaderAttrs, header } from "../gui/Header.js"
+import { BaseHeaderAttrs } from "../gui/Header.js"
 import { AriaLandmarks, landmarkAttrs, liveDataAttrs } from "../gui/AriaUtils"
 import { DisplayMode, LoginState, LoginViewModel } from "./LoginViewModel"
 import { LoginForm } from "./LoginForm"
@@ -23,6 +23,7 @@ import { IconButton } from "../gui/base/IconButton.js"
 import { showLogsDialog } from "./LoginLogDialog.js"
 import { BaseTopLevelView } from "../gui/BaseTopLevelView.js"
 import { TopLevelAttrs, TopLevelView } from "../TopLevelView.js"
+import { locator } from "../api/main/MainLocator.js"
 
 assertMainOrNode()
 
@@ -72,15 +73,16 @@ export class LoginView extends BaseTopLevelView implements TopLevelView<LoginVie
 				},
 			},
 			[
-				m(header, {
+				m(locator.header, {
 					viewSlider: null,
 					...attrs.header,
 				}),
 				m(
 					".flex-grow.flex-center.scroll",
 					m(
-						".flex-grow-shrink-auto.max-width-s.pt.plr-l" + landmarkAttrs(AriaLandmarks.Main, lang.get("login_label")),
+						".flex-grow-shrink-auto.max-width-s.pt.plr-l",
 						{
+							...landmarkAttrs(AriaLandmarks.Main, lang.get("login_label")),
 							oncreate: (vnode) => {
 								;(vnode.dom as HTMLElement).focus()
 							},
@@ -89,7 +91,7 @@ export class LoginView extends BaseTopLevelView implements TopLevelView<LoginVie
 							this.viewModel.displayMode === DisplayMode.Credentials || this.viewModel.displayMode === DisplayMode.DeleteCredentials
 								? this._renderCredentialsSelector()
 								: this._renderLoginForm(),
-							!(isApp() || isDesktop()) && isTutanotaDomain() ? this._renderAppButtons() : null,
+							!(isApp() || isDesktop()) && isTutanotaDomain(location.hostname) ? this._renderAppButtons() : null,
 							this._anyMoreItemVisible() ? this._renderOptionsExpander() : null,
 							renderInfoLinks(),
 						],
@@ -198,7 +200,7 @@ export class LoginView extends BaseTopLevelView implements TopLevelView<LoginVie
 	}
 
 	_signupLinkVisible(): boolean {
-		return this.viewModel.displayMode === DisplayMode.Form && (isTutanotaDomain() || getWhitelabelRegistrationDomains().length > 0)
+		return this.viewModel.displayMode === DisplayMode.Form && (isTutanotaDomain(location.hostname) || getWhitelabelRegistrationDomains().length > 0)
 	}
 
 	_loginAnotherLinkVisible(): boolean {
@@ -218,7 +220,7 @@ export class LoginView extends BaseTopLevelView implements TopLevelView<LoginVie
 	}
 
 	_recoverLoginVisible(): boolean {
-		return isTutanotaDomain()
+		return isTutanotaDomain(location.hostname)
 	}
 
 	_anyMoreItemVisible(): boolean {
@@ -273,7 +275,7 @@ export class LoginView extends BaseTopLevelView implements TopLevelView<LoginVie
 
 	_renderCredentialsSelector(): Children {
 		return [
-			m(".small.center.statusTextColor.pt" + liveDataAttrs(), lang.getMaybeLazy(this.viewModel.helpText)),
+			m(".small.center.statusTextColor.pt", liveDataAttrs(), lang.getMaybeLazy(this.viewModel.helpText)),
 			m(CredentialsSelector, {
 				credentials: this.viewModel.getSavedCredentials(),
 				onCredentialsSelected: async (c) => {

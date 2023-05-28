@@ -2,6 +2,8 @@ import Foundation
 
 typealias Base64 = String
 
+/// Alarm notification as received from the server. Also peristed.
+/// Contains both signaling about the event (opeartion) and the payload itself
 public struct EncryptedAlarmNotification : Codable {
   let operation: Operation
   let summary: Base64
@@ -25,7 +27,7 @@ extension EncryptedAlarmNotification: Hashable {
   }
 }
 
-struct AlarmNotification {
+struct AlarmNotification : Equatable {
   let operation: Operation
   let summary: String
   let eventStart: Date
@@ -36,6 +38,12 @@ struct AlarmNotification {
 }
 
 extension AlarmNotification {
+  var identifier: String {
+    get {
+      alarmInfo.alarmIdentifer
+    }
+  }
+  
   init(encrypted: EncryptedAlarmNotification, sessionKey: Key) throws {
     let repeatRule: RepeatRule?
     if let encRepeatRule = encrypted.repeatRule {
