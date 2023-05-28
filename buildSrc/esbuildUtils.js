@@ -1,8 +1,8 @@
 import { getNativeLibModulePath } from "./nativeLibraryProvider.js"
 import fs from "fs-extra"
-import path from "path"
+import path from "node:path"
 import { dependencyMap } from "./RollupConfig.js"
-import { esbuildPluginAliasPath } from "esbuild-plugin-alias-path"
+import { aliasPath as esbuildPluginAliasPath } from "esbuild-plugin-alias-path"
 
 /**
  * Little plugin that obtains compiled keytar, copies it to dstPath and sets the path to nativeBindingPath.

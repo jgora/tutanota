@@ -18,8 +18,9 @@ import type { LoginController } from "../api/main/LoginController"
 import type { Group } from "../api/entities/sys/TypeRefs.js"
 import { ListColumnWrapper } from "../gui/ListColumnWrapper"
 import { KnowledgeBaseEntryView } from "../knowledgebase/view/KnowledgeBaseEntryView"
-import { promiseMap } from "@tutao/tutanota-utils"
+import { NBSP, promiseMap } from "@tutao/tutanota-utils"
 import { assertMainOrNode } from "../api/common/Env"
+import { SelectableRowContainer, SelectableRowSelectedSetter } from "../gui/SelectableRowContainer.js"
 
 assertMainOrNode()
 
@@ -106,14 +107,17 @@ export class KnowledgeBaseListView implements UpdatableSettingsViewer {
 			{
 				headerContent: this.userCanEdit()
 					? m(
-							".plr-l.mr-negative-s.align-self-end",
-							m(Button, {
-								label: "addEntry_label",
-								type: ButtonType.Primary,
-								click: () => {
-									showKnowledgeBaseEditor(null, this._templateGroupRoot)
-								},
-							}),
+							".flex.flex-end.center-vertically.plr-l.list-border-bottom",
+							m(
+								".mr-negative-s",
+								m(Button, {
+									label: "addEntry_label",
+									type: ButtonType.Primary,
+									click: () => {
+										showKnowledgeBaseEditor(null, this._templateGroupRoot)
+									},
+								}),
+							),
 					  )
 					: null,
 			},
@@ -147,37 +151,36 @@ export class KnowledgeBaseListView implements UpdatableSettingsViewer {
 }
 
 export class KnowledgeBaseRow implements VirtualRow<KnowledgeBaseEntry> {
-	top: number
+	top: number = 0
 	domElement: HTMLElement | null = null
 	entity: KnowledgeBaseEntry | null = null
-	private _domEntryTitle!: HTMLElement
-
-	constructor() {
-		this.top = 0
-	}
+	private entryTitleDom!: HTMLElement
+	private selectionUpdater!: SelectableRowSelectedSetter
 
 	update(entry: KnowledgeBaseEntry, selected: boolean): void {
 		if (!this.domElement) {
 			return
 		}
 
-		if (selected) {
-			this.domElement.classList.add("row-selected")
-		} else {
-			this.domElement.classList.remove("row-selected")
-		}
+		this.selectionUpdater(selected, false)
 
-		this._domEntryTitle.textContent = entry.title
+		this.entryTitleDom.textContent = entry.title
 	}
 
 	render(): Children {
-		return [
-			m(".top", [
-				m(".name.text-ellipsis", {
-					oncreate: (vnode) => (this._domEntryTitle = vnode.dom as HTMLElement),
+		return m(
+			SelectableRowContainer,
+			{
+				onSelectedChangeRef: (updater) => (this.selectionUpdater = updater),
+			},
+			m(".flex.col.flex-grow", [
+				m(".text-ellipsis", {
+					oncreate: (vnode) => (this.entryTitleDom = vnode.dom as HTMLElement),
 				}),
+				// to create a second row
+				m(".smaller.mt-xxs", NBSP),
 			]),
-		]
+		)
 	}
 }
 

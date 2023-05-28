@@ -12,7 +12,7 @@ import { showTemplateEditor } from "./TemplateEditor"
 import type { EmailTemplate, TemplateGroupRoot } from "../api/entities/tutanota/TypeRefs.js"
 import { createEmailTemplate, createEmailTemplateContent, EmailTemplateTypeRef } from "../api/entities/tutanota/TypeRefs.js"
 import { EntityClient } from "../api/common/EntityClient"
-import { getElementId, isSameId } from "../api/common/utils/EntityUtils"
+import { GENERATED_MAX_ID, getElementId, isSameId } from "../api/common/utils/EntityUtils"
 import { TEMPLATE_SHORTCUT_PREFIX } from "../templates/model/TemplatePopupModel"
 import { hasCapabilityOnGroup } from "../sharing/GroupUtils"
 import { OperationType, ShareCapability } from "../api/common/TutanotaConstants"
@@ -21,6 +21,7 @@ import type { LoginController } from "../api/main/LoginController"
 import { ListColumnWrapper } from "../gui/ListColumnWrapper"
 import { promiseMap } from "@tutao/tutanota-utils"
 import { assertMainOrNode } from "../api/common/Env"
+import { SelectableRowContainer, SelectableRowSelectedSetter } from "../gui/SelectableRowContainer.js"
 
 assertMainOrNode()
 
@@ -46,8 +47,14 @@ export class TemplateListView implements UpdatableSettingsViewer {
 		const listConfig: ListConfig<EmailTemplate, TemplateRow> = {
 			rowHeight: size.list_row_height,
 			fetch: async (startId, count) => {
-				const items = await this._entityClient.loadRange(EmailTemplateTypeRef, this.templateListId(), startId, count, true)
-				return { items, complete: items.length < count }
+				// fetch works like in ContactListView and KnowledgeBaseListView, because we have a custom sort order there too
+				if (startId === GENERATED_MAX_ID) {
+					// load all entries at once to apply custom sort order
+					const allEntries = await this._entityClient.loadAll(EmailTemplateTypeRef, this.templateListId())
+					return { items: allEntries, complete: true }
+				} else {
+					throw new Error("fetch template entry called for specific start id")
+				}
 			},
 			loadSingle: (elementId) => {
 				return this._entityClient.load<EmailTemplate>(EmailTemplateTypeRef, [this.templateListId(), elementId])
@@ -91,9 +98,9 @@ export class TemplateListView implements UpdatableSettingsViewer {
 			ListColumnWrapper,
 			{
 				headerContent: this.userCanEdit()
-					? m(".flex.flex-end.center-vertically.plr-l", [
+					? m(".flex.flex-end.center-vertically.plr-l.list-border-bottom", [
 							m(
-								".mr-negative-s.align-self-end",
+								".mr-negative-s",
 								m(Button, {
 									label: "addTemplate_label",
 									type: ButtonType.Primary,
@@ -183,8 +190,9 @@ export class TemplateRow implements VirtualRow<EmailTemplate> {
 	domElement: HTMLElement | null = null // set from List
 
 	entity: EmailTemplate | null = null
-	private _domTemplateTitle!: HTMLElement
-	private _domTemplateId!: HTMLElement
+	private selectionUpdater!: SelectableRowSelectedSetter
+	private titleDom!: HTMLElement
+	private idDom!: HTMLElement
 
 	constructor() {
 		this.top = 0 // is needed because of the list component
@@ -195,28 +203,28 @@ export class TemplateRow implements VirtualRow<EmailTemplate> {
 			return
 		}
 
-		if (selected) {
-			this.domElement.classList.add("row-selected")
-		} else {
-			this.domElement.classList.remove("row-selected")
-		}
+		this.selectionUpdater(selected, false)
 
-		this._domTemplateTitle.textContent = template.title
-		this._domTemplateId.textContent = TEMPLATE_SHORTCUT_PREFIX + template.tag
+		this.titleDom.textContent = template.title
+		this.idDom.textContent = TEMPLATE_SHORTCUT_PREFIX + template.tag
 	}
 
 	render(): Children {
-		return [
-			m(".top", [
-				m(".name.text-ellipsis", {
-					oncreate: (vnode) => (this._domTemplateTitle = vnode.dom as HTMLElement),
+		return m(
+			SelectableRowContainer,
+			{
+				onSelectedChangeRef: (updater) => (this.selectionUpdater = updater),
+			},
+			m(".flex.col", [
+				m("", [
+					m(".text-ellipsis.badge-line-height", {
+						oncreate: (vnode) => (this.titleDom = vnode.dom as HTMLElement),
+					}),
+				]),
+				m(".smaller.mt-xxs", {
+					oncreate: (vnode) => (this.idDom = vnode.dom as HTMLElement),
 				}),
 			]),
-			m(".bottom.flex-space-between", [
-				m("small.templateContent", {
-					oncreate: (vnode) => (this._domTemplateId = vnode.dom as HTMLElement),
-				}),
-			]),
-		]
+		)
 	}
 }

@@ -30,9 +30,10 @@ import { showUserError } from "../../misc/ErrorHandlerImpl"
 import { isNewMailActionAvailable } from "../../gui/nav/NavFunctions"
 import { CancelledError } from "../../api/common/error/CancelledError"
 import { MailViewerHeader } from "./MailViewerHeader.js"
-import { editDraft, mailViewerPadding, showHeaderDialog } from "./MailViewerUtils.js"
+import { editDraft, showHeaderDialog } from "./MailViewerUtils.js"
 import { ToggleButton } from "../../gui/base/ToggleButton.js"
 import { locator } from "../../api/main/MainLocator.js"
+import { responsiveCardHMargin, responsiveCardHPadding } from "../../gui/cards.js"
 
 assertMainOrNode()
 // map of inline image cid to InlineImageReference
@@ -86,7 +87,6 @@ export class MailViewer implements Component<MailViewerAttrs> {
 
 	private readonly shortcuts: Array<Shortcut>
 
-	private scrollAnimation: Promise<void> | null = null
 	private scrollDom: HTMLElement | null = null
 
 	private domBodyDeferred: DeferredObject<HTMLElement> = defer()
@@ -160,12 +160,13 @@ export class MailViewer implements Component<MailViewerAttrs> {
 	view(vnode: Vnode<MailViewerAttrs>): Children {
 		this.handleContentBlockingOnRender()
 		return [
-			m(".mail-viewer" + ".overflow-x-hidden", [
+			m(".mail-viewer.overflow-x-hidden", [
 				this.renderMailHeader(vnode.attrs),
+				this.renderMailSubject(vnode.attrs),
 				m(
-					".flex-grow.mlr-safe-inset.scroll-x.pt.pb.border-radius-big" + (this.viewModel.isContrastFixNeeded() ? ".bg-white.content-black" : " "),
+					".flex-grow.scroll-x.pt.pb.border-radius-big" + (this.viewModel.isContrastFixNeeded() ? ".bg-white.content-black" : " "),
 					{
-						class: mailViewerPadding(),
+						class: responsiveCardHPadding(),
 						oncreate: (vnode) => {
 							this.scrollDom = vnode.dom as HTMLElement
 						},
@@ -175,6 +176,10 @@ export class MailViewer implements Component<MailViewerAttrs> {
 				this.renderQuoteExpanderButton(),
 			]),
 		]
+	}
+
+	private renderMailSubject(attrs: MailViewerAttrs) {
+		return m("h4.font-weight-600.mt.mb.text-break.selectable." + responsiveCardHMargin(), attrs.viewModel.getSubject())
 	}
 
 	/**

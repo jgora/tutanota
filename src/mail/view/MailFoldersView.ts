@@ -17,6 +17,10 @@ import { ButtonColor } from "../../gui/base/Button.js"
 import { ButtonSize } from "../../gui/base/ButtonSize.js"
 import { MailFolderType } from "../../api/common/TutanotaConstants.js"
 import { isSpamOrTrashFolder } from "../../api/common/mail/CommonMailUtils.js"
+import { Icon } from "../../gui/base/Icon.js"
+import { theme } from "../../gui/theme.js"
+import { lang } from "../../misc/LanguageViewModel.js"
+import { px, size } from "../../gui/size.js"
 
 export interface MailFolderViewAttrs {
 	mailboxDetail: MailboxDetail
@@ -65,6 +69,7 @@ export class MailFoldersView implements Component<MailFolderViewAttrs> {
 					this.renderFolderTree(customSystems, groupCounters, attrs, path).children,
 				),
 			)
+			children.push(this.renderAddFolderButtonRow(attrs))
 		}
 		return children
 	}
@@ -106,10 +111,9 @@ export class MailFoldersView implements Component<MailFolderViewAttrs> {
 						count: attrs.inEditMode ? 0 : summedCount,
 						button,
 						icon: getFolderIcon(system.folder),
-						rightButton:
-							attrs.inEditMode && !(system.folder.folderType === MailFolderType.TRASH || system.folder.folderType === MailFolderType.SPAM)
-								? this.createFolderMoreButton(system.folder, attrs)
-								: null,
+						rightButton: !(system.folder.folderType === MailFolderType.TRASH || system.folder.folderType === MailFolderType.SPAM)
+							? this.createFolderMoreButton(system.folder, attrs)
+							: null,
 						expanded: hasChildren ? currentExpansionState : null,
 						indentationLevel: Math.min(indentationLevel, MAX_FOLDER_INDENT_LEVEL),
 						onExpanderClick: hasChildren ? () => attrs.onFolderExpanded(system.folder, currentExpansionState) : noOp,
@@ -126,6 +130,32 @@ export class MailFoldersView implements Component<MailFolderViewAttrs> {
 			result.children.push(render)
 		}
 		return result
+	}
+
+	private renderAddFolderButtonRow(attrs: MailFolderViewAttrs): Child {
+		// This button needs to fill the whole role, but is not a navigation button (so IconButton or NavButton weren't appropriate)
+		return m(
+			"button.folder-row.flex.flex-row.mlr-button.border-radius-small.state-bg.button-height",
+			{
+				key: "addFolder",
+				style: {
+					color: theme.navigation_button,
+					width: `calc(100% - ${px(size.hpad_button * 2)})`,
+				},
+				onclick: () => {
+					attrs.onShowFolderAddEditDialog(attrs.mailboxDetail.mailGroup._id, null, null)
+				},
+			},
+			m(Icon, {
+				icon: Icons.Add,
+				large: true,
+				style: {
+					fill: theme.navigation_button,
+				},
+				class: "plr-button",
+			}),
+			m("span.label.plr-button", lang.get("addFolder_action")),
+		)
 	}
 
 	private getTotalFolderCounter(counters: Counters, system: FolderSubtree): number {
@@ -198,7 +228,6 @@ export class MailFoldersView implements Component<MailFolderViewAttrs> {
 
 	private renderEditFoldersButton(attrs: MailFolderViewAttrs): Child {
 		return m(IconButton, {
-			// FIXME another translation maybe?
 			title: "edit_action",
 			click: () => attrs.onEditMailbox(),
 			icon: Icons.Edit,

@@ -2,7 +2,7 @@ import m from "mithril"
 import stream from "mithril/stream"
 import Stream from "mithril/stream"
 import { containsEventOfType } from "../../api/common/utils/Utils"
-import { assertNotNull, groupBy, lazyMemoized, neverNull, noOp, ofClass, splitInChunks } from "@tutao/tutanota-utils"
+import { assertNotNull, groupBy, lazyMemoized, neverNull, noOp, ofClass, promiseMap, splitInChunks } from "@tutao/tutanota-utils"
 import type { Mail, MailBox, MailboxGroupRoot, MailboxProperties, MailFolder } from "../../api/entities/tutanota/TypeRefs.js"
 import {
 	createMailAddressProperties,
@@ -31,10 +31,10 @@ import { Notifications } from "../../gui/Notifications"
 import { findAndApplyMatchingRule } from "./InboxRuleHandler"
 import { EntityClient } from "../../api/common/EntityClient"
 import { elementIdPart, GENERATED_MAX_ID, getElementId, getListId, isSameId, listIdPart } from "../../api/common/utils/EntityUtils"
-import { NotFoundError, PreconditionFailedError } from "../../api/common/error/RestError"
+import { LockedError, NotFoundError, PreconditionFailedError } from "../../api/common/error/RestError"
 import type { MailFacade } from "../../api/worker/facades/lazy/MailFacade.js"
 import { LoginController } from "../../api/main/LoginController.js"
-import { getEnabledMailAddressesWithUser } from "./MailUtils.js"
+import { areParticipantsRestricted, getEnabledMailAddressesWithUser } from "./MailUtils.js"
 import { ProgrammingError } from "../../api/common/error/ProgrammingError.js"
 import { WebsocketConnectivityModel } from "../../misc/WebsocketConnectivityModel.js"
 import { FolderSystem } from "../../api/common/mail/FolderSystem.js"
@@ -230,7 +230,13 @@ export class MailModel {
 	 * Finally deletes all given mails. Caller must ensure that mails are only from one folder
 	 */
 	async _moveMails(mails: Mail[], targetMailFolder: MailFolder): Promise<void> {
-		let moveMails = mails.filter((m) => m._id[0] !== targetMailFolder.mails && targetMailFolder._ownerGroup === m._ownerGroup) // prevent moving mails between mail boxes.
+		let moveMails = mails.filter(
+			(m) =>
+				m._id[0] !== targetMailFolder.mails &&
+				targetMailFolder._ownerGroup === m._ownerGroup &&
+				// there is a chance to get here without going through that check when using multiselect, so checking again here.
+				!areParticipantsRestricted(m),
+		) // prevent moving mails between mail boxes.
 
 		// Do not move if target is the same as the current mailFolder
 		const sourceMailFolder = this.getMailFolder(getListId(mails[0]))
@@ -265,6 +271,27 @@ export class MailModel {
 				console.log("Move mail: no mail folder for list id", listId)
 			}
 		}
+	}
+
+	isMovingMailsAllowed(): boolean {
+		return this.logins.getUserController().isInternalUser()
+	}
+
+	isExportingMailsAllowed(): boolean {
+		return !this.logins.isEnabled(FeatureType.DisableMailExport)
+	}
+
+	async markMails(mails: readonly Mail[], unread: boolean): Promise<void> {
+		await promiseMap(
+			mails,
+			async (mail) => {
+				if (mail.unread !== unread) {
+					mail.unread = unread
+					return this.entityClient.update(mail).catch(ofClass(NotFoundError, noOp)).catch(ofClass(LockedError, noOp))
+				}
+			},
+			{ concurrency: 5 },
+		)
 	}
 
 	/**

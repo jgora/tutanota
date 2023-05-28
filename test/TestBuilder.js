@@ -1,11 +1,10 @@
 import * as env from "../buildSrc/env.js"
 import fs from "fs-extra"
-import path from "path"
+import path from "node:path"
 import { renderHtml } from "../buildSrc/LaunchHtml.js"
-import { $ } from "zx"
 import { build as esbuild } from "esbuild"
 import { getTutanotaAppVersion, runStep, sh, writeFile } from "../buildSrc/buildUtils.js"
-import { esbuildPluginAliasPath } from "esbuild-plugin-alias-path"
+import { aliasPath as esbuildPluginAliasPath } from "esbuild-plugin-alias-path"
 import { keytarNativePlugin, libDeps, preludeEnvPlugin, sqliteNativePlugin } from "../buildSrc/esbuildUtils.js"
 import { buildPackages } from "../buildSrc/packageBuilderFunctions.js"
 

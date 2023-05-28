@@ -2,34 +2,31 @@ import m, { Children, Vnode } from "mithril"
 import { ViewSlider } from "../../gui/nav/ViewSlider.js"
 import { ColumnType, ViewColumn } from "../../gui/base/ViewColumn"
 import { lang } from "../../misc/LanguageViewModel"
-import type { ButtonAttrs } from "../../gui/base/Button.js"
-import { Button, ButtonColor, ButtonType } from "../../gui/base/Button.js"
+import { ButtonType } from "../../gui/base/Button.js"
 import { isSelectedPrefix } from "../../gui/base/NavButton.js"
 import { Dialog } from "../../gui/base/Dialog"
 import { FeatureType, Keys, MailFolderType } from "../../api/common/TutanotaConstants"
-import { BaseHeaderAttrs } from "../../gui/Header.js"
+import { AppHeaderAttrs, Header } from "../../gui/Header.js"
 import type { Mail, MailFolder } from "../../api/entities/tutanota/TypeRefs.js"
 import { assertNotNull, defer, getFirstOrThrow, noOp, ofClass } from "@tutao/tutanota-utils"
 import { MailListView } from "./MailListView"
 import { assertMainOrNode, isApp, isDesktop } from "../../api/common/Env"
 import type { Shortcut } from "../../misc/KeyManager"
 import { keyManager } from "../../misc/KeyManager"
-import { getMultiMailViewerActionButtonAttrs, MultiMailViewer } from "./MultiMailViewer"
+import { getMailSelectionMessage, MultiMailViewer } from "./MultiMailViewer"
 import { Icons } from "../../gui/base/icons/Icons"
 import { PreconditionFailedError } from "../../api/common/error/RestError"
 import { showProgressDialog } from "../../gui/dialogs/ProgressDialog"
-import { canDoDragAndDropExport, getFolderName, getMailboxName, markMails } from "../model/MailUtils"
+import { canDoDragAndDropExport, getFolderName, getMailboxName } from "../model/MailUtils"
 import type { MailboxDetail } from "../model/MailModel"
 import { locator } from "../../api/main/MainLocator"
-import { ActionBar } from "../../gui/base/ActionBar"
-import { MultiSelectionBar } from "../../gui/base/MultiSelectionBar"
 import { PermissionError } from "../../api/common/error/PermissionError"
 import { MAIL_PREFIX, navButtonRoutes, throttleRoute } from "../../misc/RouteChange"
 import { styles } from "../../gui/styles"
-import { size } from "../../gui/size"
+import { px, size } from "../../gui/size"
 import { UserError } from "../../api/main/UserError"
 import { showUserError } from "../../misc/ErrorHandlerImpl"
-import { archiveMails, moveMails, moveToInbox, promptAndDeleteMails, showMoveMailsDropdown } from "./MailGuiUtils"
+import { archiveMails, getConversationTitle, moveMails, moveToInbox, promptAndDeleteMails, showMoveMailsDropdown } from "./MailGuiUtils"
 import { getElementId, isSameId } from "../../api/common/utils/EntityUtils"
 import { isNewMailActionAvailable } from "../../gui/nav/NavFunctions"
 import { CancelledError } from "../../api/common/error/CancelledError"
@@ -48,9 +45,20 @@ import { SidebarSection } from "../../gui/SidebarSection.js"
 import { EditFoldersDialog } from "./EditFoldersDialog.js"
 import { TopLevelAttrs, TopLevelView } from "../../TopLevelView.js"
 import { ConversationViewModel } from "./ConversationViewModel.js"
-import { ConversationViewer } from "./ConversationViewer.js"
+import { conversationCardMargin, ConversationViewer } from "./ConversationViewer.js"
 import type { DesktopSystemFacade } from "../../native/common/generatedipc/DesktopSystemFacade.js"
 import { CreateMailViewerOptions } from "./MailViewer.js"
+import { IconButton } from "../../gui/base/IconButton.js"
+import { BackgroundColumnLayout } from "../../gui/BackgroundColumnLayout.js"
+import { MailViewerActions } from "./MailViewerToolbar.js"
+import { theme } from "../../gui/theme.js"
+import { MobileMailMultiselectionActionBar } from "./MobileMailMultiselectionActionBar.js"
+import { SelectAllCheckbox } from "../../gui/SelectAllCheckbox.js"
+import { DesktopListToolbar, DesktopViewerToolbar } from "../../gui/DesktopToolbars.js"
+import { EnterMultiselectIconButton } from "../../gui/EnterMultiselectIconButton.js"
+import { MobileHeader } from "../../gui/MobileHeader.js"
+import { LazySearchBar } from "../../misc/LazySearchBar.js"
+import { MultiselectMobileHeader } from "../../gui/MultiselectMobileHeader.js"
 
 assertMainOrNode()
 
@@ -72,7 +80,7 @@ export interface MailViewCache {
 export interface MailViewAttrs extends TopLevelAttrs {
 	drawerAttrs: DrawerMenuAttrs
 	cache: MailViewCache
-	header: BaseHeaderAttrs
+	header: AppHeaderAttrs
 	desktopSystemFacade: DesktopSystemFacade | null
 }
 
@@ -99,6 +107,7 @@ export class MailView extends BaseTopLevelView implements TopLevelView<MailViewA
 
 	private expandedState: Set<Id>
 	private mailboxSubscription: Stream<void> | null = null
+	private loadingAllForMailList: Id | null = null
 
 	get conversationViewModel(): ConversationViewModel | null {
 		return this.cache.conversationViewModel
@@ -124,52 +133,58 @@ export class MailView extends BaseTopLevelView implements TopLevelView<MailViewA
 		this.folderColumn = this.createFolderColumn(null, vnode.attrs.drawerAttrs)
 		this.listColumn = new ViewColumn(
 			{
-				view: () => m(".list-column", [this.cache.mailList ? m(this.cache.mailList, { mailView: this }) : null]),
+				view: () => {
+					const mailList = this.cache.mailList
+					return m(BackgroundColumnLayout, {
+						backgroundColor: theme.navigation_bg,
+						desktopToolbar: () => m(DesktopListToolbar, mailList ? m(SelectAllCheckbox, { list: mailList.list }) : null),
+						columnLayout: mailList
+							? m(
+									"",
+									{
+										style: {
+											marginBottom: px(conversationCardMargin),
+										},
+									},
+									m(mailList, { mailView: this }),
+							  )
+							: null,
+						mobileHeader: () =>
+							mailList && (mailList.list.isMobileMultiselectActive() || mailList.list.isMultiSelectActive())
+								? m(MultiselectMobileHeader, { list: mailList.list, message: getMailSelectionMessage(mailList.list.getSelectedEntities()) })
+								: m(MobileHeader, {
+										...vnode.attrs.header,
+										title: this.listColumn.getTitle(),
+										columnType: "first",
+										actions: m(EnterMultiselectIconButton, { list: mailList?.list }),
+										primaryAction: () => this.renderHeaderRightView(),
+										viewSlider: this.viewSlider,
+								  }),
+					})
+				},
 			},
 			ColumnType.Background,
 			size.second_col_min_width,
 			size.second_col_max_width,
-			() => {
-				return this.cache.selectedFolder ? getFolderName(this.cache.selectedFolder) : ""
-			},
+			() => (this.cache.selectedFolder ? getFolderName(this.cache.selectedFolder) : ""),
 		)
-
-		const mailColumnTitle = () => {
-			const selectedEntities = this.cache.mailList ? this.cache.mailList.list.getSelectedEntities() : []
-
-			if (selectedEntities.length > 0) {
-				return selectedEntities[0].subject
-			} else {
-				return ""
-			}
-		}
 
 		this.mailColumn = new ViewColumn(
 			{
 				view: () => {
-					const multiMailViewerAttrs = {
-						selectedEntities: this.cache.mailList?.list.getSelectedEntities() ?? [],
-						selectNone: () => {
-							this.cache.mailList?.list.selectNone()
-						},
+					const viewModel = this.cache.conversationViewModel
+					if (viewModel) {
+						return this.renderSingleMailViewer(vnode.attrs.header, viewModel)
+					} else {
+						return this.renderMultiMailViewer(vnode.attrs.header)
 					}
-					return m(
-						".mail",
-						this.conversationViewModel != null
-							? m(ConversationViewer, {
-									// Re-create the whole viewer and its vnode tree if email has changed
-									key: getElementId(this.conversationViewModel.primaryMail),
-									viewModel: this.conversationViewModel,
-							  })
-							: m(MultiMailViewer, multiMailViewerAttrs),
-					)
 				},
 			},
 			ColumnType.Background,
 			size.third_col_min_width,
 			size.third_col_max_width,
-			mailColumnTitle,
-			() => lang.get("email_label") + " " + mailColumnTitle(),
+			undefined,
+			() => lang.get("email_label"),
 		)
 		this.viewSlider = new ViewSlider([this.folderColumn, this.listColumn, this.mailColumn], "MailView")
 		this.viewSlider.focusedColumn = this.viewSlider.columns[0]
@@ -198,6 +213,9 @@ export class MailView extends BaseTopLevelView implements TopLevelView<MailViewA
 		}
 
 		this.onremove = () => {
+			// cancel the loading if we are destroyed
+			this.loadingAllForMailList = null
+
 			this.countersStream?.end(true)
 			this.countersStream = null
 
@@ -205,6 +223,73 @@ export class MailView extends BaseTopLevelView implements TopLevelView<MailViewA
 			// this is safe to pause because if we are recreated we will subscribe and get a new value right away
 			this.mailboxSubscription?.end(true)
 		}
+	}
+
+	private mailViewerSingleActions(viewModel: ConversationViewModel) {
+		return m(MailViewerActions, {
+			mailModel: viewModel.primaryViewModel().mailModel,
+			mailViewerViewModel: viewModel.primaryViewModel(),
+			mails: [viewModel.primaryMail],
+		})
+	}
+
+	private renderSingleMailViewer(header: AppHeaderAttrs, viewModel: ConversationViewModel) {
+		return m(BackgroundColumnLayout, {
+			backgroundColor: theme.navigation_bg,
+			desktopToolbar: () => m(DesktopViewerToolbar, this.mailViewerSingleActions(viewModel)),
+			mobileHeader: () =>
+				m(MobileHeader, {
+					...header,
+					viewSlider: this.viewSlider,
+					columnType: "other",
+					actions: null,
+					multicolumnActions: () => this.mailViewerSingleActions(viewModel),
+					primaryAction: () => this.renderHeaderRightView(),
+					title: getConversationTitle(viewModel),
+				}),
+			columnLayout: m(ConversationViewer, {
+				// Re-create the whole viewer and its vnode tree if email has changed
+				key: getElementId(viewModel.primaryMail),
+				viewModel: viewModel,
+			}),
+		})
+	}
+
+	private mailViewerMultiActions() {
+		return m(MailViewerActions, {
+			mailModel: locator.mailModel,
+			mails: this.cache.mailList?.list.getSelectedEntities() ?? [],
+			selectNone: () => this.cache.mailList?.list.selectNone(),
+		})
+	}
+
+	private renderMultiMailViewer(header: AppHeaderAttrs) {
+		return m(BackgroundColumnLayout, {
+			backgroundColor: theme.navigation_bg,
+			desktopToolbar: () => m(DesktopViewerToolbar, this.mailViewerMultiActions()),
+			mobileHeader: () =>
+				m(MobileHeader, {
+					actions: this.mailViewerMultiActions(),
+					primaryAction: () => this.renderHeaderRightView(),
+					viewSlider: this.viewSlider,
+					...header,
+					columnType: "other",
+				}),
+			columnLayout: m(MultiMailViewer, {
+				selectedEntities: this.cache.mailList?.list.getSelectedEntities() ?? [],
+				selectNone: () => {
+					this.cache.mailList?.list.selectNone()
+				},
+				loadAll: () => this.loadAll(),
+				stopLoadAll: () => (this.loadingAllForMailList = null),
+				loadingAll:
+					this.loadingAllForMailList != null && this.loadingAllForMailList === this.cache.mailList?.listId
+						? "loading"
+						: this.cache.mailList?.list.isLoadedCompletely()
+						? "loaded"
+						: "can_load",
+			}),
+		})
 	}
 
 	view({ attrs }: Vnode<MailViewAttrs>): Children {
@@ -245,18 +330,49 @@ export class MailView extends BaseTopLevelView implements TopLevelView<MailViewA
 				},
 			},
 			m(this.viewSlider, {
-				header: m(locator.header, {
-					headerView: this.renderHeaderView(),
+				header: m(Header, {
 					rightView: this.renderHeaderRightView(),
-					viewSlider: this.viewSlider,
+					searchBar: () =>
+						m(LazySearchBar, {
+							placeholder: lang.get("searchEmails_placeholder"),
+						}),
 					...attrs.header,
 				}),
 				bottomNav:
 					styles.isSingleColumnLayout() && this.viewSlider.focusedColumn === this.mailColumn && this.conversationViewModel
 						? m(MobileMailActionBar, { viewModel: this.conversationViewModel.primaryViewModel() })
+						: styles.isSingleColumnLayout() && this.cache.mailList?.list.isSomeMultiselectActive()
+						? m(MobileMailMultiselectionActionBar, {
+								mails: this.cache.mailList.list.getSelectedEntities(),
+								selectNone: () => this.cache.mailList?.list.selectNone(),
+								mailModel: locator.mailModel,
+						  })
 						: m(BottomNav),
 			}),
 		)
+	}
+
+	async loadAll() {
+		if (this.loadingAllForMailList != null) return
+		this.loadingAllForMailList = this.cache.mailList?.listId ?? null
+		this.cache.mailList?.list.selectAll()
+		try {
+			// use cache reference always to not capture the list when the cache is already changed
+			while (
+				this.cache.mailList &&
+				this.loadingAllForMailList &&
+				this.cache.mailList?.listId === this.loadingAllForMailList &&
+				!this.cache.mailList.list.isLoadedCompletely()
+			) {
+				const mailList = this.cache.mailList
+				// even if the list will change it will be another list so it's safe to call selectAll() still
+				await mailList.list.loadMoreItems()
+				mailList.list.selectAll()
+			}
+		} finally {
+			this.loadingAllForMailList = null
+			m.redraw()
+		}
 	}
 
 	private onUpdateMailboxDetails(mailboxDetails: MailboxDetail[]) {
@@ -295,14 +411,15 @@ export class MailView extends BaseTopLevelView implements TopLevelView<MailViewA
 	}
 
 	private renderHeaderRightView(): Children {
-		const openMailButtonAttrs: ButtonAttrs = {
-			label: "newMail_action",
-			click: () => this.showNewMailDialog().catch(ofClass(PermissionError, noOp)),
-			type: ButtonType.Action,
-			icon: () => Icons.PencilSquare,
-			colors: ButtonColor.Header,
-		}
-		return isNewMailActionAvailable() ? m(Button, openMailButtonAttrs) : null
+		return isNewMailActionAvailable()
+			? [
+					m(IconButton, {
+						title: "newMail_action",
+						click: () => this.showNewMailDialog().catch(ofClass(PermissionError, noOp)),
+						icon: Icons.PencilSquare,
+					}),
+			  ]
+			: null
 	}
 
 	_getShortcuts(): Array<Shortcut> {
@@ -775,7 +892,7 @@ export class MailView extends BaseTopLevelView implements TopLevelView<MailViewA
 			return
 		}
 		// set all selected emails to the opposite of the first email's unread state
-		return markMails(locator.entityClient, mails, !mails[0].unread)
+		await locator.mailModel.markMails(mails, !mails[0].unread)
 	}
 
 	private deleteMails(mails: Mail[]): Promise<boolean> {
@@ -808,24 +925,6 @@ export class MailView extends BaseTopLevelView implements TopLevelView<MailViewA
 		} else {
 			throw new Error(`Cannot delete mails in folder ${String(folder._id)} with type ${folder.folderType}`)
 		}
-	}
-
-	/**
-	 * Used by Header to figure out when content needs to be injected there
-	 * @returns {Children} Mithril children or null
-	 */
-	private renderHeaderView(): Children {
-		const selectedEntities = this.cache.mailList?.list.getSelectedEntities() ?? []
-		return this.viewSlider.getVisibleBackgroundColumns().length === 1 && this.cache.mailList?.list.isMobileMultiSelectionActionActive()
-			? m(
-					MultiSelectionBar,
-					{
-						selectNoneHandler: () => this.cache.mailList?.list.selectNone(),
-						text: String(selectedEntities.length),
-					},
-					m(ActionBar, { buttons: getMultiMailViewerActionButtonAttrs(selectedEntities, () => this.cache.mailList?.list.selectNone(), false) }),
-			  )
-			: null
 	}
 
 	private async showFolderAddEditDialog(mailGroupId: Id, folder: MailFolder | null, parentFolder: MailFolder | null) {

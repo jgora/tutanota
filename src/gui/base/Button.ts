@@ -160,7 +160,7 @@ export class Button implements ClassComponent<ButtonAttrs> {
 	_getStyle(a: ButtonAttrs): {} {
 		return a.type === ButtonType.Login
 			? {
-					"border-radius": px(size.border_radius_small),
+					"border-radius": px(size.border_radius),
 					"background-color": theme.content_accent,
 			  }
 			: {}
@@ -261,6 +261,10 @@ export class Button implements ClassComponent<ButtonAttrs> {
 
 		if (![ButtonType.TextBubble].includes(type)) {
 			wrapperClasses.push("plr-button")
+		}
+
+		if (ButtonType.Bubble === type) {
+			wrapperClasses.push("smaller")
 		}
 
 		wrapperClasses.push("justify-center")

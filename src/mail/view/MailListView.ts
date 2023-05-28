@@ -32,6 +32,7 @@ import { isOfflineError } from "../../api/common/utils/ErrorCheckUtils.js"
 import { FolderSystem } from "../../api/common/mail/FolderSystem.js"
 import { EntityUpdateData, isUpdateForTypeRef } from "../../api/main/EventController.js"
 import { assertSystemFolderOfType, isOfTypeOrSubfolderOf, isSpamOrTrashFolder } from "../../api/common/mail/CommonMailUtils.js"
+import { checkboxOpacity } from "../../gui/SelectableRowContainer.js"
 
 assertMainOrNode()
 const className = "mail-list"
@@ -94,7 +95,7 @@ export class MailListView implements Component<MailListViewAttrs> {
 			sortCompare: sortCompareByReverseId,
 			elementSelected: (entities, elementClicked, selectionChanged, multiSelectionActive) =>
 				this.mailView?.elementSelected(entities, elementClicked, selectionChanged, multiSelectionActive),
-			createVirtualRow: () => new MailRow(false),
+			createVirtualRow: () => new MailRow(false, (entity) => this.list.toggleMultiSelectForEntity(entity)),
 			className: className,
 			swipe: {
 				renderLeftSpacer: () =>
@@ -434,18 +435,24 @@ export class MailListView implements Component<MailListViewAttrs> {
 			m(
 				ListColumnWrapper,
 				{
-					headerContent: this.showingSpamOrTrash
-						? [
-								m(".flex.flex-column.plr-l", [
-									m(".small.flex-grow.pt", lang.get("storageDeletion_msg")),
-									m(".mr-negative-s.align-self-end", m(Button, purgeButtonAttrs)),
-								]),
-						  ]
-						: null,
+					headerContent: this.renderListHeader(purgeButtonAttrs),
 				},
 				m(this.list),
 			),
 		)
+	}
+
+	private renderListHeader(purgeButtonAttrs: ButtonAttrs): Children {
+		return m(".flex.col", [
+			this.showingSpamOrTrash
+				? [
+						m(".flex.flex-column.plr-l", [
+							m(".small.flex-grow.pt", lang.get("storageDeletion_msg")),
+							m(".mr-negative-s.align-self-end", m(Button, purgeButtonAttrs)),
+						]),
+				  ]
+				: null,
+		])
 	}
 
 	oncreate(vnode: VnodeDOM<MailListViewAttrs>) {

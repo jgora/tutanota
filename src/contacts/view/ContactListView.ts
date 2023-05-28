@@ -1,5 +1,4 @@
 import m, { Children } from "mithril"
-import stream from "mithril/stream"
 import { ContactView } from "./ContactView"
 import type { VirtualRow } from "../../gui/base/List"
 import { List } from "../../gui/base/List"
@@ -8,30 +7,35 @@ import { ContactTypeRef } from "../../api/entities/tutanota/TypeRefs.js"
 import { getContactListName } from "../model/ContactUtils"
 import { lang } from "../../misc/LanguageViewModel"
 import { NotFoundError } from "../../api/common/error/RestError"
-import { size } from "../../gui/size"
+import { px, size } from "../../gui/size"
 import { locator } from "../../api/main/MainLocator"
 import { GENERATED_MAX_ID } from "../../api/common/utils/EntityUtils"
 import { ListColumnWrapper } from "../../gui/ListColumnWrapper"
-import { DropDownSelector } from "../../gui/base/DropDownSelector.js"
 import { compareContacts } from "./ContactGuiUtils"
-import { ofClass } from "@tutao/tutanota-utils"
+import { NBSP, noOp, ofClass } from "@tutao/tutanota-utils"
 import { assertMainOrNode } from "../../api/common/Env"
+import {
+	checkboxOpacity,
+	scaleXHide,
+	scaleXShow,
+	selectableRowAnimParams,
+	SelectableRowContainer,
+	SelectableRowSelectedSetter,
+	shouldAlwaysShowMultiselectCheckbox,
+} from "../../gui/SelectableRowContainer.js"
 
 assertMainOrNode()
 const className = "contact-list"
 
 export class ContactListView {
-	listId: Id
-	contactView: ContactView
-	list: List<Contact, ContactRow>
-	view: (...args: Array<any>) => any
-	oncreate: (...args: Array<any>) => any
-	onbeforeremove: (...args: Array<any>) => any
+	readonly listId: Id
+	readonly contactView: ContactView
+	readonly list: List<Contact, ContactRow>
+	sortByFirstName = true
 
 	constructor(contactListId: Id, contactView: ContactView) {
 		this.listId = contactListId
 		this.contactView = contactView
-		const sortByFirstName = stream(true)
 		this.list = new List({
 			rowHeight: size.list_row_height,
 			fetch: async (startId, count) => {
@@ -52,10 +56,10 @@ export class ContactListView {
 					}),
 				)
 			},
-			sortCompare: (c1, c2) => compareContacts(c1, c2, sortByFirstName()),
+			sortCompare: (c1, c2) => compareContacts(c1, c2, this.sortByFirstName),
 			elementSelected: (entities, elementClicked, selectionChanged, multiSelectionActive) =>
 				contactView.elementSelected(entities, elementClicked, selectionChanged, multiSelectionActive),
-			createVirtualRow: () => new ContactRow(),
+			createVirtualRow: () => new ContactRow((entity) => this.list.toggleMultiSelectForEntity(entity)),
 			className: className,
 			swipe: {
 				renderLeftSpacer: () => [],
@@ -68,88 +72,149 @@ export class ContactListView {
 			emptyMessage: lang.get("noContacts_msg"),
 		})
 
-		this.view = (): Children => {
-			return m(
-				ListColumnWrapper,
-				{
-					headerContent: m(DropDownSelector, {
-						label: "sortBy_label",
-						selectedValue: sortByFirstName(),
-						selectionChangedHandler: sortByFirstName,
-						items: [
-							{
-								name: lang.get("firstName_placeholder"),
-								value: true,
-							},
-							{
-								name: lang.get("lastName_placeholder"),
-								value: false,
-							},
-						],
-						class: "mt-m ml mb-xs",
-						doShowBorder: false,
-					}),
-				},
-				m(this.list),
-			)
-		}
+		// old style components lose "this" ref easily
+		this.view = this.view.bind(this)
+	}
 
-		let sortModeChangedListener: stream<void>
-
-		this.oncreate = () => {
-			sortModeChangedListener = sortByFirstName.map(() => this.list.sort())
-		}
-
-		this.onbeforeremove = () => {
-			sortModeChangedListener.end(true)
-		}
+	view(): Children {
+		return m(
+			ListColumnWrapper,
+			{
+				headerContent: null,
+			},
+			m(this.list),
+		)
 	}
 }
+
+const shiftByForCheckbox = px(size.checkbox_size + size.hpad)
+const translateXShow = `translateX(${shiftByForCheckbox})`
+const translateXHide = "translateX(0)"
 
 export class ContactRow implements VirtualRow<Contact> {
 	top: number
 	domElement: HTMLElement | null = null // set from List
 
 	entity: Contact | null
-	private _domName!: HTMLElement
-	private _domAddress!: HTMLElement
+	private selectionUpdater!: SelectableRowSelectedSetter
+	private domName!: HTMLElement
+	private domAddress!: HTMLElement
+	private checkboxDom!: HTMLInputElement
+	private checkboxWasVisible = shouldAlwaysShowMultiselectCheckbox()
 
-	constructor() {
+	constructor(private readonly onSelected: (entity: Contact, selected: boolean) => unknown) {
 		this.top = 0
 		this.entity = null
 	}
 
-	update(contact: Contact, selected: boolean): void {
+	update(contact: Contact, selected: boolean, isInMultiSelect: boolean): void {
 		if (!this.domElement) {
 			return
 		}
 
-		if (selected) {
-			this.domElement.classList.add("row-selected")
-		} else {
-			this.domElement.classList.remove("row-selected")
-		}
+		this.selectionUpdater(selected, isInMultiSelect)
+		this.showCheckboxAnimated(shouldAlwaysShowMultiselectCheckbox() || isInMultiSelect)
+		checkboxOpacity(this.checkboxDom, selected)
+		this.checkboxDom.checked = selected && isInMultiSelect
 
-		this._domName.textContent = getContactListName(contact)
-		this._domAddress.textContent = contact.mailAddresses && contact.mailAddresses.length > 0 ? contact.mailAddresses[0].address : ""
+		this.domName.textContent = getContactListName(contact)
+		this.domAddress.textContent = contact.mailAddresses && contact.mailAddresses.length > 0 ? contact.mailAddresses[0].address : NBSP
 	}
 
 	/**
 	 * Only the structure is managed by mithril. We set all contents on our own (see update) in order to avoid the vdom overhead (not negligible on mobiles)
 	 */
 	render(): Children {
-		let elements = [
-			m(".top", [
-				m(".name.text-ellipsis", {
-					oncreate: (vnode) => (this._domName = vnode.dom as HTMLElement),
+		return m(
+			SelectableRowContainer,
+			{
+				oncreate: (vnode) => {
+					Promise.resolve().then(() => this.showCheckbox(shouldAlwaysShowMultiselectCheckbox()))
+				},
+				onSelectedChangeRef: (updater) => (this.selectionUpdater = updater),
+			},
+			m(".mt-xs.abs", [
+				m("input.checkbox.list-checkbox", {
+					type: "checkbox",
+					style: {
+						transformOrigin: "left",
+					},
+					onclick: (e: MouseEvent) => {
+						e.stopPropagation()
+						// e.redraw = false
+					},
+					onchange: () => {
+						this.entity && this.onSelected(this.entity, this.checkboxDom.checked)
+					},
+					oncreate: (vnode) => {
+						this.checkboxDom = vnode.dom as HTMLInputElement
+						checkboxOpacity(this.checkboxDom, false)
+					},
 				}),
 			]),
-			m(".bottom.flex-space-between", [
-				m("small.mail-address", {
-					oncreate: (vnode) => (this._domAddress = vnode.dom as HTMLElement),
+			m(".flex.col.overflow-hidden.flex-grow", [
+				m(".text-ellipsis.badge-line-height", {
+					oncreate: (vnode) => (this.domName = vnode.dom as HTMLElement),
+				}),
+				m(".text-ellipsis.smaller.mt-xxs", {
+					oncreate: (vnode) => (this.domAddress = vnode.dom as HTMLElement),
 				}),
 			]),
-		]
-		return elements
+		)
+	}
+
+	private showCheckboxAnimated(show: boolean) {
+		if (this.checkboxWasVisible === show) return
+		if (show) {
+			this.domName.style.paddingRight = shiftByForCheckbox
+			this.domAddress.style.paddingRight = shiftByForCheckbox
+
+			const nameAnim = this.domName.animate({ transform: [translateXHide, translateXShow] }, selectableRowAnimParams)
+			const addressAnim = this.domAddress.animate({ transform: [translateXHide, translateXShow] }, selectableRowAnimParams)
+			const checkboxAnim = this.checkboxDom.animate({ transform: [scaleXHide, scaleXShow] }, selectableRowAnimParams)
+
+			Promise.all([nameAnim.finished, addressAnim.finished, checkboxAnim.finished]).then(() => {
+				nameAnim.cancel()
+				addressAnim.cancel()
+				checkboxAnim.cancel()
+				this.showCheckbox(show)
+			}, noOp)
+		} else {
+			this.domName.style.paddingRight = "0"
+			this.domAddress.style.paddingRight = "0"
+
+			const nameAnim = this.domName.animate({ transform: [translateXShow, translateXHide] }, selectableRowAnimParams)
+			const addressAnim = this.domAddress.animate({ transform: [translateXShow, translateXHide] }, selectableRowAnimParams)
+			const checkboxAnim = this.checkboxDom.animate({ transform: [scaleXShow, scaleXHide] }, selectableRowAnimParams)
+
+			Promise.all([nameAnim.finished, addressAnim.finished, checkboxAnim.finished]).then(() => {
+				nameAnim.cancel()
+				addressAnim.cancel()
+				checkboxAnim.cancel()
+				this.showCheckbox(show)
+			}, noOp)
+		}
+		this.checkboxWasVisible = show
+	}
+
+	private showCheckbox(show: boolean) {
+		let translate
+		let scale
+		let padding
+		if (show) {
+			translate = translateXShow
+			scale = scaleXShow
+			padding = shiftByForCheckbox
+		} else {
+			translate = translateXHide
+			scale = scaleXHide
+			padding = "0"
+		}
+
+		this.domAddress.style.transform = translate
+		this.domName.style.transform = translate
+		this.domAddress.style.paddingRight = padding
+		this.domName.style.paddingRight = padding
+		this.checkboxDom.style.transform = scale
 	}
 }

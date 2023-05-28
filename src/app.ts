@@ -3,7 +3,6 @@ import m, { Children, ClassComponent, Component, RouteDefs, RouteResolver, Vnode
 import { lang, languageCodeToTag, languages } from "./misc/LanguageViewModel"
 import { root } from "./RootView"
 import { disableErrorHandlingDuringLogout, handleUncaughtError } from "./misc/ErrorHandler"
-import "./gui/main-styles"
 import { assertMainOrNodeBoot, bootFinished, isApp, isDesktop, isOfflineStorageAvailable, isTutanotaDomain } from "./api/common/Env"
 import { assertNotNull, neverNull } from "@tutao/tutanota-utils"
 import { windowFacade } from "./misc/WindowFacade"
@@ -29,7 +28,7 @@ import { ContactView, ContactViewAttrs } from "./contacts/view/ContactView.js"
 import { SettingsView, SettingsViewAttrs } from "./settings/SettingsView.js"
 import { SearchView, SearchViewAttrs } from "./search/view/SearchView.js"
 import { TopLevelAttrs, TopLevelView } from "./TopLevelView.js"
-import { BaseHeaderAttrs } from "./gui/Header.js"
+import { AppHeaderAttrs } from "./gui/Header.js"
 import { CalendarViewModel } from "./calendar/view/CalendarViewModel.js"
 import { ExternalLoginView, ExternalLoginViewAttrs, ExternalLoginViewModel } from "./login/ExternalLoginView.js"
 import { LoginController } from "./api/main/LoginController.js"
@@ -118,9 +117,14 @@ if (!isDesktop() && typeof navigator.registerProtocolHandler === "function") {
 import("./translations/en")
 	.then((en) => lang.init(en.default))
 	.then(async () => {
+		await import("./gui/main-styles")
+
 		// do this after lang initialized
 		const { locator } = await import("./api/main/MainLocator")
 		await locator.init()
+
+		const { setupNavShortcuts } = await import("./misc/NavShortcuts.js")
+		setupNavShortcuts()
 
 		// this needs to stay after client.init
 		windowFacade.init(locator.logins)
@@ -156,7 +160,7 @@ import("./translations/en")
 		styles.init()
 
 		const paths = applicationPaths({
-			login: makeViewResolver<LoginViewAttrs, LoginView, { makeViewModel: () => LoginViewModel; header: BaseHeaderAttrs }>(
+			login: makeViewResolver<LoginViewAttrs, LoginView, { makeViewModel: () => LoginViewModel }>(
 				{
 					prepareRoute: async () => {
 						const { LoginViewModel } = await import("./login/LoginViewModel.js")
@@ -165,16 +169,15 @@ import("./translations/en")
 							component: LoginView,
 							cache: {
 								makeViewModel: () => new LoginViewModel(locator.logins, locator.credentialsProvider, locator.secondFactorHandler, deviceConfig),
-								header: await locator.baseHeaderAttrs(),
 							},
 						}
 					},
-					prepareAttrs: ({ makeViewModel, header }) => ({ targetPath: "/mail", makeViewModel, header }),
+					prepareAttrs: ({ makeViewModel }) => ({ targetPath: "/mail", makeViewModel }),
 					requireLogin: false,
 				},
 				locator.logins,
 			),
-			termination: makeViewResolver<TerminationViewAttrs, TerminationView, { makeViewModel: () => TerminationViewModel; header: BaseHeaderAttrs }>(
+			termination: makeViewResolver<TerminationViewAttrs, TerminationView, { makeViewModel: () => TerminationViewModel; header: AppHeaderAttrs }>(
 				{
 					prepareRoute: async () => {
 						const { TerminationViewModel } = await import("./termination/TerminationViewModel.js")
@@ -184,7 +187,7 @@ import("./translations/en")
 							cache: {
 								makeViewModel: () =>
 									new TerminationViewModel(locator.logins, locator.secondFactorHandler, locator.serviceExecutor, locator.entityClient),
-								header: await locator.baseHeaderAttrs(),
+								header: await locator.appHeaderAttrs(),
 							},
 						}
 					},
@@ -193,32 +196,28 @@ import("./translations/en")
 				},
 				locator.logins,
 			),
-			contact: makeViewResolver<ContactViewAttrs, ContactView, { drawerAttrsFactory: () => DrawerMenuAttrs; header: BaseHeaderAttrs }>(
+			contact: makeViewResolver<ContactViewAttrs, ContactView, { drawerAttrsFactory: () => DrawerMenuAttrs; header: AppHeaderAttrs }>(
 				{
 					prepareRoute: async () => {
 						const { ContactView } = await import("./contacts/view/ContactView.js")
 						const drawerAttrsFactory = await locator.drawerAttrsFactory()
 						return {
 							component: ContactView,
-							cache: { drawerAttrsFactory, header: await locator.baseHeaderAttrs() },
+							cache: { drawerAttrsFactory, header: await locator.appHeaderAttrs() },
 						}
 					},
 					prepareAttrs: (cache) => ({ drawerAttrs: cache.drawerAttrsFactory(), header: cache.header }),
 				},
 				locator.logins,
 			),
-			externalLogin: makeViewResolver<
-				ExternalLoginViewAttrs,
-				ExternalLoginView,
-				{ header: BaseHeaderAttrs; makeViewModel: () => ExternalLoginViewModel }
-			>(
+			externalLogin: makeViewResolver<ExternalLoginViewAttrs, ExternalLoginView, { header: AppHeaderAttrs; makeViewModel: () => ExternalLoginViewModel }>(
 				{
 					prepareRoute: async () => {
 						const { ExternalLoginView } = await import("./login/ExternalLoginView.js")
 						const makeViewModel = await locator.externalLoginViewModelFactory()
 						return {
 							component: ExternalLoginView,
-							cache: { header: await locator.baseHeaderAttrs(), makeViewModel },
+							cache: { header: await locator.appHeaderAttrs(), makeViewModel },
 						}
 					},
 					prepareAttrs: ({ header, makeViewModel }) => ({ header, viewModelFactory: makeViewModel }),
@@ -226,7 +225,7 @@ import("./translations/en")
 				},
 				locator.logins,
 			),
-			mail: makeViewResolver<MailViewAttrs, MailView, { drawerAttrsFactory: () => DrawerMenuAttrs; cache: MailViewCache; header: BaseHeaderAttrs }>(
+			mail: makeViewResolver<MailViewAttrs, MailView, { drawerAttrsFactory: () => DrawerMenuAttrs; cache: MailViewCache; header: AppHeaderAttrs }>(
 				{
 					prepareRoute: async (previousCache) => {
 						const { MailView } = await import("./mail/view/MailView.js")
@@ -235,7 +234,7 @@ import("./translations/en")
 							cache: previousCache ?? {
 								drawerAttrsFactory: await locator.drawerAttrsFactory(),
 								cache: { mailList: null, selectedFolder: null, conversationViewModel: null, conversationViewPreference: null },
-								header: await locator.baseHeaderAttrs(),
+								header: await locator.appHeaderAttrs(),
 							},
 						}
 					},
@@ -248,28 +247,28 @@ import("./translations/en")
 				},
 				locator.logins,
 			),
-			settings: makeViewResolver<SettingsViewAttrs, SettingsView, { drawerAttrsFactory: () => DrawerMenuAttrs; header: BaseHeaderAttrs }>(
+			settings: makeViewResolver<SettingsViewAttrs, SettingsView, { drawerAttrsFactory: () => DrawerMenuAttrs; header: AppHeaderAttrs }>(
 				{
 					prepareRoute: async () => {
 						const { SettingsView } = await import("./settings/SettingsView.js")
 						const drawerAttrsFactory = await locator.drawerAttrsFactory()
 						return {
 							component: SettingsView,
-							cache: { drawerAttrsFactory, header: await locator.baseHeaderAttrs() },
+							cache: { drawerAttrsFactory, header: await locator.appHeaderAttrs() },
 						}
 					},
 					prepareAttrs: (cache) => ({ drawerAttrs: cache.drawerAttrsFactory(), header: cache.header, logins: locator.logins }),
 				},
 				locator.logins,
 			),
-			search: makeViewResolver<SearchViewAttrs, SearchView, { drawerAttrsFactory: () => DrawerMenuAttrs; header: BaseHeaderAttrs }>(
+			search: makeViewResolver<SearchViewAttrs, SearchView, { drawerAttrsFactory: () => DrawerMenuAttrs; header: AppHeaderAttrs }>(
 				{
 					prepareRoute: async () => {
 						const { SearchView } = await import("./search/view/SearchView.js")
 						const drawerAttrsFactory = await locator.drawerAttrsFactory()
 						return {
 							component: SearchView,
-							cache: { drawerAttrsFactory, header: await locator.baseHeaderAttrs() },
+							cache: { drawerAttrsFactory, header: await locator.appHeaderAttrs() },
 						}
 					},
 					prepareAttrs: (cache) => ({ drawerAttrs: cache.drawerAttrsFactory(), header: cache.header }),
@@ -279,7 +278,7 @@ import("./translations/en")
 			contactForm: makeOldViewResolver(
 				async () => {
 					const { ContactFormView } = await import("./login/contactform/ContactFormView.js")
-					const header = await locator.baseHeaderAttrs()
+					const header = await locator.appHeaderAttrs()
 					return new ContactFormView(header)
 				},
 				{
@@ -290,7 +289,7 @@ import("./translations/en")
 			calendar: makeViewResolver<
 				CalendarViewAttrs,
 				CalendarView,
-				{ drawerAttrsFactory: () => DrawerMenuAttrs; header: BaseHeaderAttrs; calendarViewModel: CalendarViewModel }
+				{ drawerAttrsFactory: () => DrawerMenuAttrs; header: AppHeaderAttrs; calendarViewModel: CalendarViewModel }
 			>(
 				{
 					prepareRoute: async (cache) => {
@@ -300,7 +299,7 @@ import("./translations/en")
 							component: CalendarView,
 							cache: cache ?? {
 								drawerAttrsFactory,
-								header: await locator.baseHeaderAttrs(),
+								header: await locator.appHeaderAttrs(),
 								calendarViewModel: await locator.calendarViewModel(),
 							},
 						}

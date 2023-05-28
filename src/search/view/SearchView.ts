@@ -4,15 +4,14 @@ import { ColumnType, ViewColumn } from "../../gui/base/ViewColumn"
 import type { TranslationKey } from "../../misc/LanguageViewModel"
 import { lang } from "../../misc/LanguageViewModel"
 import { FeatureType, FULL_INDEXED_TIMESTAMP, Keys, MailFolderType, NOTHING_INDEXED_TIMESTAMP, OperationType } from "../../api/common/TutanotaConstants"
-import { assertMainOrNode } from "../../api/common/Env"
+import { assertMainOrNode, isDesktop } from "../../api/common/Env"
 import { keyManager, Shortcut } from "../../misc/KeyManager"
 import type { NavButtonAttrs } from "../../gui/base/NavButton.js"
 import { isNavButtonSelected, NavButton, NavButtonColor } from "../../gui/base/NavButton.js"
 import { BootIcons } from "../../gui/base/icons/BootIcons"
-import { ContactTypeRef, MailTypeRef } from "../../api/entities/tutanota/TypeRefs.js"
+import { ContactTypeRef, Mail, MailTypeRef } from "../../api/entities/tutanota/TypeRefs.js"
 import { SearchListView, SearchResultListEntry } from "./SearchListView"
 import { size } from "../../gui/size"
-import { SearchResultDetailsViewer } from "./SearchResultDetailsViewer"
 import {
 	createRestriction,
 	getFreeSearchStartDate,
@@ -30,17 +29,15 @@ import { formatDateWithMonth, formatDateWithTimeIfNotEven } from "../../misc/For
 import { showDateRangeSelectionDialog } from "../../gui/date/DatePickerDialog"
 import { Icons } from "../../gui/base/icons/Icons"
 import { PageSize } from "../../gui/base/List"
-import { MultiSelectionBar } from "../../gui/base/MultiSelectionBar"
-import { BaseHeaderAttrs } from "../../gui/Header.js"
+import { AppHeaderAttrs, Header } from "../../gui/Header.js"
 import type { EntityUpdateData } from "../../api/main/EventController"
 import { isUpdateForTypeRef } from "../../api/main/EventController"
 import { getStartOfTheWeekOffsetForUser } from "../../calendar/date/CalendarUtils"
-import { Button, ButtonColor, ButtonType } from "../../gui/base/Button.js"
+import { ButtonType } from "../../gui/base/Button.js"
 import { PermissionError } from "../../api/common/error/PermissionError"
 import { ContactEditor } from "../../contacts/ContactEditor"
 import { styles } from "../../gui/styles"
 import { FolderColumnView } from "../../gui/FolderColumnView.js"
-import { ActionBar } from "../../gui/base/ActionBar"
 import { getGroupInfoDisplayName } from "../../api/common/utils/GroupUtils"
 import { isNewMailActionAvailable } from "../../gui/nav/NavFunctions"
 import { showNotAvailableForFreeDialog } from "../../misc/SubscriptionDialogs"
@@ -58,12 +55,39 @@ import { BaseTopLevelView } from "../../gui/BaseTopLevelView.js"
 import { TopLevelAttrs, TopLevelView } from "../../TopLevelView.js"
 import { MailboxDetail } from "../../mail/model/MailModel.js"
 import Stream from "mithril/stream"
+import { getContactSelectionMessage, MultiContactViewer } from "../../contacts/view/MultiContactViewer.js"
+import { assertIsEntity2, elementIdPart, getElementId } from "../../api/common/utils/EntityUtils.js"
+import { ContactCardViewer } from "../../contacts/view/ContactCardViewer.js"
+import { getMailSelectionMessage, MultiMailViewer } from "../../mail/view/MultiMailViewer.js"
+import { ConversationViewer } from "../../mail/view/ConversationViewer.js"
+import { ConversationViewModel } from "../../mail/view/ConversationViewModel.js"
+import { ContactViewerActions } from "../../contacts/view/ContactViewerActions.js"
+import { confirmMerge, deleteContacts, writeMail } from "../../contacts/view/ContactView.js"
+import ColumnEmptyMessageBox from "../../gui/base/ColumnEmptyMessageBox.js"
+import { theme } from "../../gui/theme.js"
+import { SearchResult } from "../../api/worker/search/SearchTypes.js"
+import { isSameSearchRestriction } from "../model/SearchModel.js"
+import { searchBar } from "../SearchBar.js"
+import { MobileMailMultiselectionActionBar } from "../../mail/view/MobileMailMultiselectionActionBar.js"
+import { exportContacts } from "../../contacts/VCardExporter.js"
+import { BackgroundColumnLayout } from "../../gui/BackgroundColumnLayout.js"
+import { DesktopListToolbar, DesktopViewerToolbar } from "../../gui/DesktopToolbars.js"
+import { SelectAllCheckbox } from "../../gui/SelectAllCheckbox.js"
+import { MailViewerActions } from "../../mail/view/MailViewerToolbar.js"
+import { BaseMobileHeader } from "../../gui/BaseMobileHeader.js"
+import { ProgressBar } from "../../gui/base/ProgressBar.js"
+import { EnterMultiselectIconButton } from "../../gui/EnterMultiselectIconButton.js"
+import { MobileHeader, MobileHeaderMenuButton } from "../../gui/MobileHeader.js"
+import { MobileContactActionBar } from "../../contacts/view/MobileContactActionBar.js"
+import { MobileBottomActionBar } from "../../gui/MobileBottomActionBar.js"
+import { getConversationTitle } from "../../mail/view/MailGuiUtils.js"
+import { MultiselectMobileHeader } from "../../gui/MultiselectMobileHeader.js"
 
 assertMainOrNode()
 
 export interface SearchViewAttrs extends TopLevelAttrs {
 	drawerAttrs: DrawerMenuAttrs
-	header: BaseHeaderAttrs
+	header: AppHeaderAttrs
 }
 
 export class SearchView extends BaseTopLevelView implements TopLevelView<SearchViewAttrs> {
@@ -73,7 +97,6 @@ export class SearchView extends BaseTopLevelView implements TopLevelView<SearchV
 	private resultListColumn: ViewColumn
 	private resultDetailsColumn: ViewColumn
 	private folderColumn: ViewColumn
-	private viewer: SearchResultDetailsViewer
 	private viewSlider: ViewSlider
 	private searchList: SearchListView
 
@@ -103,6 +126,10 @@ export class SearchView extends BaseTopLevelView implements TopLevelView<SearchV
 	private selectedMailField: string | null = null
 	private readonly availableMailFields = SEARCH_MAIL_FIELDS.map((f) => ({ name: lang.get(f.textId), value: f.field }))
 	private mailboxSubscription: Stream<void> | null = null
+	private loadingAllForSearchResult: SearchResult | null = null
+
+	/** if there is exactly one mail selected, we want to fetch the view model async and redraw. */
+	private conversationViewModel: ConversationViewModel | null = null
 
 	constructor(vnode: Vnode<SearchViewAttrs>) {
 		super()
@@ -146,17 +173,24 @@ export class SearchView extends BaseTopLevelView implements TopLevelView<SearchV
 		this.searchList = new SearchListView(this)
 		this.resultListColumn = new ViewColumn(
 			{
-				view: () => m(".list-column", [m(this.searchList)]),
+				view: () => {
+					return m(BackgroundColumnLayout, {
+						backgroundColor: theme.navigation_bg,
+						desktopToolbar: () =>
+							m(DesktopListToolbar, [this.searchList.list ? m(SelectAllCheckbox, { list: this.searchList.list }) : m(".button-height")]),
+						mobileHeader: () => this.renderMobileListHeader(vnode.attrs.header),
+						columnLayout: m(this.searchList),
+					})
+				},
 			},
 			ColumnType.Background,
 			size.second_col_min_width,
 			size.second_col_max_width,
 			() => lang.get("searchResult_label"),
 		)
-		this.viewer = new SearchResultDetailsViewer(this.searchList)
 		this.resultDetailsColumn = new ViewColumn(
 			{
-				view: () => m(".search", m(this.viewer)),
+				view: () => this.renderDetailsView(vnode.attrs.header),
 			},
 			ColumnType.Background,
 			size.third_col_min_width,
@@ -168,16 +202,190 @@ export class SearchView extends BaseTopLevelView implements TopLevelView<SearchV
 
 		this.oncreate = (vnode) => {
 			keyManager.registerShortcuts(shortcuts)
-			neverNull(locator.header.searchBar).setReturnListener(() => this.resultListColumn.focus())
 			locator.eventController.addEntityListener(this.entityListener)
 			this.mailboxSubscription = locator.mailModel.mailboxDetails.map((mailboxes) => this.onMailboxesChanged(mailboxes))
 		}
 
 		this.onremove = () => {
+			// cancel the loading if we are destroyed
+			this.loadingAllForSearchResult = null
+
 			keyManager.unregisterShortcuts(shortcuts)
-			neverNull(locator.header.searchBar).setReturnListener(noOp)
 			locator.eventController.removeEntityListener(this.entityListener)
 			this.mailboxSubscription?.end(true)
+		}
+	}
+
+	private renderMobileListHeader(header: AppHeaderAttrs) {
+		return this.searchList.list && (this.searchList.list?.isMultiSelectActive() || this.searchList.list?.isMobileMultiselectActive())
+			? m(MultiselectMobileHeader, {
+					list: this.searchList.list,
+					message:
+						getCurrentSearchMode() === "mail"
+							? getMailSelectionMessage(this.getSelectedMails())
+							: getContactSelectionMessage(this.getSelectedContacts()),
+			  })
+			: m(BaseMobileHeader, {
+					left: m(MobileHeaderMenuButton, { viewSlider: this.viewSlider, ...header }),
+					right: [m(EnterMultiselectIconButton, { list: this.searchList.list }), styles.isSingleColumnLayout() ? this.renderHeaderRightView() : null],
+					center: m(
+						".flex-grow.flex.justify-center",
+						m(searchBar, {
+							placeholder: this.searchBarPlaceholder(),
+							returnListener: () => this.resultListColumn.focus(),
+						}),
+					),
+					injections: m(ProgressBar, { progress: header.offlineIndicatorModel.getProgress() }),
+			  })
+	}
+
+	/** depending on the search and selection state we want to render a
+	 * (multi) mail viewer or a (multi) contact viewer
+	 */
+	private renderDetailsView(header: AppHeaderAttrs): Children {
+		if (getCurrentSearchMode() === "contact") {
+			const selectedContacts = this.getSelectedContacts()
+
+			const actions = m(ContactViewerActions, {
+				contacts: selectedContacts,
+				onEdit: () => new ContactEditor(locator.entityClient, selectedContacts[0]),
+				onDelete: deleteContacts,
+				onMerge: confirmMerge,
+				onExport: exportContacts,
+			})
+			const isMultiselect = this.searchList.list?.isMultiSelectActive() || selectedContacts.length === 0
+			return m(BackgroundColumnLayout, {
+				backgroundColor: theme.navigation_bg,
+				desktopToolbar: () => m(DesktopViewerToolbar, actions),
+				mobileHeader: () =>
+					m(MobileHeader, {
+						...header,
+						viewSlider: this.viewSlider,
+						columnType: "other",
+						title: lang.get("search_label"),
+						actions: null,
+						multicolumnActions: () => actions,
+						primaryAction: () => this.renderHeaderRightView(),
+					}),
+				columnLayout: isMultiselect
+					? m(MultiContactViewer, {
+							selectedEntities: selectedContacts,
+							selectNone: () => this.searchList.selectNone(),
+					  })
+					: m(ContactCardViewer, { contact: selectedContacts[0], onWriteMail: writeMail }),
+			})
+		} else if (getCurrentSearchMode() === "mail") {
+			const selectedMails = this.getSelectedMails()
+
+			const conversationViewModel = this.conversationViewModel
+			if (this.searchList.list?.isMultiSelectActive() || !conversationViewModel) {
+				const actions = m(MailViewerActions, {
+					mailModel: locator.mailModel,
+					mails: selectedMails,
+					selectNone: () => this.searchList.selectNone(),
+				})
+				return m(BackgroundColumnLayout, {
+					backgroundColor: theme.navigation_bg,
+					desktopToolbar: () => m(DesktopViewerToolbar, actions),
+					mobileHeader: () =>
+						m(MobileHeader, {
+							...header,
+							viewSlider: this.viewSlider,
+							columnType: "other",
+							title: getMailSelectionMessage(selectedMails),
+							actions: null,
+							multicolumnActions: () => actions,
+							primaryAction: () => this.renderHeaderRightView(),
+						}),
+					columnLayout: m(MultiMailViewer, {
+						selectedEntities: selectedMails,
+						selectNone: () => this.searchList.selectNone(),
+						loadAll: () => this.loadAll(),
+						stopLoadAll: () => (this.loadingAllForSearchResult = null),
+						loadingAll: this.loadingAllForSearchResult != null ? "loading" : this.searchList.list?.isLoadedCompletely() ? "loaded" : "can_load",
+					}),
+				})
+			} else {
+				const actions = m(MailViewerActions, {
+					mailModel: conversationViewModel.primaryViewModel().mailModel,
+					mailViewerViewModel: conversationViewModel.primaryViewModel(),
+					mails: [conversationViewModel.primaryMail],
+				})
+				return m(BackgroundColumnLayout, {
+					backgroundColor: theme.navigation_bg,
+					desktopToolbar: () => m(DesktopViewerToolbar, actions),
+					mobileHeader: () =>
+						m(MobileHeader, {
+							...header,
+							viewSlider: this.viewSlider,
+							columnType: "other",
+							title: getConversationTitle(conversationViewModel),
+							actions: null,
+							multicolumnActions: () => actions,
+							primaryAction: () => this.renderHeaderRightView(),
+						}),
+					columnLayout: m(ConversationViewer, { viewModel: conversationViewModel }),
+				})
+			}
+		} else {
+			return m(
+				".flex.col.fill-absolute",
+				// Using contactViewToolbar because it will display empty
+				m(ContactViewerActions, { contacts: [], onExport: noOp, onMerge: noOp, onDelete: noOp, onEdit: noOp }),
+				m(
+					".flex-grow.rel.overflow-hidden",
+					m(ColumnEmptyMessageBox, {
+						message: () => lang.get("noSelection_msg"),
+						color: theme.content_message_bg,
+						backgroundColor: theme.navigation_bg,
+					}),
+				),
+			)
+		}
+	}
+
+	private getSelectedMails() {
+		return (
+			this.searchList.list
+				?.getSelectedEntities()
+				.map(({ entry }) => entry)
+				.filter(assertIsEntity2(MailTypeRef)) ?? []
+		)
+	}
+
+	private getSelectedContacts() {
+		return (
+			this.searchList.list
+				?.getSelectedEntities()
+				.map(({ entry }) => entry)
+				.filter(assertIsEntity2(ContactTypeRef)) ?? []
+		)
+	}
+
+	async loadAll() {
+		if (this.loadingAllForSearchResult != null) return
+		this.loadingAllForSearchResult = this.searchList._searchResult ?? null
+		this.searchList.list?.selectAll()
+		try {
+			while (
+				this.searchList.list &&
+				this.searchList._searchResult?.restriction &&
+				this.loadingAllForSearchResult &&
+				isSameSearchRestriction(this.searchList._searchResult?.restriction, this.loadingAllForSearchResult.restriction) &&
+				!this.searchList.list.isLoadedCompletely()
+			) {
+				await this.searchList.list.loadMoreItems()
+				if (
+					this.searchList._searchResult.restriction &&
+					this.loadingAllForSearchResult.restriction &&
+					isSameSearchRestriction(this.searchList._searchResult.restriction, this.loadingAllForSearchResult.restriction)
+				) {
+					this.searchList.list.selectAll()
+				}
+			}
+		} finally {
+			this.loadingAllForSearchResult = null
+			m.redraw()
 		}
 	}
 
@@ -219,18 +427,55 @@ export class SearchView extends BaseTopLevelView implements TopLevelView<SearchV
 		return m(
 			"#search.main-view",
 			m(this.viewSlider, {
-				header: m(locator.header, {
-					headerView: this.renderHeaderView(),
-					rightView: this.renderHeaderRightView(),
-					viewSlider: this.viewSlider,
+				header: m(Header, {
+					searchBar: () =>
+						m(searchBar, {
+							placeholder: this.searchBarPlaceholder(),
+							returnListener: () => this.resultListColumn.focus(),
+						}),
 					...attrs.header,
 				}),
 				bottomNav:
-					styles.isSingleColumnLayout() && this.viewSlider.focusedColumn === this.resultDetailsColumn && this.viewer.viewer?.mode === "mail"
-						? m(MobileMailActionBar, { viewModel: this.viewer.viewer.viewModel.primaryViewModel() })
+					styles.isSingleColumnLayout() && this.viewSlider.focusedColumn === this.resultDetailsColumn && this.conversationViewModel
+						? m(MobileMailActionBar, { viewModel: this.conversationViewModel?.primaryViewModel() })
+						: styles.isSingleColumnLayout() &&
+						  this.searchList.list &&
+						  this.searchList.list.isSomeMultiselectActive() &&
+						  getCurrentSearchMode() === "mail"
+						? m(MobileMailMultiselectionActionBar, {
+								mails: this.getSelectedMails(),
+								selectNone: () => this.searchList.selectNone(),
+								mailModel: locator.mailModel,
+						  })
+						: getCurrentSearchMode() === "contact" &&
+						  styles.isSingleColumnLayout() &&
+						  this.viewSlider.focusedColumn === this.resultDetailsColumn &&
+						  !this.searchList.list?.isSomeMultiselectActive()
+						? m(MobileContactActionBar, {
+								editAction: () => new ContactEditor(locator.entityClient, this.getSelectedContacts()[0]),
+								deleteAction: () => deleteContacts(this.getSelectedContacts()),
+						  })
+						: styles.isSingleColumnLayout() &&
+						  this.searchList &&
+						  this.viewSlider.focusedColumn === this.resultListColumn &&
+						  this.searchList.list?.isSomeMultiselectActive()
+						? m(
+								MobileBottomActionBar,
+								m(ContactViewerActions, {
+									contacts: this.getSelectedContacts(),
+									onEdit: () => new ContactEditor(locator.entityClient, this.getSelectedContacts()[0]),
+									onDelete: deleteContacts,
+									onMerge: confirmMerge,
+									onExport: exportContacts,
+								}),
+						  )
 						: m(BottomNav),
 			}),
 		)
+	}
+
+	private searchBarPlaceholder() {
+		return lang.get(m.route.get().startsWith("/search/mail") ? "searchEmails_placeholder" : "searchContacts_placeholder")
 	}
 
 	_renderSearchFilters(): Children {
@@ -285,28 +530,24 @@ export class SearchView extends BaseTopLevelView implements TopLevelView<SearchV
 		const restriction = getRestriction(m.route.get())
 		return styles.isUsingBottomNavigation()
 			? isSameTypeRef(restriction.type, MailTypeRef) && isNewMailActionAvailable()
-				? m(Button, {
+				? m(IconButton, {
 						click: () => {
 							newMailEditor()
 								.then((editor) => editor.show())
 								.catch(ofClass(PermissionError, noOp))
 						},
-						label: "newMail_action",
-						type: ButtonType.Action,
-						colors: ButtonColor.Header,
-						icon: () => Icons.PencilSquare,
+						title: "newMail_action",
+						icon: Icons.PencilSquare,
 				  })
 				: isSameTypeRef(restriction.type, ContactTypeRef)
-				? m(Button, {
+				? m(IconButton, {
 						click: () => {
 							locator.contactModel.contactListId().then((contactListId) => {
 								new ContactEditor(locator.entityClient, null, contactListId ?? undefined).show()
 							})
 						},
-						label: "newContact_action",
-						type: ButtonType.Action,
-						colors: ButtonColor.Header,
-						icon: () => Icons.Add,
+						title: "newContact_action",
+						icon: Icons.Add,
 				  })
 				: null
 			: null
@@ -528,14 +769,26 @@ export class SearchView extends BaseTopLevelView implements TopLevelView<SearchV
 		]
 	}
 
-	elementSelected(entries: SearchResultListEntry[], elementClicked: boolean, selectionChanged: boolean, multiSelectOperation: boolean): void {
-		this.viewer.elementSelected(entries, elementClicked, selectionChanged, multiSelectOperation)
+	elementSelected(newSelection: SearchResultListEntry[], elementClicked: boolean, selectionChanged: boolean, multiSelectOperation: boolean): void {
+		if (selectionChanged) {
+			m.redraw()
+		} else {
+			return
+		}
 
-		if (entries.length === 1 && !multiSelectOperation && (selectionChanged || !this.viewer.viewer)) {
+		if (newSelection.length === 1 && !multiSelectOperation) {
 			// do not set the search url if an element is removed from this list by another view
-			if (m.route.get().startsWith("/search")) {
-				setSearchUrl(getSearchUrl(locator.search.lastQuery(), getRestriction(m.route.get()), entries[0]._id[1]))
+			const selectedElementId = getElementId(newSelection[0])
+			setSearchUrl(getSearchUrl(locator.search.lastQuery(), getRestriction(m.route.get()), selectedElementId))
+			if (getCurrentSearchMode() === "mail") {
+				this.updateDisplayedConversation(newSelection[0].entry as Mail).then(m.redraw)
+			} else {
+				this.conversationViewModel = null
+				m.redraw()
 			}
+		} else {
+			this.conversationViewModel = null
+			m.redraw()
 		}
 
 		if (!multiSelectOperation && elementClicked) {
@@ -545,9 +798,29 @@ export class SearchView extends BaseTopLevelView implements TopLevelView<SearchV
 		}
 	}
 
+	private async updateDisplayedConversation(mail: Mail): Promise<void> {
+		const viewModelParams = {
+			mail,
+			showFolder: true,
+		}
+		const mailboxDetails = await locator.mailModel.getMailboxDetailsForMail(viewModelParams.mail)
+		if (mailboxDetails == null) {
+			this.conversationViewModel = null
+			return
+		} else {
+			const mailboxProperties = await locator.mailModel.getMailboxProperties(mailboxDetails.mailboxGroupRoot)
+			const viewModel = await locator.conversationViewModel({ mail, showFolder: true }, mailboxDetails, mailboxProperties)
+			await viewModel.init()
+			if (viewModel && isDesktop()) {
+				// Notify the admin client about the mail being selected
+				locator.desktopSystemFacade?.sendSocketMessage(viewModel.primaryMail.sender.address)
+			}
+			this.conversationViewModel = viewModel
+		}
+	}
+
 	onNewUrl(args: Record<string, any>, requestedPath: string) {
 		let restriction
-
 		try {
 			restriction = getRestriction(requestedPath)
 		} catch (e) {
@@ -599,51 +872,27 @@ export class SearchView extends BaseTopLevelView implements TopLevelView<SearchV
 		return neverNull(SEARCH_CATEGORIES.find((c) => isSameTypeRef(c.typeRef, restriction.type))).name
 	}
 
-	entityEventReceived(update: EntityUpdateData): Promise<void> {
-		if (isUpdateForTypeRef(MailTypeRef, update) || isUpdateForTypeRef(ContactTypeRef, update)) {
-			const { instanceListId, instanceId, operation } = update
-			const id = [neverNull(instanceListId), instanceId] as const
-			const typeRef = new TypeRef<SomeEntity>(update.application, update.type)
-
-			if (this.searchList.isInSearchResult(typeRef, id)) {
-				return this.searchList.entityEventReceived(instanceId, operation).then(() => {
-					// run the mail or contact update after the update on the list is finished to avoid parallel loading
-					if (operation === OperationType.UPDATE && this.viewer && this.viewer.isShownEntity(id)) {
-						return locator.entityClient
-							.load(typeRef, id)
-							.then((updatedEntity) => {
-								this.viewer.showEntity(updatedEntity, false)
-							})
-							.catch(() => {
-								// ignore. might happen if a mail was just sent
-							})
-					}
-				})
-			} else {
-				return Promise.resolve()
-			}
-		} else {
-			return Promise.resolve()
+	async entityEventReceived(update: EntityUpdateData): Promise<void> {
+		const mode = getCurrentSearchMode()
+		if (!((isUpdateForTypeRef(MailTypeRef, update) && mode === "mail") || (isUpdateForTypeRef(ContactTypeRef, update) && mode === "contact"))) {
+			return
 		}
-	}
-
-	/**
-	 * Used by Header to figure out when content needs to be injected there
-	 * @returns {Children} Mithril children or null
-	 */
-	private renderHeaderView(): Children {
-		return this.viewSlider.getVisibleBackgroundColumns().length === 1 && this.searchList.list && this.searchList.list.isMobileMultiSelectionActionActive()
-			? m(
-					MultiSelectionBar,
-					{
-						selectNoneHandler: () => this.searchList.selectNone(),
-						text: String(this.searchList.getSelectedEntities().length),
-					},
-					m(ActionBar, {
-						buttons: this.viewer.multiSearchActionBarButtons(),
-					}),
-			  )
-			: null
+		const { instanceListId, instanceId, operation } = update
+		const id = [neverNull(instanceListId), instanceId] as const
+		const typeRef = new TypeRef<SomeEntity>(update.application, update.type)
+		if (!this.searchList.isInSearchResult(typeRef, id)) {
+			return
+		}
+		await this.searchList.entityEventReceived(instanceId, operation)
+		// run the mail or contact update after the update on the list is finished to avoid parallel loading
+		if (operation === OperationType.UPDATE && this.searchList.list?.isEntitySelected(elementIdPart(id))) {
+			try {
+				await locator.entityClient.load(typeRef, id)
+				m.redraw()
+			} catch (e) {
+				// ignore. might happen if a mail was just sent
+			}
+		}
 	}
 
 	getMainButton(typeRef: TypeRef<unknown>):
@@ -680,6 +929,10 @@ export class SearchView extends BaseTopLevelView implements TopLevelView<SearchV
 			return null
 		}
 	}
+}
+
+function getCurrentSearchMode() {
+	return m.route.get().startsWith("/search/contact") ? "contact" : "mail"
 }
 
 async function newMailEditor(): Promise<Dialog> {

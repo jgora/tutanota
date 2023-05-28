@@ -1,22 +1,22 @@
 import m, { Children, Component, Vnode } from "mithril"
 import { Button, ButtonColor, ButtonType } from "../base/Button.js"
 import { BootIcons } from "../base/icons/BootIcons"
-import { LogoutUrl } from "../Header.js"
 import { showSupportDialog, showUpgradeDialog } from "./NavFunctions"
 import { isIOSApp } from "../../api/common/Env"
-import { navButtonRoutes } from "../../misc/RouteChange"
+import { LogoutUrl, navButtonRoutes } from "../../misc/RouteChange"
 import { getSafeAreaInsetLeft } from "../HtmlUtils"
 import { Icons } from "../base/icons/Icons"
 import { AriaLandmarks, landmarkAttrs } from "../AriaUtils"
 import { createDropdown } from "../base/Dropdown.js"
 import { keyManager } from "../../misc/KeyManager"
 import { CounterBadge } from "../base/CounterBadge.js"
-import { px } from "../size.js"
+import { px, size } from "../size.js"
 import { theme } from "../theme.js"
 import { showNewsDialog } from "../../misc/news/NewsDialog.js"
 import { LoginController } from "../../api/main/LoginController.js"
 import { NewsModel } from "../../misc/news/NewsModel.js"
 import { DesktopSystemFacade } from "../../native/common/generatedipc/DesktopSystemFacade.js"
+import { styles } from "../styles.js"
 
 export interface DrawerMenuAttrs {
 	logins: LoginController
@@ -35,6 +35,7 @@ export class DrawerMenu implements Component<DrawerMenuAttrs> {
 				...landmarkAttrs(AriaLandmarks.Contentinfo, "drawer menu"),
 				style: {
 					"padding-left": getSafeAreaInsetLeft(),
+					"border-top-right-radius": styles.isDesktopLayout() ? px(size.border_radius_big) : "",
 				},
 			},
 			m(".flex.col.height-100p.items-center.pt.pb", [
@@ -99,25 +100,20 @@ export class DrawerMenu implements Component<DrawerMenuAttrs> {
 					label: "showHelp_action",
 					icon: () => BootIcons.Help,
 					type: ButtonType.ActionLarge,
-					click: (e, dom) => {
-						if (logins.isUserLoggedIn() && logins.getUserController().isPremiumAccount()) {
-							createDropdown({
-								width: 300,
-								lazyButtons: () => [
-									{
-										label: "supportMenu_label",
-										click: () => showSupportDialog(),
-									},
-									{
-										label: "keyboardShortcuts_title",
-										click: () => keyManager.openF1Help(true),
-									},
-								],
-							})(e, dom)
-						} else {
-							keyManager.openF1Help()
-						}
-					},
+					click: (e, dom) =>
+						createDropdown({
+							width: 300,
+							lazyButtons: () => [
+								{
+									label: "supportMenu_label",
+									click: () => showSupportDialog(logins),
+								},
+								{
+									label: "keyboardShortcuts_title",
+									click: () => keyManager.openF1Help(true),
+								},
+							],
+						})(e, dom),
 					noBubble: true,
 					colors: ButtonColor.DrawerNav,
 				}),

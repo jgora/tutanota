@@ -19,7 +19,7 @@ import {
 	ReplyType,
 	TUTANOTA_MAIL_ADDRESS_DOMAINS,
 } from "../../api/common/TutanotaConstants"
-import { assertNotNull, contains, endsWith, first, neverNull, noOp, ofClass } from "@tutao/tutanota-utils"
+import { assertNotNull, contains, endsWith, first, neverNull, noOp, ofClass, promiseMap } from "@tutao/tutanota-utils"
 import { assertMainOrNode, isDesktop } from "../../api/common/Env"
 import { LockedError, NotFoundError } from "../../api/common/error/RestError"
 import type { LoginController } from "../../api/main/LoginController"
@@ -135,6 +135,12 @@ export function getSenderOrRecipientHeadingTooltip(mail: Mail): string {
 
 export function isTutanotaTeamMail(mail: Mail): boolean {
 	return mail.confidential && mail.state === MailState.RECEIVED && endsWith(mail.sender.address, "@tutao.de")
+}
+
+/** this is used for contact form messages to prevent them from being sent to recipients that are not the contact forms target mail group */
+export function areParticipantsRestricted(mail: Mail): boolean {
+	const { restrictions } = mail
+	return restrictions != null && restrictions.participantGroupInfos.length > 0
 }
 
 export function isExcludedMailAddress(mailAddress: string): boolean {
@@ -258,19 +264,6 @@ export interface ImageHandler {
 	insertImage(srcAttr: string, attrs?: Record<string, string>): HTMLElement
 }
 
-export function markMails(entityClient: EntityClient, mails: Mail[], unread: boolean): Promise<void> {
-	return Promise.all(
-		mails.map((mail) => {
-			if (mail.unread !== unread) {
-				mail.unread = unread
-				return entityClient.update(mail).catch(ofClass(NotFoundError, noOp)).catch(ofClass(LockedError, noOp))
-			} else {
-				return Promise.resolve()
-			}
-		}),
-	).then(noOp)
-}
-
 /**
  * Check if all mails in the selection are drafts. If there are mixed drafts and non-drafts or the array is empty, return true.
  * @param mails
@@ -371,7 +364,7 @@ export enum RecipientField {
 
 export type FolderInfo = { level: number; folder: MailFolder }
 
-export async function getMoveTargetFolderSystems(model: MailModel, mails: Mail[]): Promise<Array<FolderInfo>> {
+export async function getMoveTargetFolderSystems(model: MailModel, mails: readonly Mail[]): Promise<Array<FolderInfo>> {
 	const firstMail = first(mails)
 	if (firstMail == null) return []
 
@@ -419,17 +412,4 @@ export async function loadMailHeaders(entityClient: EntityClient, mailWrapper: M
 		const details = mailWrapper.getDetails()
 		return details.headers != null ? getMailHeaders(details.headers) : null
 	}
-}
-
-/**
- * Extract and normalize email subject.
- * Remove re:/fwd: prefixes.
- * remove newlines
- */
-export function normalizeSubject(subject: string): string {
-	subject = subject.replace(/[\n\r]/g, "")
-	// try to remove re: and fwd: in front of the subject
-	const match = subject.match(/^(?:(?:re|fwd)(?::|\s)+)*(.*)$/i)
-	// if we can't match fall back to the regular subject
-	return match ? match[1] : subject
 }

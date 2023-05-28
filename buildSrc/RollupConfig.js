@@ -1,4 +1,4 @@
-import path from "path"
+import path from "node:path"
 
 // These are the dependencies that must be provided for the module loader systemjs
 export const dependencyMap = {
@@ -283,7 +283,7 @@ export function bundleDependencyCheckPlugin() {
 						if (!allowedImports[importedChunk]) {
 							unknownChunks.push(`${importedChunk} of ${importedId}`)
 						}
-						if (ownChunk !== importedChunk && !allowedImports[ownChunk].includes(importedChunk)) {
+						if (ownChunk !== importedChunk && !allowedImports[ownChunk]?.includes(importedChunk)) {
 							pushToMapEntry(illegalImports, `${moduleId} [${ownChunk}]`, `${importedId} [${importedChunk}]`)
 						}
 					}

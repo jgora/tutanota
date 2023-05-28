@@ -5,7 +5,7 @@ import { lang } from "../misc/LanguageViewModel.js"
 import { NotFoundError } from "../api/common/error/RestError.js"
 import { size } from "../gui/size.js"
 import type { GroupInfo } from "../api/entities/sys/TypeRefs.js"
-import { CustomerTypeRef, GroupInfoTypeRef, GroupMemberTypeRef, UserTypeRef } from "../api/entities/sys/TypeRefs.js"
+import { GroupInfoTypeRef, GroupMemberTypeRef, UserTypeRef } from "../api/entities/sys/TypeRefs.js"
 import { assertNotNull, contains, LazyLoaded, neverNull, noOp, promiseMap } from "@tutao/tutanota-utils"
 import { UserViewer } from "./UserViewer.js"
 import type { SettingsView, UpdatableSettingsViewer } from "./SettingsView.js"
@@ -21,9 +21,10 @@ import { elementIdPart, GENERATED_MAX_ID } from "../api/common/utils/EntityUtils
 import { ListColumnWrapper } from "../gui/ListColumnWrapper.js"
 import { assertMainOrNode } from "../api/common/Env.js"
 import { locator } from "../api/main/MainLocator.js"
-import Stream from "mithril/stream"
 import { showNotAvailableForFreeDialog } from "../misc/SubscriptionDialogs.js"
 import * as AddUserDialog from "./AddUserDialog.js"
+import { SelectableRowContainer, SelectableRowSelectedSetter, setVisibility } from "../gui/SelectableRowContainer.js"
+import Stream from "mithril/stream"
 
 assertMainOrNode()
 const className = "user-list"
@@ -32,7 +33,7 @@ export class UserListView implements UpdatableSettingsViewer {
 	readonly list: List<GroupInfo, UserRow>
 
 	private readonly listId: LazyLoaded<Id>
-	private readonly searchResultStreamDependency: Stream<any>
+	private readonly searchResultStreamDependency: Stream<unknown>
 	private adminUserGroupInfoIds: Id[] = []
 
 	constructor(private readonly settingsView: SettingsView) {
@@ -79,7 +80,7 @@ export class UserListView implements UpdatableSettingsViewer {
 			sortCompare: compareGroupInfos,
 			elementSelected: (entities, elementClicked, selectionChanged, multiSelectionActive) =>
 				this.elementSelected(entities, elementClicked, selectionChanged, multiSelectionActive),
-			createVirtualRow: () => new UserRow(this),
+			createVirtualRow: () => new UserRow((groupInfo) => this.isAdmin(groupInfo)),
 			className: className,
 			swipe: {
 				renderLeftSpacer: () => [],
@@ -93,13 +94,12 @@ export class UserListView implements UpdatableSettingsViewer {
 		})
 
 		this.list.loadInitial()
-		const searchBar = neverNull(locator.header.searchBar)
 
 		this.listId.getAsync().then((listId) => {
-			searchBar.setGroupInfoRestrictionListId(listId)
+			locator.search.setGroupInfoRestrictionListId(listId)
 		})
 
-		this.searchResultStreamDependency = searchBar.lastSelectedGroupInfoResult.map((groupInfo) => {
+		this.searchResultStreamDependency = locator.search.lastSelectedGroupInfoResult.map((groupInfo) => {
 			if (this.listId.isLoaded() && this.listId.getSync() === groupInfo._id[0]) {
 				this.list.scrollToIdAndSelect(groupInfo._id[1])
 			}
@@ -118,12 +118,15 @@ export class UserListView implements UpdatableSettingsViewer {
 			ListColumnWrapper,
 			{
 				headerContent: m(
-					".mr-negative-s.align-self-end.plr-l",
-					m(Button, {
-						label: "addUsers_action",
-						type: ButtonType.Primary,
-						click: () => this.addButtonClicked(),
-					}),
+					".flex.flex-end.center-vertically.plr-l.list-border-bottom",
+					m(
+						".mr-negative-s",
+						m(Button, {
+							label: "addUsers_action",
+							type: ButtonType.Primary,
+							click: () => this.addButtonClicked(),
+						}),
+					),
 				),
 			},
 			m(this.list),
@@ -212,83 +215,70 @@ export class UserListView implements UpdatableSettingsViewer {
 }
 
 export class UserRow implements VirtualRow<GroupInfo> {
-	top: number
+	top: number = 0
 	domElement: HTMLElement | null = null // set from List
+	entity: GroupInfo | null = null
+	private nameDom!: HTMLElement
+	private addressDom!: HTMLElement
+	private adminIconDom!: HTMLElement
+	private deletedIconDom!: HTMLElement
+	private selectionUpdater!: SelectableRowSelectedSetter
 
-	entity: GroupInfo | null
-	private _domName!: HTMLElement
-	private _domAddress!: HTMLElement
-	private _domAdminIcon!: HTMLElement
-	private _domDeletedIcon!: HTMLElement
-	private readonly _userListView: UserListView
-
-	constructor(userListView: UserListView) {
-		this._userListView = userListView
-		this.top = 0
-		this.entity = null
-	}
+	constructor(private readonly isAdmin: (groupInfo: GroupInfo) => boolean) {}
 
 	update(groupInfo: GroupInfo, selected: boolean): void {
 		if (!this.domElement) {
 			return
 		}
 
-		if (selected) {
-			this.domElement.classList.add("row-selected")
-		} else {
-			this.domElement.classList.remove("row-selected")
-		}
+		this.selectionUpdater(selected, false)
 
-		this._domName.textContent = groupInfo.name
-		this._domAddress.textContent = groupInfo.mailAddress ? groupInfo.mailAddress : ""
+		this.nameDom.textContent = groupInfo.name
+		this.addressDom.textContent = groupInfo.mailAddress ? groupInfo.mailAddress : ""
 
-		if (this._userListView.isAdmin(groupInfo)) {
-			this._domAdminIcon.style.display = ""
-		} else {
-			this._domAdminIcon.style.display = "none"
-		}
-
-		if (groupInfo.deleted) {
-			this._domDeletedIcon.style.display = ""
-		} else {
-			this._domDeletedIcon.style.display = "none"
-		}
+		setVisibility(this.adminIconDom, this.isAdmin(groupInfo))
+		setVisibility(this.deletedIconDom, groupInfo.deleted != null)
 	}
 
 	/**
 	 * Only the structure is managed by mithril. We set all contents on our own (see update) in order to avoid the vdom overhead (not negligible on mobiles)
 	 */
-	render(): any {
-		let elements = [
-			m(".top", [
-				m(".name", {
-					oncreate: (vnode) => (this._domName = vnode.dom as HTMLElement),
-				}),
-			]),
-			m(".bottom.flex-space-between", [
-				m("small.mail-address", {
-					oncreate: (vnode) => (this._domAddress = vnode.dom as HTMLElement),
-				}),
-				m(".icons.flex", [
-					m(Icon, {
-						icon: BootIcons.Settings,
-						oncreate: (vnode) => (this._domAdminIcon = vnode.dom as HTMLElement),
-						class: "svg-list-accent-fg",
-						style: {
-							display: "none",
-						},
-					}),
-					m(Icon, {
-						icon: Icons.Trash,
-						oncreate: (vnode) => (this._domDeletedIcon = vnode.dom as HTMLElement),
-						class: "svg-list-accent-fg",
-						style: {
-							display: "none",
-						},
+	render(): Children {
+		return m(
+			SelectableRowContainer,
+			{
+				onSelectedChangeRef: (updater) => (this.selectionUpdater = updater),
+			},
+			m(".flex.col.flex-grow", [
+				m(".badge-line-height", [
+					m("", {
+						oncreate: (vnode) => (this.nameDom = vnode.dom as HTMLElement),
 					}),
 				]),
+				m(".flex-space-between.mt-xxs", [
+					m(".smaller", {
+						oncreate: (vnode) => (this.addressDom = vnode.dom as HTMLElement),
+					}),
+					m(".icons.flex", [
+						m(Icon, {
+							icon: BootIcons.Settings,
+							oncreate: (vnode) => (this.adminIconDom = vnode.dom as HTMLElement),
+							class: "svg-list-accent-fg",
+							style: {
+								display: "none",
+							},
+						}),
+						m(Icon, {
+							icon: Icons.Trash,
+							oncreate: (vnode) => (this.deletedIconDom = vnode.dom as HTMLElement),
+							class: "svg-list-accent-fg",
+							style: {
+								display: "none",
+							},
+						}),
+					]),
+				]),
 			]),
-		]
-		return elements
+		)
 	}
 }

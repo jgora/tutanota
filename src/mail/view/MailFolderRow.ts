@@ -8,6 +8,7 @@ import { IconButton, IconButtonAttrs } from "../../gui/base/IconButton.js"
 import { AllIcons, Icon } from "../../gui/base/Icon.js"
 import { Icons } from "../../gui/base/icons/Icons.js"
 import { stateBgHover } from "../../gui/builtinThemes.js"
+import { client } from "../../misc/ClientDetector.js"
 
 export type MailFolderRowAttrs = {
 	count: number
@@ -25,6 +26,8 @@ export type MailFolderRowAttrs = {
 }
 
 export class MailFolderRow implements Component<MailFolderRowAttrs> {
+	private hovered: boolean = false
+
 	view(vnode: Vnode<MailFolderRowAttrs>): Children {
 		const { count, button, rightButton, expanded, indentationLevel, icon, hasChildren, editMode } = vnode.attrs
 
@@ -37,6 +40,12 @@ export class MailFolderRow implements Component<MailFolderRowAttrs> {
 			{
 				style: {
 					background: isNavButtonSelected(button) ? stateBgHover : "",
+				},
+				onmouseenter: () => {
+					this.hovered = true
+				},
+				onmouseleave: () => {
+					this.hovered = false
 				},
 			},
 			[
@@ -80,16 +89,31 @@ export class MailFolderRow implements Component<MailFolderRowAttrs> {
 						},
 					}),
 				),
-				m(NavButton, button),
-				rightButton
+				m(NavButton, {
+					...button,
+					onfocus: () => (this.hovered = true),
+					onblur: () => {
+						// The setTimout is so that there is some time to tab to the rightButton
+						// otherwise it disappears immediately and is unreachable on keyboard
+						setTimeout(() => {
+							this.hovered = false
+						}, 5)
+					},
+				}),
+				// show the edit button in either edit mode or on hover (excluding hover on mobile)
+				rightButton && (editMode || (!client.isMobileDevice() && this.hovered))
 					? m(IconButton, {
 							...rightButton,
+							onblur: () => {
+								m.redraw()
+							},
 					  })
 					: m("", { style: { marginRight: px(size.hpad_button) } }, [
 							m(CounterBadge, {
 								count,
 								color: theme.navigation_button_icon,
 								background: getNavButtonIconBackground(),
+								showFullCount: true,
 							}),
 					  ]),
 			],

@@ -21,7 +21,6 @@ import { client } from "../../misc/ClientDetector.js"
 import { showProgressDialog } from "../../gui/dialogs/ProgressDialog.js"
 import { LockedError } from "../../api/common/error/RestError.js"
 import { ifAllowedTutanotaLinks } from "../../gui/base/GuiUtils.js"
-import { styles } from "../../gui/styles.js"
 
 export function insertInlineImageB64ClickHandler(ev: Event, handler: ImageHandler) {
 	showFileChooser(true, ALLOWED_IMAGE_FORMATS).then((files) => {
@@ -139,20 +138,22 @@ export async function makeAssignMailsButtons(viewModel: MailViewerViewModel): Pr
 	})
 }
 
-export function mailViewerMoreActions(viewModel: MailViewerViewModel): Array<DropdownButtonAttrs> {
+export function mailViewerMoreActions(viewModel: MailViewerViewModel, showReadButton: boolean = true): Array<DropdownButtonAttrs> {
 	const moreButtons: Array<DropdownButtonAttrs> = []
-	if (viewModel.isUnread()) {
-		moreButtons.push({
-			label: "markRead_action",
-			click: () => viewModel.setUnread(false),
-			icon: Icons.Eye,
-		})
-	} else {
-		moreButtons.push({
-			label: "markUnread_action",
-			click: () => viewModel.setUnread(true),
-			icon: Icons.NoEye,
-		})
+	if (showReadButton) {
+		if (viewModel.isUnread()) {
+			moreButtons.push({
+				label: "markRead_action",
+				click: () => viewModel.setUnread(false),
+				icon: Icons.Eye,
+			})
+		} else {
+			moreButtons.push({
+				label: "markUnread_action",
+				click: () => viewModel.setUnread(true),
+				icon: Icons.NoEye,
+			})
+		}
 	}
 
 	if (!client.isMobileDevice() && viewModel.canExport()) {
@@ -283,12 +284,4 @@ function reportMail(viewModel: MailViewerViewModel) {
 			),
 		okAction: null,
 	})
-}
-
-export function mailViewerMargin() {
-	return styles.isSingleColumnLayout() ? "mlr" : "mlr-l"
-}
-
-export function mailViewerPadding() {
-	return styles.isSingleColumnLayout() ? "plr" : "plr-l"
 }

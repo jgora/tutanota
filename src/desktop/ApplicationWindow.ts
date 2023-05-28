@@ -1,11 +1,11 @@
 import type { BrowserWindow, ContextMenuParams, NativeImage, Result, Session } from "electron"
 import type { WindowBounds, WindowManager } from "./DesktopWindowManager"
-import url from "url"
+import url from "node:url"
 import type { lazy } from "@tutao/tutanota-utils"
 import { capitalizeFirstLetter, noOp, typedEntries, typedKeys } from "@tutao/tutanota-utils"
 import { Keys } from "../api/common/TutanotaConstants"
 import type { Key } from "../misc/KeyManager"
-import path from "path"
+import path from "node:path"
 import type { TranslationKey } from "../misc/LanguageViewModel"
 import { lang } from "../misc/LanguageViewModel"
 import { log } from "./DesktopLog"
@@ -209,7 +209,7 @@ export class ApplicationWindow {
 		const theme = await this.themeFacade.getCurrentThemeWithFallback()
 
 		if (theme) {
-			this._browserWindow.setBackgroundColor(theme.content_bg)
+			this._browserWindow.setBackgroundColor(theme.navigation_bg)
 		}
 	}
 

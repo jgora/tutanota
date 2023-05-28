@@ -139,6 +139,7 @@ export class SecondFactorEditDialog {
 			m(TextField, {
 				label: "totpCode_label",
 				value: this.model.totpCode,
+				helpLabel: () => this.statusMessage(),
 				autocompleteAs: Autocomplete.oneTimeCode,
 				oninput: (newValue) => this.model.onTotpValueChange(newValue),
 			}),
@@ -151,7 +152,7 @@ export class SecondFactorEditDialog {
 		if (otpInfo) {
 			const qrCodeSvg = assertNotNull(otpInfo.qrCodeSvg)
 			// sanitized in the model
-			return m(".flex-center.pt-m", m.trust(qrCodeSvg))
+			return m(".flex-center.pt", m.trust(qrCodeSvg))
 		} else {
 			return null
 		}

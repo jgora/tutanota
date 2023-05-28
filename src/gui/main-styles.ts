@@ -3,12 +3,14 @@ import { px, size } from "./size"
 import { client } from "../misc/ClientDetector"
 import { lang } from "../misc/LanguageViewModel"
 import { noselect, position_absolute, positionValue } from "./mixins"
-import { assertMainOrNodeBoot, isAdminClient, isApp, isElectronClient } from "../api/common/Env"
+import { assertMainOrNode, isAdminClient, isApp, isElectronClient } from "../api/common/Env"
 import { getElevatedBackground, getNavigationMenuBg, theme } from "./theme"
 import { BrowserType } from "../misc/ClientConstants"
-import { stateBgActive, stateBgFocus, stateBgHover } from "./builtinThemes.js"
+import { stateBgActive, stateBgFocus, stateBgHover, stateBgLike } from "./builtinThemes.js"
+import { FontIcons } from "./base/icons/FontIcons.js"
+import { DefaultAnimationTime } from "./animation/Animations.js"
 
-assertMainOrNodeBoot()
+assertMainOrNode()
 
 export function getFonts(): string {
 	// see https://bitsofco.de/the-new-system-font-stack/
@@ -29,7 +31,9 @@ export function getFonts(): string {
 	return fonts.join(", ")
 }
 
-const boxShadow = `0 2px 12px rgba(0, 0, 0, 0.4), 0 10px 40px rgba(0, 0, 0, 0.3)`
+const boxShadow = `0 10px 20px rgba(0,0,0,0.19), 0 6px 6px rgba(0,0,0,0.23)`
+const searchBarShadow = "0px 2px 4px rgb(0, 0, 0, 0.12)"
+
 styles.registerStyle("main", () => {
 	return {
 		"#link-tt": isElectronClient()
@@ -260,6 +264,9 @@ styles.registerStyle("main", () => {
 		".mt-xs": {
 			"margin-top": px(size.vpad_xs),
 		},
+		".mt-xxs": {
+			"margin-top": px(2),
+		},
 		".mt-s": {
 			"margin-top": px(size.vpad_small),
 		},
@@ -344,9 +351,6 @@ styles.registerStyle("main", () => {
 		".p0": {
 			padding: "0",
 		},
-		".pt-responsive": {
-			"padding-top": px(size.hpad_large * 3),
-		},
 		".pt": {
 			"padding-top": px(size.vpad),
 		},
@@ -360,7 +364,7 @@ styles.registerStyle("main", () => {
 			"padding-top": px(size.vpad_large),
 		},
 		".pt-m": {
-			"padding-top": px(size.vpad),
+			"padding-top": px(size.hpad),
 		},
 		".pt-ml": {
 			"padding-top": px(size.vpad_ml),
@@ -394,7 +398,7 @@ styles.registerStyle("main", () => {
 			"padding-bottom": px(size.vpad_xl),
 		},
 		".pb-m": {
-			"padding-bottom": px(size.vpad),
+			"padding-bottom": px(size.hpad),
 		},
 		".pb-ml": {
 			"padding-bottom": px(size.vpad_ml),
@@ -440,6 +444,10 @@ styles.registerStyle("main", () => {
 		".plr-l": {
 			"padding-left": px(size.hpad_large),
 			"padding-right": px(size.hpad_large),
+		},
+		".plr-2l": {
+			"padding-left": px(size.hpad_large * 2),
+			"padding-right": px(size.hpad_large * 2),
 		},
 		".pl-l": {
 			"padding-left": px(size.hpad_large),
@@ -524,6 +532,9 @@ styles.registerStyle("main", () => {
 		".break-word": {
 			"word-break": "normal",
 			"overflow-wrap": "break-word",
+		},
+		".break-all": {
+			"word-break": "break-all",
 		},
 		".break-word-links a": {
 			"word-wrap": "break-word",
@@ -705,25 +716,25 @@ styles.registerStyle("main", () => {
 		"::-webkit-scrollbar": !client.isMobileDevice()
 			? {
 					background: "transparent",
-					width: "8px", // width of vertical scrollbar
-					height: "8px", // width of horizontal scrollbar
+					width: "3px", // width of vertical scrollbar
+					height: "3px", // width of horizontal scrollbar
 			  }
 			: {},
 		"::-webkit-scrollbar-thumb": !client.isMobileDevice()
 			? {
 					background: theme.content_button,
-					"border-radius": "4px",
+					"border-radius": "3px",
 			  }
 			: {},
 		// scrollbar will be disabled for mobile devices, even with .scroll applied,
 		// apply this class if you need it to show
 		".visible-scrollbar::-webkit-scrollbar": {
 			background: "transparent",
-			width: "8px",
+			width: "6px",
 		},
 		".visible-scrollbar::-webkit-scrollbar-thumb": {
 			background: theme.content_button,
-			"border-radius": "4px",
+			"border-radius": "3px",
 		},
 		//TODO: migrate to .text-center
 		".center": {
@@ -975,6 +986,9 @@ styles.registerStyle("main", () => {
 			"border-top-left-radius": px(size.border_radius),
 			"border-top-right-radius": px(size.border_radius),
 		},
+		".border-radius-top-left-big": {
+			"border-top-left-radius": px(size.border_radius_big),
+		},
 		".border-radius-bottom": {
 			"border-bottom-left-radius": px(size.border_radius),
 			"border-bottom-right-radius": px(size.border_radius),
@@ -1011,13 +1025,26 @@ styles.registerStyle("main", () => {
 			height: px(size.icon_size_medium),
 			width: px(size.icon_size_medium),
 		},
+		// a bit cursed solution to make the visible icon not too huge relative to the tiny "close" icon that we have but also to keep the size consistent
+		// with icon-large so that the text field doesn't jump around
 		".icon-progress-search": {
-			height: px(20),
-			width: px(20),
+			height: px(size.icon_size_large),
+			width: px(size.icon_size_large),
 		},
 		".icon-progress-search > svg": {
 			height: px(20),
 			width: px(20),
+		},
+		".search-bar": {
+			transition: "all 200ms",
+			"background-color": stateBgLike,
+		},
+		".search-bar:hover": {
+			"background-color": stateBgHover,
+		},
+		".search-bar[focused=true]": {
+			"background-color": theme.content_bg,
+			"box-shadow": searchBarShadow,
 		},
 		".icon-progress-tiny": {
 			height: px(15),
@@ -1146,18 +1173,17 @@ styles.registerStyle("main", () => {
 			"padding-right": "env(safe-area-inset-right)",
 			"padding-left": "env(safe-area-inset-left)",
 		},
+		".mt-safe-inset": {
+			"margin-top": "env(safe-area-inset-top)",
+		},
 		// header
 		".header-nav": {
-			position: "relative",
 			height: px(size.navbar_height),
-			"background-color": theme.header_bg,
-			"box-shadow": `0 2px 4px 0 ${theme.header_box_shadow_bg}`,
+			"background-color": theme.navigation_bg,
 			"z-index": 2,
-			// box_shadow will be overruled by the views background, otherwise
-			"margin-top": "env(safe-area-inset-top)", // insets for iPhone X
 		},
 		"bottom-nav, .bottom-nav": {
-			"box-shadow": `0 -2px 4px 0 ${theme.header_box_shadow_bg}`,
+			"border-top": `1px solid ${theme.navigation_border}`,
 			height: positionValue(size.bottom_nav_bar),
 			background: theme.header_bg,
 			"margin-bottom": "env(safe-area-inset-bottom)",
@@ -1175,17 +1201,14 @@ styles.registerStyle("main", () => {
 			overflow: "hidden",
 		},
 		".dot": {
-			width: px(size.hpad_large_mobile + 1),
-			height: px(size.hpad_large_mobile + 1),
+			width: px(size.dot_size),
+			height: px(size.dot_size),
 			"border-radius": "50%",
 			overflow: "hidden",
 			"margin-top": px(6),
 		},
 		".news-button": {
 			position: "relative",
-		},
-		".logo": {
-			height: px(size.header_logo_height),
 		},
 		".logo-text": {
 			height: px(size.header_logo_height),
@@ -1202,30 +1225,13 @@ styles.registerStyle("main", () => {
 			"background-repeat": "no-repeat",
 			"background-size": "auto 100%",
 		},
-		".header-left": {
-			position: "absolute",
-			left: "0",
-			top: 0,
-			bottom: 0,
-		},
-		".header-right": {
-			position: "absolute",
-			left: "56px",
-			right: "0",
-			top: 0,
-			bottom: 0,
-		},
 		".nav-bar-spacer": {
 			width: "0px",
 			height: "22px",
 			"margin-left": "2px",
-			"margin-top": "10px",
 			"border-color": theme.navigation_border,
 			"border-width": "1px",
 			"border-style": "solid",
-		},
-		".search-bar > .text-field": {
-			"padding-top": "0 !important",
 		},
 		// dialogs
 		".dialog": {
@@ -1316,11 +1322,6 @@ styles.registerStyle("main", () => {
 			"border-color": `${theme.list_accent_fg} !important`,
 			color: `${theme.list_accent_fg}`,
 		},
-		// FIXME why??
-		// ".folder-row > a": {
-		// 	"flex-grow": 1,
-		// 	"margin-left": px(-size.hpad_button - size.border_selection),
-		// },
 		".hoverable-list-item:hover": {
 			"border-color": `${theme.list_accent_fg} !important`,
 			color: `${theme.list_accent_fg}`,
@@ -1361,23 +1362,12 @@ styles.registerStyle("main", () => {
 			"list-style": "none",
 			margin: 0,
 			padding: 0,
-			"border-bottom": `1px solid ${theme.list_border}`,
-		},
-		".list-alternate-background": {
-			background: `repeating-linear-gradient(to bottom, ${theme.list_bg}, ${theme.list_bg} ${px(size.list_row_height)},  ${theme.list_alternate_bg} ${px(
-				size.list_row_height,
-			)}, ${theme.list_alternate_bg} ${px(size.list_row_height * 2)})`,
 		},
 		".list-row": {
 			position: "absolute",
 			left: 0,
 			right: 0,
-			"background-color": theme.list_alternate_bg,
 			height: px(size.list_row_height),
-			"border-left": px(size.border_selection) + " solid transparent",
-		},
-		".list-row > div": {
-			"margin-left": px(-size.border_selection),
 		},
 		".odd-row": {
 			"background-color": theme.list_bg,
@@ -1476,8 +1466,6 @@ styles.registerStyle("main", () => {
 			"padding-right": px(size.vpad),
 		},
 		"button, .nav-button": {
-			// FIXME whyyy?
-			// position: "relative",
 			border: 0,
 			cursor: "pointer",
 			overflow: "hidden",
@@ -1530,7 +1518,6 @@ styles.registerStyle("main", () => {
 			"padding-top": px(size.text_bubble_tpad),
 		},
 		".bubble": {
-			"max-width": "300px",
 			"border-radius": px(size.border_radius),
 			height: px(size.button_height_bubble),
 			"background-color": theme.button_bubble_bg,
@@ -1549,6 +1536,10 @@ styles.registerStyle("main", () => {
 			"border-radius": px(size.border_radius),
 			margin: px(size.vpad_small / 2),
 			"background-color": theme.button_bubble_bg,
+		},
+		".bubble-color": {
+			"background-color": theme.button_bubble_bg,
+			color: theme.button_bubble_fg,
 		},
 		mark: {
 			// 'background-color': theme.content_button,
@@ -1760,6 +1751,72 @@ styles.registerStyle("main", () => {
 			"border-style": "solid",
 			"border-radius": "2px",
 		},
+		".checkbox": {
+			appearance: "none",
+			// reset browser style
+			margin: "0",
+			display: "block",
+			width: px(size.checkbox_size),
+			height: px(size.checkbox_size),
+			border: `2px solid ${theme.content_button}`,
+			"border-radius": "3px",
+			position: "relative",
+			transition: `border ${DefaultAnimationTime}ms cubic-bezier(.4,.0,.23,1)`,
+			opacity: "0.8",
+		},
+		".checkbox:hover": {
+			opacity: "1",
+		},
+		".checkbox:checked": {
+			border: `7px solid ${theme.content_accent}`,
+			opacity: "1",
+		},
+		".checkbox:checked:after": {
+			display: "inline-flex",
+		},
+		".checkbox:after": {
+			"font-family": "'Ionicons'",
+			content: `'${FontIcons.Checkbox}'`,
+			position: "absolute",
+			display: "none",
+			"font-size": "12px",
+			// related to border width
+			top: "-6px",
+			left: "-6px",
+			right: 0,
+			bottom: 0,
+			"line-height": "12px",
+			color: theme.content_bg,
+			"align-items": "center",
+			width: "12px",
+			height: "12px",
+		},
+		".checkbox:before": {
+			content: "''",
+			position: "absolute",
+			width: "30px",
+			height: "30px",
+			// position relative to the inner size of checkbox (inside the border)
+			top: "-10px",
+			left: "-10px",
+			"border-radius": px(size.border_radius),
+			// position is relate to padding and we animate padding so to keep the checkbox in place we also animate position so it looks like it doesn't move
+			transition: `all ${DefaultAnimationTime}ms cubic-bezier(.4,.0,.23,1)`,
+		},
+		".checkbox:checked:before": {
+			// position relative to the inner size of the checkbox (inside the border) and selected checkbox has border 50%
+			top: "-15px",
+			left: "-15px",
+		},
+		".checkbox:hover:before": {
+			background: stateBgHover,
+		},
+		".checkbox:active:before": {
+			background: stateBgActive,
+		},
+		".list-checkbox": {
+			opacity: "0.4",
+		},
 		".calendar-alternate-background": {
 			background: `${theme.list_alternate_bg} !important`,
 		},
@@ -1962,31 +2019,6 @@ styles.registerStyle("main", () => {
 		"drawer-menu": {
 			width: px(size.drawer_menu_width),
 			background: getNavigationMenuBg(),
-			"border-right": `0.5px solid ${theme.navigation_border}`,
-		},
-		".mobile .header-nav": {
-			height: px(size.navbar_height_mobile),
-		},
-		".mobile .header-logo": {
-			height: px(size.header_logo_height_mobile),
-		},
-		".mobile .header-logo > svg": {
-			height: px(size.header_logo_height_mobile),
-			width: "auto",
-		},
-		".mobile .header-left": {
-			width: `${px(size.navbar_edge_width_mobile)}`,
-		},
-		".mobile .header-middle": {
-			position: "absolute",
-			right: px(size.navbar_edge_width_mobile),
-			left: px(size.navbar_edge_width_mobile),
-			top: 0,
-			bottom: 0,
-		},
-		".mobile .header-right": {
-			left: "auto",
-			width: `${px(size.navbar_edge_width_mobile)}`,
 		},
 		".menu-shadow": {
 			"box-shadow": "0 4px 5px 2px rgba(0,0,0,0.14), 0 4px 5px 2px rgba(0,0,0,0.14), 0 4px 5px 2px rgba(0,0,0,0.14)",
@@ -2000,18 +2032,9 @@ styles.registerStyle("main", () => {
 				top: 0,
 				bottom: 0,
 			},
-			".logo-height": {
-				height: px(size.header_logo_height_mobile),
-			},
-			".logo-height > svg": {
-				height: px(size.header_logo_height_mobile),
-			},
 			".fixed-bottom-right": {
 				bottom: px(size.hpad_large_mobile + size.bottom_nav_bar),
 				right: px(size.hpad_large_mobile),
-			},
-			".pt-responsive": {
-				"padding-top": px(size.hpad_large),
 			},
 			".custom-logo": {
 				width: px(40),
