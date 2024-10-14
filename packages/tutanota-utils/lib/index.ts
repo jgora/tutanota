@@ -14,6 +14,7 @@ export {
 	filterNull,
 	last,
 	isEmpty,
+	isNotEmpty,
 	lastThrow,
 	getFirstOrThrow,
 	first,
@@ -26,7 +27,6 @@ export {
 	groupByAndMap,
 	groupBy,
 	splitInChunks,
-	flat,
 	flatMap,
 	insertIntoSortedArray,
 	zip,
@@ -41,9 +41,11 @@ export {
 	partitionAsync,
 	arrayOf,
 	count,
+	zeroOut,
+	compare,
 } from "./ArrayUtils.js"
 export { AsyncResult } from "./AsyncResult.js"
-export { intersection } from "./CollectionUtils.js"
+export { intersection, trisectingDiff, setAddAll, max, maxBy, findBy, min, minBy, mapWith, mapWithout, setEquals, setMap } from "./CollectionUtils.js"
 export {
 	DAY_IN_MILLIS,
 	getStartOfNextDay,
@@ -63,6 +65,7 @@ export {
 	isValidDate,
 	millisToDays,
 	daysToMillis,
+	TIMESTAMP_ZERO_YEAR,
 } from "./DateUtils.js"
 export {
 	uint8ArrayToArrayBuffer,
@@ -83,13 +86,15 @@ export {
 	decodeQuotedPrintable,
 	decodeBase64,
 	stringToBase64,
+	byteArraysToBytes,
+	bytesToByteArrays,
 } from "./Encoding.js"
 export type { Base64, Base64Ext, Base64Url, Hex } from "./Encoding.js"
 export { LazyLoaded } from "./LazyLoaded.js"
 export { mergeMaps, getFromMap, addMapEntry, deleteMapEntry } from "./MapUtils.js"
 export { pMap } from "./PromiseMap.js"
 export type { Mapper } from "./PromiseMap.js"
-export { mapInCallContext, promiseMap, promiseMapCompat, PromisableWrapper, delay, tap, ofClass, promiseFilter } from "./PromiseUtils.js"
+export { mapInCallContext, promiseMap, promiseMapCompat, PromisableWrapper, delay, tap, ofClass, promiseFilter, settledThen } from "./PromiseUtils.js"
 export type { PromiseMapFn, $Promisable } from "./PromiseUtils.js"
 export { SortedArray } from "./SortedArray.js"
 export type { CompareFn } from "./SortedArray.js"
@@ -106,9 +111,8 @@ export {
 	toLowerCase,
 	localeCompare,
 	byteLength,
-	replaceAll,
 } from "./StringUtils.js"
-export { TypeRef, isSameTypeRefByAttr, isSameTypeRef, getTypeId } from "./TypeRef.js"
+export { TypeRef, isSameTypeRefByAttr, isSameTypeRef, getTypeId, isSameTypeRefNullable } from "./TypeRef.js"
 export {
 	defer,
 	deferWithHandler,
@@ -146,9 +150,29 @@ export {
 	insideRect,
 	mapNullable,
 	mapObject,
+	Require,
+	memoizedWithHiddenArgument,
+	BoundedExecutor,
+	freshVersioned,
 } from "./Utils.js"
-export type { DeferredObject, lazy, lazyAsync, Thunk, DeferredObjectWithHandler, MaybeLazy, TimeoutSetter, ErrorInfo } from "./Utils.js"
+export type { Callback, DeferredObject, lazy, lazyAsync, Thunk, DeferredObjectWithHandler, MaybeLazy, TimeoutSetter, ErrorInfo, Versioned } from "./Utils.js"
+
+export {
+	callWebAssemblyFunctionWithArguments,
+	allocateBuffer,
+	Ptr,
+	ConstPtr,
+	FreeFN,
+	MutableUint8Array,
+	SecureFreeUint8Array,
+	mutableSecureFree,
+	secureFree,
+	mutable,
+	WASMExports,
+} from "./WebAssembly.js"
 
 export { mod, clamp } from "./MathUtils.js"
 
 export { renderCsv } from "./Csv.js"
+
+export { tokenize } from "./Tokenizer.js"

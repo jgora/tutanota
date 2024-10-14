@@ -2,7 +2,7 @@ pipeline {
 	environment {
 		VERSION = sh(returnStdout: true, script: "${env.NODE_PATH}/node -p -e \"require('./package.json').version\" | tr -d \"\n\"")
 		APK_SIGN_STORE = '/opt/android-keystore/android.jks'
-		PATH = "${env.NODE_PATH}:${env.PATH}"
+		PATH = "${env.NODE_PATH}:${env.PATH}:/home/jenkins/emsdk/upstream/bin/:/home/jenkins/emsdk/:/home/jenkins/emsdk/upstream/emscripten"
 		ANDROID_SDK_ROOT = "/opt/android-sdk-linux"
 		ANDROID_HOME = "/opt/android-sdk-linux"
 		GITHUB_RELEASE_PAGE = "https://github.com/tutao/tutanota/releases/tag/tutanota-android-release-${VERSION}"
@@ -10,6 +10,10 @@ pipeline {
 
 	agent {
 		label 'linux'
+	}
+
+	tools {
+		jdk 'jdk-21.0.2'
 	}
 
 	parameters {
@@ -42,7 +46,6 @@ pipeline {
 				}
 			}
 		}
-
 		stage('Build') {
 			stages {
 				stage('Testing') {
@@ -69,12 +72,12 @@ pipeline {
 						]) {
 							sh 'node android.js -b releaseTest test'
 						}
-						stash includes: "build/app-android/tutanota-tutao-releaseTest-${VERSION}.apk", name: 'apk-testing'
+						stash includes: "build/app-android/tutanota-app-tutao-releaseTest-${VERSION}.apk", name: 'apk-testing'
 					}
 				} // stage testing
 				stage('Production') {
 					when {
-						expression { params.RELEASE }
+						expression { return params.RELEASE }
 					}
 					environment {
 						APK_SIGN_ALIAS = "tutao.de"
@@ -97,7 +100,7 @@ pipeline {
 						]) {
 							sh 'node android.js -b release prod'
 						}
-						stash includes: "build/app-android/tutanota-tutao-release-${VERSION}.apk", name: 'apk-production'
+						stash includes: "build/app-android/tutanota-app-tutao-release-${VERSION}.apk", name: 'apk-production'
 					}
 				} // stage production
 			}
@@ -105,7 +108,7 @@ pipeline {
 
 		stage('Publish') {
 			when {
-				expression { params.RELEASE }
+				expression { return params.RELEASE }
 			}
 			stages {
 				stage('Testing') {
@@ -118,26 +121,29 @@ pipeline {
 									groupId: "app",
 									artifactId: "android-test",
 									version: "${VERSION}",
-									assetFilePath: "${WORKSPACE}/build/app-android/tutanota-tutao-releaseTest-${VERSION}.apk",
+									assetFilePath: "${WORKSPACE}/build/app-android/tutanota-app-tutao-releaseTest-${VERSION}.apk",
 									fileExtension: 'apk'
 							)
 
-							// This doesn't publish to the main app on play store,
-							// instead it gets published to the hidden "tutanota-test" app
-							// this happens because the AppId is set to de.tutao.tutanota.test by the android build
-							// and play store knows which app to publish just based on the id
-							androidApkUpload(
-									googleCredentialsId: 'android-app-publisher-credentials',
-									apkFilesPattern: "build/app-android/tutanota-tutao-releaseTest-${VERSION}.apk",
-									trackName: 'internal',
-									rolloutPercentage: '100%',
-									recentChangeList: [
-											[
-													language: "en-US",
-													text    : "see: ${GITHUB_RELEASE_PAGE}"
-											]
-									]
-							)
+							catchError(stageResult: 'UNSTABLE', buildResult: 'SUCCESS', message: 'Failed to upload android test app to Play Store') {
+								// This doesn't publish to the main app on play store,
+								// instead it gets published to the hidden "tutanota-test" app
+								// this happens because the AppId is set to de.tutao.tutanota.test by the android build
+								// and play store knows which app to publish just based on the id
+								androidApkUpload(
+										googleCredentialsId: 'android-app-publisher-credentials',
+										apkFilesPattern: "build/app-android/tutanota-app-tutao-releaseTest-${VERSION}.apk",
+										trackName: 'internal',
+										rolloutPercentage: '100%',
+										recentChangeList: [
+												[
+														language: "en-US",
+														text    : "see: ${GITHUB_RELEASE_PAGE}"
+												]
+										]
+								) // androidApkUpload
+							} // catchError
+
 						}
 					}
 				} // stage testing
@@ -147,7 +153,7 @@ pipeline {
 						unstash 'apk-production'
 
 						script {
-							def filePath = "build/app-android/tutanota-tutao-release-${VERSION}.apk"
+							def filePath = "build/app-android/tutanota-app-tutao-release-${VERSION}.apk"
 							def util = load "ci/jenkins-lib/util.groovy"
 
 							util.publishToNexus(
@@ -179,14 +185,14 @@ pipeline {
 		}
 		stage('Tag and publish release page') {
 			when {
-				expression { params.RELEASE }
+				expression { return params.RELEASE }
 			}
 			steps {
 				// Needed to upload it
 				unstash 'apk-production'
 
 				script {
-					def filePath = "build/app-android/tutanota-tutao-release-${VERSION}.apk"
+					def filePath = "build/app-android/tutanota-app-tutao-release-${VERSION}.apk"
 
 					writeFile file: "notes.txt", text: params.releaseNotes
 					catchError(stageResult: 'UNSTABLE', buildResult: 'SUCCESS', message: 'Failed to create github release page for android') {

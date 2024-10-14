@@ -1,33 +1,29 @@
 pipeline {
     environment {
-        NODE_MAC_PATH = '/usr/local/opt/node@16/bin/'
+    	// on m1 macs, this is a symlink that must be updated. see wiki.
         VERSION = sh(returnStdout: true, script: "${env.NODE_PATH}/node -p -e \"require('./package.json').version\" | tr -d \"\n\"")
+        TMPDIR='/tmp'
     }
     options {
-        preserveStashes()
-    }
+		preserveStashes()
+	}
 
-    parameters {
-        booleanParam(
-            name: 'RELEASE',
-            defaultValue: false,
-            description: "Prepare a release version (doesn't publish to production, this is done manually)"
-        )
-        booleanParam(
-            name: 'UPDATE_DICTIONARIES',
-            defaultValue: false,
-            description: 'pull the spellcheck dictionaries from github when producing .debs'
-        )
+	parameters {
+		booleanParam(
+			name: 'RELEASE',
+			defaultValue: false,
+			description: "Prepare a release version (doesn't publish to production, this is done manually)"
+		)
 		persistentText(
 			name: "releaseNotes",
 			defaultValue: "",
 			description: "release notes for this build"
 		 )
-    }
+	}
 
-    agent {
-        label 'master'
-    }
+	agent {
+		label 'master'
+	}
 
     stages {
 		stage('Check Github') {
@@ -38,23 +34,25 @@ pipeline {
 				}
 			}
 		}
-
-    	stage('Build dependencies') {
-    		parallel {
+		stage('Build dependencies') {
+			parallel {
 				stage('Build webapp') {
-					environment {
-						PATH = "${env.NODE_PATH}:${env.PATH}"
-					}
 					agent {
-						label 'linux'
-					}
+						dockerfile {
+							filename 'linux-build.dockerfile'
+							label 'master'
+							dir 'ci/containers'
+							additionalBuildArgs "--format docker"
+							args '--network host'
+						} // docker
+					} // agent
 					steps {
 						sh 'npm ci'
 						sh 'npm run build-packages'
 						sh 'node webapp.js release'
 
 						// excluding web-specific and mobile specific parts which we don't need in desktop
-						stash includes: 'build/dist/**', excludes: '**/braintree.html, **/index.html, **/app.html, **/desktop.html, **/index-index.js, **/index-app.js, **/index-desktop.js, **/dist/sw.js', name: 'web_base'
+						stash includes: 'build/**', excludes: '**/braintree.html, **/index.html, **/app.html, **/desktop.html, **/index-index.js, **/index-app.js, **/index-desktop.js, **/sw.js', name: 'web_base'
 					}
 				}
 
@@ -65,17 +63,16 @@ pipeline {
 					steps {
 						bat "npm ci"
 
-						bat "node buildSrc\\nativeLibraryProvider.js keytar --force-rebuild --root-dir ${WORKSPACE}"
-						bat "node buildSrc\\nativeLibraryProvider.js better-sqlite3 --copy-target better_sqlite3 --force-rebuild --root-dir ${WORKSPACE}"
+						bat "node buildSrc\\getNativeLibrary.js better-sqlite3 --copy-target better_sqlite3 --force-rebuild --root-dir ${WORKSPACE}"
 						stash includes: 'native-cache/**/*', name: 'native_modules'
 					}
 				}
-    		}
-    	}
+			}
+		}
 
-        stage('Build desktop clients') {
-            parallel {
-                stage('Windows') {
+		stage('Build desktop clients') {
+			parallel {
+				stage('Windows') {
 					environment {
 						PATH = "${env.NODE_PATH}:${env.PATH}"
 					}
@@ -89,14 +86,14 @@ pipeline {
 						// so they will be picked up by our rollup plugin
 						unstash 'native_modules'
 
-						withCredentials([string(credentialsId: 'HSM_USER_PIN', variable: 'PW')]) {
+						// add DEBUG for electron-builder because it tends to not let us know about things failing
+						withCredentials([string(credentialsId: 'YUBI_28989236_PIN', variable: 'PW')]) {
 							sh '''
-							export HSM_USER_PIN=${PW};
-							export WIN_CSC_FILE="/opt/etc/codesign.crt";
-							node desktop --existing --platform win '''
+							export YUBI_PIN=${PW};
+							DEBUG=electron-builder node desktop --existing --platform win '''
 						}
 
-						dir('build') {
+						dir('artifacts') {
 							stash includes: 'desktop-test/*', name:'win_installer_test'
 							stash includes: 'desktop/*', name:'win_installer'
 						}
@@ -104,13 +101,13 @@ pipeline {
                 }
 
                 stage('Mac') {
-                    environment {
-                        PATH = "${env.NODE_MAC_PATH}:${env.PATH}"
-                    }
-                    agent {
-                        label 'mac'
-                    }
-                    steps {
+					environment {
+						PATH = "${env.NODE_MAC_PATH}:${env.PATH}"
+					}
+					agent {
+						label 'mac-m1'
+					}
+					steps {
 						initBuildArea()
 
 						withCredentials([
@@ -125,8 +122,8 @@ pipeline {
 								export APPLEID=${APPLEIDVAR};
 								export APPLEIDPASS=${APPLEIDPASSVAR};
 								export APPLETEAMID=${APPLETEAMIDVAR};
-								node desktop --existing --platform mac ''' + "${stage}"
-								dir('build') {
+								node desktop --existing --architecture universal --platform mac ''' + "${stage}"
+								dir('artifacts') {
 									if (params.RELEASE) {
 										stash includes: 'desktop-test/*', name:'mac_installer_test'
 									}
@@ -135,33 +132,56 @@ pipeline {
 							}
 						}
 					}
-                }
+				}
 
-                stage('Linux') {
-                    agent {
-                        label 'linux'
-                    }
-                    environment {
-                        PATH = "${env.NODE_PATH}:${env.PATH}"
-                    }
-                    steps {
+				stage('Linux') {
+					agent {
+						dockerfile {
+							filename 'linux-build.dockerfile'
+							label 'master'
+							dir 'ci/containers'
+							additionalBuildArgs "--format docker"
+							args '--network host'
+						} // docker
+					}
+					steps {
 						initBuildArea()
 
-                        sh 'node desktop --existing --platform linux'
+						sh 'node desktop --existing --platform linux'
 
-                        dir('build') {
-                        	stash includes: 'desktop-test/*', name:'linux_installer_test'
-                        	stash includes: 'desktop/*', name:'linux_installer'
-                        }
-                    }
-                }
-            }
-        }
+						dir('artifacts') {
+							stash includes: 'desktop-test/*', name:'linux_installer_test'
+							stash includes: 'desktop/*', name:'linux_installer'
+						}
+					}
+				}
+			}
+		}
 
+		stage('Preparation for build deb and publish') {
+			when { expression { return params.RELEASE } }
+			agent {
+				label 'master'
+			}
+			steps {
+				script {
+					def devicePath =  sh(script: 'lsusb | grep Nitro | sed -nr \'s|Bus (.*) Device ([^:]*):.*|/dev/bus/usb/\\1/\\2|p\'', returnStdout: true).trim()
+					env.DEVICE_PATH = devicePath
+				}
+			}
+		}
 		stage('Build deb and publish') {
-			when { expression { params.RELEASE } }
-			agent { label 'linux' }
-			environment { PATH = "${env.NODE_PATH}:${env.PATH}" }
+			when { expression { return params.RELEASE } }
+			agent {
+				dockerfile {
+					filename 'linux-build.dockerfile'
+					label 'master'
+					dir 'ci/containers'
+					additionalBuildArgs '--format docker'
+					args "--network host -v /run:/run:rw,z -v /opt/repository:/opt/repository:rw,z --device=${env.DEVICE_PATH}"
+				} // docker
+		    }
+		    environment { PATH = "${env.NODE_PATH}:${env.PATH}" }
 			steps {
 				sh 'npm ci'
 				sh 'npm run build-packages'
@@ -174,12 +194,6 @@ pipeline {
 					unstash 'linux_installer_test'
 					unstash 'mac_installer_test'
 					unstash 'win_installer_test'
-				}
-
-				script {
-					if (params.UPDATE_DICTIONARIES) {
-						sh 'node buildSrc/fetchDictionaries.js --publish'
-					}
 				}
 
 				withCredentials([string(credentialsId: 'HSM_USER_PIN', variable: 'PW')]) {
@@ -256,10 +270,12 @@ pipeline {
 
 			} // steps
 		} // stage build deb & publish
-    } // stages
+	} // stages
 } // pipeline
 
 void initBuildArea() {
+	sh 'node -v'
+	sh 'npm -v'
     sh 'npm ci'
     sh 'npm run build-packages'
     sh 'rm -rf ./build/*'

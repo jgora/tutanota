@@ -10,17 +10,17 @@ import "zx/globals"
 
 	if (process.argv[2] === "webapp") {
 		await compress()
-		const tutanotaVersion = getTutanotaAppVersion()
+		const tutanotaVersion = await getTutanotaAppVersion()
 		await packageAndPublishDeb({
 			version: tutanotaVersion,
 			name: "tutanota",
-			fpmRootMapping: "./build/dist/=/opt/tutanota",
+			fpmRootMapping: "./build/=/opt/tutanota",
 			fpmAfterInstallScript: "./resources/scripts/after-install.sh",
 			destinationDir: `/opt/repository/tutanota`,
 		})
 	} else if (process.argv[2] === "desktop") {
 		await compress()
-		const tutanotaVersion = getTutanotaAppVersion()
+		const tutanotaVersion = await getTutanotaAppVersion()
 		await packageAndPublishDeb({
 			version: tutanotaVersion,
 			name: "tutanota-desktop",
@@ -45,6 +45,14 @@ import "zx/globals"
 	}
 })()
 
+/**
+ * @param params {object}
+ * @param params.version {string}
+ * @param params.fpmRootMapping {string}
+ * @param params.name {string}
+ * @param [params.fpmAfterInstallScript] {string}
+ * @param params.destinationDir {string}
+ */
 async function packageAndPublishDeb({ version, fpmRootMapping, name, fpmAfterInstallScript, destinationDir }) {
 	const fpmFlags = [
 		`--force`,

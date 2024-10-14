@@ -1,6 +1,6 @@
 pipeline {
     environment {
-         PATH="/opt/node-v16.16.0-linux-x64/bin:${env.PATH}"
+         PATH="${env.NODE_PATH}:${env.PATH}:/home/jenkins/emsdk/upstream/bin/:/home/jenkins/emsdk/:/home/jenkins/emsdk/upstream/emscripten"
     }
 	options {
 		preserveStashes()
@@ -38,7 +38,7 @@ pipeline {
             	sh 'npm run build-packages'
 				sh 'node webapp.js release'
 				// excluding web-specific and mobile specific parts which we don't need in desktop
-				stash includes: 'build/dist/**', excludes: '**/app.html, **/desktop.html, **/index-app.js, **/index-desktop.js', name: 'webapp_built'
+				stash includes: 'build/**', excludes: '**/app.html, **/desktop.html, **/index-app.js, **/index-desktop.js', name: 'webapp_built'
 
 				// Bundle size stats
 				publishHTML target: [
@@ -68,7 +68,7 @@ pipeline {
          		VERSION = sh(returnStdout: true, script: "node -p -e \"require('./package.json').version\" | tr -d \"\n\"")
          	}
             when {
-            	expression { params.RELEASE }
+            	expression { return params.RELEASE }
             }
             agent {
                 label 'linux'
@@ -92,7 +92,7 @@ pipeline {
 
         stage('Publish npm modules') {
 			when {
-				expression { params.RELEASE }
+				expression { return params.RELEASE }
 			}
 			agent {
 				label 'linux'

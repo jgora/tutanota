@@ -24,6 +24,11 @@ pipeline {
 			defaultValue: '',
 			description: 'Which github milestone to reference for generating release notes. leave empty to use version number.'
 		)
+		booleanParam(
+			name: "dictionaries",
+			defaultValue: false,
+			description: "download, update and package the current desktop dictionaries"
+		)
         booleanParam(
             name: 'web',
             defaultValue: true,
@@ -53,7 +58,7 @@ pipeline {
     stages {
 		stage("Prepare Release Notes") {
 			agent { label 'master' }
-			when { expression { params.generateReleaseNotes && (params.web || params.android || params.ios || params.desktop) } }
+			when { expression { return params.generateReleaseNotes && (params.web || params.android || params.ios || params.desktop) } }
 			steps {
 				sh "npm ci"
 				script { // create release notes
@@ -69,7 +74,7 @@ pipeline {
 			} // steps
 		} // stage prepare release notes
 		stage("web app & packages") {
-			when { expression { params.web } }
+			when { expression { return params.web } }
 			agent { label 'master'}
 			steps {
 				build job: 'tutanota-3-webapp', parameters: params.generateReleaseNotes ? [
@@ -80,36 +85,46 @@ pipeline {
 		} // stage web app & packages
 		stage("other clients") {
 			parallel {
+				stage("Desktop Dicts") {
+					when { expression { return params.dictionaries } }
+					steps {
+						script {
+							build job: 'tutanota-3-desktop-dictionaries', parameters: [booleanParam(name: "RELEASE", value: !params.dryRun)]
+						} // script
+					}
+				}
 				stage("Desktop Client") {
-					when { expression { params.desktop } }
+					when { expression { return params.desktop } }
 					steps {
 						script {
 							build job: 'tutanota-3-desktop', parameters: params.generateReleaseNotes ? [
 								booleanParam(name: "RELEASE", value: !params.dryRun),
 								text(name: "releaseNotes", value: releaseNotes.desktop),
-								booleanParam(name: "UPDATE_DICTIONARIES", value: false),
 							] : [
 								booleanParam(name: "RELEASE", value: !params.dryRun),
-								booleanParam(name: "UPDATE_DICTIONARIES", value: false),
 							]
 						} // script
 					} // steps
 				} // stage desktop client
 				stage("iOS Client") {
-					when { expression { params.ios } }
+					when { expression { return params.ios } }
 					steps {
 						script {
 							build job: 'tutanota-3-ios', parameters: params.generateReleaseNotes ? [
 								booleanParam(name: "RELEASE", value: !params.dryRun),
 								text(name: "releaseNotes", value: releaseNotes.ios),
+								booleanParam(name: "STAGING", value: true),
+								booleanParam(name: "PROD", value: true),
 							] : [
 								booleanParam(name: "RELEASE", value: !params.dryRun),
+								booleanParam(name: "STAGING", value: true),
+								booleanParam(name: "PROD", value: true),
 							]
 						} // script
 					} // steps
 				} // stage desktop client
 				stage("Android Client") {
-					when { expression { params.android } }
+					when { expression { return params.android } }
 					steps {
 						script {
 							build job: 'tutanota-3-android', parameters: params.generateReleaseNotes	? [

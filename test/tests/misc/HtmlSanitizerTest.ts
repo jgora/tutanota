@@ -1,6 +1,6 @@
-import o from "ospec"
-import { htmlSanitizer, PREVENT_EXTERNAL_IMAGE_LOADING_ICON } from "../../../src/misc/HtmlSanitizer.js"
-import { createDataFile } from "../../../src/api/common/DataFile.js"
+import o from "@tutao/otest"
+import { htmlSanitizer, PREVENT_EXTERNAL_IMAGE_LOADING_ICON } from "../../../src/common/misc/HtmlSanitizer.js"
+import { createDataFile } from "../../../src/common/api/common/DataFile.js"
 import { stringToUtf8Uint8Array, utf8Uint8ArrayToString } from "@tutao/tutanota-utils"
 
 o.spec(
@@ -24,21 +24,21 @@ o.spec(
 				},
 				{
 					html: "<IMG SRC=\"javascript:alert('XSS');\">",
-					expected: "<img>",
+					expected: `<img style="max-width: 100%;">`,
 				},
 				{
 					html: "<IMG SRC=javascript:alert('XSS')>",
-					expected: "<img>",
+					expected: `<img style="max-width: 100%;">`,
 				},
 			]
-			tests.forEach((test) => {
+			for (const test of tests) {
 				// attacks should not be possible even if we load external content
 				o(
 					htmlSanitizer.sanitizeHTML(test.html, {
 						blockExternalContent: false,
 					}).html,
 				).equals(test.expected)
-			})
+			}
 		})
 		o("blockquotes", function () {
 			//var sanitizer = DOMPurify.sanitize("");
@@ -77,6 +77,17 @@ o.spec(
 			o(sanitizedLink.includes('target="_blank"')).equals(true)
 			o(sanitizedLink.includes('rel="noopener noreferrer"')).equals(true)
 			o(sanitizedLink.includes(">here</a>")).equals(true)
+		})
+		o("tutatemplate links in html", function () {
+			let tutatemplateLink = '<a href="tutatemplate:some-id/some-entry">#hashtag</a>'
+			let sanitized = htmlSanitizer.sanitizeHTML(tutatemplateLink).html
+			o(sanitized.includes('href="tutatemplate:some-id/some-entry"')).equals(true)
+		})
+		o("tutatemplate links in fragment", function () {
+			const tutatemplateLink = '<a href="tutatemplate:some-id/some-entry">#hashtag</a>'
+			const sanitized = htmlSanitizer.sanitizeFragment(tutatemplateLink).fragment
+			const a = sanitized.querySelector("a")
+			o(a != null && a.href.includes("tutatemplate:some-id/some-entry")).equals(true)
 		})
 		o("notification mail template link", function () {
 			let simpleHtmlLink = '<a href=" {link} ">here</a>'
@@ -147,7 +158,7 @@ o.spec(
 						blockExternalContent: true,
 					},
 				)
-				o(result.externalContent).equals(1)
+				o(result.blockedExternalContent).equals(1)
 				const p = result.fragment.querySelector("p")!
 				o(p.style.backgroundImage).equals(REPLACEMENT_VALUE)
 			})
@@ -158,7 +169,7 @@ o.spec(
 						blockExternalContent: true,
 					},
 				)
-				o(result.externalContent).equals(1)
+				o(result.blockedExternalContent).equals(1)
 				const p = result.fragment.querySelector("p")!
 				o(p.style.backgroundImage).equals(`url("${PREVENT_EXTERNAL_IMAGE_LOADING_ICON}")`)
 			})
@@ -169,7 +180,7 @@ o.spec(
 						blockExternalContent: true,
 					},
 				)
-				o(result.externalContent).equals(1)
+				o(result.blockedExternalContent).equals(1)
 				const p = result.fragment.querySelector("p")!
 				o(p.style.backgroundImage).equals(REPLACEMENT_VALUE)
 			})
@@ -180,7 +191,7 @@ o.spec(
 						blockExternalContent: true,
 					},
 				)
-				o(result.externalContent).equals(1)
+				o(result.blockedExternalContent).equals(1)
 				const p = result.fragment.querySelector("p")!
 				o(p.style.backgroundImage).equals(REPLACEMENT_VALUE)
 			})
@@ -191,7 +202,7 @@ o.spec(
 						blockExternalContent: false,
 					},
 				)
-				o(result.externalContent).equals(0)
+				o(result.blockedExternalContent).equals(0)
 				const p = result.fragment.querySelector("p")!
 				o(p.style.backgroundImage).equals(`url("https://emailprivacytester.com/cb/1134f6cba766bf0b/background_image")`)
 			})
@@ -207,7 +218,7 @@ o.spec(
 				}
 				const dirty = `<p style="background-image: ${cssValue};"></p>`
 				const result = htmlSanitizer.sanitizeFragment(dirty, { blockExternalContent: true })
-				o(result.externalContent).equals(1)
+				o(result.blockedExternalContent).equals(1)
 				const p = result.fragment.querySelector("p")!
 				o(p.style.backgroundImage).equals(REPLACEMENT_VALUE)
 			})
@@ -223,7 +234,7 @@ o.spec(
 				}
 				const dirty = `<p style="background-image: ${cssValue};"></p>`
 				const result = htmlSanitizer.sanitizeFragment(dirty, { blockExternalContent: true })
-				o(result.externalContent).equals(1)
+				o(result.blockedExternalContent).equals(1)
 				const p = result.fragment.querySelector("p")!
 				o(p.style.backgroundImage).equals(REPLACEMENT_VALUE)
 			})
@@ -233,7 +244,7 @@ o.spec(
 <p style="background: url('https://example.com/1.png'), url('https://exmaple.com/2.jpg');">
 </p>`
 				const result = htmlSanitizer.sanitizeFragment(dirty, { blockExternalContent: true })
-				o(result.externalContent).equals(1)
+				o(result.blockedExternalContent).equals(1)
 				const p = result.fragment.querySelector("p")!
 				o(p.style.backgroundImage).equals(REPLACEMENT_VALUE)
 			})
@@ -243,7 +254,7 @@ o.spec(
 <p style="background: linear-gradient(blueviolet, black), url('https://exmaple.com/1.jpg')">
 </p>`
 				const result = htmlSanitizer.sanitizeFragment(dirty, { blockExternalContent: true })
-				o(result.externalContent).equals(1)
+				o(result.blockedExternalContent).equals(1)
 				const p = result.fragment.querySelector("p")!
 				o(p.style.backgroundImage).equals(REPLACEMENT_VALUE)
 			})
@@ -254,7 +265,7 @@ o.spec(
 	<p style="background: url('${backgroundUrl}');">
 	</p>`
 				const result = htmlSanitizer.sanitizeFragment(ditry, { blockExternalContent: true })
-				o(result.externalContent).equals(0)
+				o(result.blockedExternalContent).equals(0)
 				const p = result.fragment.querySelector("p")!
 				o(p.style.backgroundImage).equals(`url("${backgroundUrl}")`)
 			})
@@ -262,7 +273,7 @@ o.spec(
 			o("when external content is blocked url border-image-source is removed", function () {
 				const dirty = `<div style="border-image-source: url('https://exmaple.com/1.jpg')">hi</div>`
 				const result = htmlSanitizer.sanitizeFragment(dirty, { blockExternalContent: true })
-				o(result.externalContent).equals(1)
+				o(result.blockedExternalContent).equals(1)
 				const div = result.fragment.querySelector("div")!
 				o(div.style.borderImageSource).equals("")
 			})
@@ -279,7 +290,7 @@ o.spec(
 			o("when external content is blocked url shape-outside is removed", function () {
 				const dirty = `<div style="shape-outside: url('https://exmaple.com/1.jpg')">hi</div>`
 				const result = htmlSanitizer.sanitizeFragment(dirty, { blockExternalContent: true })
-				o(result.externalContent).equals(1)
+				o(result.blockedExternalContent).equals(1)
 				const div = result.fragment.querySelector("div")!
 				o(div.style.shapeOutside).equals("")
 			})
@@ -297,32 +308,32 @@ o.spec(
 			let result = htmlSanitizer.sanitizeHTML(`<p style="background-image: url(${backgroundUrl})"> </p>`, {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html.includes(backgroundUrl)).equals(true)
 			result = htmlSanitizer.sanitizeHTML(`<p style="background-image: url(${backgroundUrl}), url(${backgroundUrl})"> </p>`, {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html.includes(backgroundUrl)).equals(true)
 			result = htmlSanitizer.sanitizeHTML(`<p style="background-image: url('${backgroundUrl}')"> </p>`, {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html.includes(backgroundUrl)).equals(true)
 			result = htmlSanitizer.sanitizeHTML(`<p style='background-image: url("${backgroundUrl}")'> </p>`, {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html.includes(backgroundUrl)).equals(true)
 			result = htmlSanitizer.sanitizeHTML(`<p style="background-image: url(&quot;${backgroundUrl}&quot;)"> </p>`, {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html.includes(backgroundUrl)).equals(true)
 			result = htmlSanitizer.sanitizeHTML(`<p style="background-image: url(&#39;${backgroundUrl}&#39;)"> </p>`, {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html.includes(backgroundUrl)).equals(true)
 		})
 		o("background attribute", function () {
@@ -330,8 +341,9 @@ o.spec(
 			const cleanHtml = htmlSanitizer.sanitizeHTML(plainHtml, {
 				blockExternalContent: true,
 			})
-			o(cleanHtml.externalContent).equals(1)
-			o(cleanHtml.html.includes("image.jpg")).equals(false)
+			o(cleanHtml.blockedExternalContent).equals(1)
+			o(cleanHtml.html.split(" ").some((e) => e === 'background="https://tutanota.com/image.jpg"')).equals(false)
+			o(cleanHtml.html.includes("draft-background")).equals(true)
 			o(
 				htmlSanitizer
 					.sanitizeHTML(plainHtml, {
@@ -339,6 +351,13 @@ o.spec(
 					})
 					.html.includes("background="),
 			).equals(true)
+			o(
+				htmlSanitizer
+					.sanitizeHTML(plainHtml, {
+						blockExternalContent: false,
+					})
+					.html.includes("draft-background="),
+			).equals(false)
 		})
 		o("srcset attribute", function () {
 			const plainHtml =
@@ -346,17 +365,29 @@ o.spec(
 			const cleanHtml = htmlSanitizer.sanitizeHTML(plainHtml, {
 				blockExternalContent: true,
 			})
-			o(cleanHtml.externalContent).equals(2)
-			o(cleanHtml.html.includes("srcSet")).equals(false)
-			o(cleanHtml.html.includes("srcset")).equals(false) // srcSet attribute is removed when writing node
+			o(cleanHtml.blockedExternalContent).equals(2)
 
+			o(
+				cleanHtml.html
+					.split(" ")
+					.some(
+						(e) =>
+							e === 'srcSet="https://tutanota.com/image1.jpg 1x, https://tutanota.com/image2.jpg 2x, https://tutanota.com/image3.jpg 3x"' ||
+							e === 'srcset="https://tutanota.com/image1.jpg 1x, https://tutanota.com/image2.jpg 2x, https://tutanota.com/image3.jpg 3x"',
+					),
+			).equals(false)
+			o(
+				cleanHtml.html.includes(
+					'draft-srcset="https://tutanota.com/image1.jpg 1x, https://tutanota.com/image2.jpg 2x, https://tutanota.com/image3.jpg 3x',
+				),
+			).equals(true)
 			o(cleanHtml.html.includes('src="data:image/svg+xml;utf8,')).equals(true)
 		})
-		o("detect images", function () {
+		o("detect images and set maxWidth=100px for placeholder images", function () {
 			let result = htmlSanitizer.sanitizeHTML('<img src="https://emailprivacytester.com/cb/510828b5a8f43ab5">', {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(1)
+			o(result.blockedExternalContent).equals(1)
 			o(result.html.includes('src="data:image/svg+xml;utf8,')).equals(true)
 			o(result.html.includes('style="max-width: 100px;')).equals(true)
 		})
@@ -365,8 +396,9 @@ o.spec(
 			let result = htmlSanitizer.sanitizeHTML(inputElement, {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(1)
-			o(result.html.includes('src="https://tutanota.com')).equals(false)
+			o(result.blockedExternalContent).equals(1)
+			o(result.html.split(" ").some((e) => e === 'src="https://tutanota.com')).equals(false)
+			o(result.html.includes('draft-src="https://tutanota.com')).equals(true)
 		})
 		o("detect video posters", function () {
 			let result = htmlSanitizer.sanitizeHTML(
@@ -375,7 +407,7 @@ o.spec(
 					blockExternalContent: true,
 				},
 			)
-			o(result.externalContent).equals(1)
+			o(result.blockedExternalContent).equals(1)
 			o(result.html.includes('poster="data:image/svg+xml;utf8,')).equals(true)
 		})
 		o("detect style list images", function () {
@@ -385,27 +417,27 @@ o.spec(
 					blockExternalContent: true,
 				},
 			)
-			o(result.externalContent).equals(1)
+			o(result.blockedExternalContent).equals(1)
 			o(result.html.includes("list-style-image: url(&quot;data:image/svg+xml;utf8,")).equals(true)
 		})
 		o("detect style content urls", function () {
 			let result = htmlSanitizer.sanitizeHTML('<div style="content: url(http://www.heise.de/icons/ho/heise_online_logo_top.gif)"></div>', {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(1)
+			o(result.blockedExternalContent).equals(1)
 			o(result.html.includes("content: url(&quot;data:image/svg+xml;utf8,")).equals(true)
 			// do not modify non url content
 			result = htmlSanitizer.sanitizeHTML('<div style="content: blabla"> </div >', {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html.includes("content: blabla")).equals(true)
 		})
 		o("detect style cursor images", function () {
 			let result = htmlSanitizer.sanitizeHTML('<div style="cursor:url(https://tutanota.com/images/favicon/favicon.ico),auto;" ></div>', {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(1)
+			o(result.blockedExternalContent).equals(1)
 			o(result.html).equals('<div style=""></div>')
 			o(result.html.includes("cursor:")).equals(false)
 			result = htmlSanitizer.sanitizeHTML(
@@ -414,7 +446,7 @@ o.spec(
 					blockExternalContent: false,
 				},
 			)
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html).equals(
 				'<div style="cursor:url(https://tutanota.com/images/favicon/favicon2.ico),url(https://tutanota.com/images/favicon/favicon.ico),auto;"></div>',
 			)
@@ -423,24 +455,24 @@ o.spec(
 			let result = htmlSanitizer.sanitizeHTML('<div style="filter:url(https://tutanota.com/images/favicon/favicon.ico);" ></div>', {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(1)
+			o(result.blockedExternalContent).equals(1)
 			o(result.html.includes("filter:")).equals(false)
 			result = htmlSanitizer.sanitizeHTML('<div style="filter:url(https://tutanota.com/images/favicon/favicon.ico);" ></div>', {
 				blockExternalContent: false,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html).equals('<div style="filter:url(https://tutanota.com/images/favicon/favicon.ico);"></div>')
 		})
 		o("detect style element", function () {
 			let result = htmlSanitizer.sanitizeHTML("<div><style>@import url(https://fonts.googleapis.com/css?family=Diplomata+SC);</style></div>", {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html).equals("<div></div>")
 			result = htmlSanitizer.sanitizeHTML("<div><style>@import url(https://fonts.googleapis.com/css?family=Diplomata+SC);</style></div>", {
 				blockExternalContent: false,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html).equals("<div></div>")
 		})
 		o("replace images and links", function () {
@@ -450,7 +482,7 @@ o.spec(
 					blockExternalContent: true,
 				},
 			)
-			o(result.externalContent).equals(9)
+			o(result.blockedExternalContent).equals(9)
 			// do not replace links
 			o(
 				result.html.includes('<a target="_blank" rel="noopener noreferrer" href="http://localhost/index.html">') ||
@@ -462,11 +494,11 @@ o.spec(
 			const result = htmlSanitizer.sanitizeHTML(input, {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.inlineImageCids).deepEquals(["asbasdf-safd_d"])
-			o(result.html).equals(
-				`<img src="${PREVENT_EXTERNAL_IMAGE_LOADING_ICON}" cid="asbasdf-safd_d" class="tutanota-placeholder"><img src="data:image/svg+xml;utf8,sadfsdasdf">`,
-			)
+			o(result.html.includes(`cid="asbasdf-safd_d"`)).equals(true)
+			o(result.html.includes(`data:image/svg+xml;utf8,sadfsdasdf`)).equals(true)
+			o(result.html.match(/max-width: 100%;/g)!.length).equals(2)
 		})
 		o("audio tag", function () {
 			let result = htmlSanitizer.sanitizeHTML(
@@ -475,19 +507,19 @@ o.spec(
 					blockExternalContent: true,
 				},
 			)
-			o(result.externalContent).equals(1)
+			o(result.blockedExternalContent).equals(1)
 			o(result.html.includes("data:image/svg+xml;utf8,")).equals(true)
 		})
 		o("embed tag", function () {
 			let result = htmlSanitizer.sanitizeHTML('<div><embed src="https://tutanota.com/images/favicon/favicon.ico"></div>', {
 				blockExternalContent: true,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html).equals("<div></div>")
 			result = htmlSanitizer.sanitizeHTML('<div><embed src="https://tutanota.com/images/favicon/favicon.ico"></div>', {
 				blockExternalContent: false,
 			})
-			o(result.externalContent).equals(0)
+			o(result.blockedExternalContent).equals(0)
 			o(result.html).equals("<div></div>")
 		})
 		o("disallow relative links", function () {
@@ -518,15 +550,46 @@ o.spec(
 			const r1 = htmlSanitizer.sanitizeHTML(`<img src="cid:123456">`, {
 				usePlaceholderForInlineImages: true,
 			}).html
-			o(r1).equals(`<img src="${PREVENT_EXTERNAL_IMAGE_LOADING_ICON}" cid="123456" class="tutanota-placeholder">`)
+			o(r1.includes(`src="${PREVENT_EXTERNAL_IMAGE_LOADING_ICON}"`)).equals(true)
+			o(r1.includes(`style="max-width: 100%;"`)).equals(true)
+			o(r1.includes(`cid="123456"`)).equals(true)
+			o(r1.includes(`class="tutanota-placeholder"`)).equals(true)
+
 			const r2 = htmlSanitizer.sanitizeHTML(`<img src="cid:123456">`).html
-			o(r2).equals(`<img src="${PREVENT_EXTERNAL_IMAGE_LOADING_ICON}" cid="123456" class="tutanota-placeholder">`)
+			o(r2.includes(`src="${PREVENT_EXTERNAL_IMAGE_LOADING_ICON}"`)).equals(true)
+			o(r2.includes(`style="max-width: 100%;"`)).equals(true)
+			o(r2.includes(`cid="123456"`)).equals(true)
+			o(r2.includes(`class="tutanota-placeholder"`)).equals(true)
 		})
 		o("don't use image loading placeholder", function () {
 			const result = htmlSanitizer.sanitizeHTML(`<img src="cid:123456">`, {
 				usePlaceholderForInlineImages: false,
 			}).html
-			o(result).equals(`<img src="cid:123456">`)
+			o(result).equals(`<img src="cid:123456" style="max-width: 100%;">`)
+		})
+		o("add max-width to images", function () {
+			const result = htmlSanitizer.sanitizeHTML(`<img src="cid:123456">`, {
+				usePlaceholderForInlineImages: false,
+			}).html
+			o(result).equals(`<img src="cid:123456" style="max-width: 100%;">`)
+		})
+		o("add max-width to images that have a given width", function () {
+			const result = htmlSanitizer.sanitizeHTML(`<img src="cid:123456" style="width: 150px;">`, {
+				usePlaceholderForInlineImages: false,
+			}).html
+			o(result).equals(`<img style="width: 150px; max-width: 100%;" src="cid:123456">`)
+		})
+		o("replace max-width for inline images", function () {
+			const result = htmlSanitizer.sanitizeHTML(`<img src="cid:123456" style="max-width: 60%;">`, {
+				usePlaceholderForInlineImages: false,
+			}).html
+			o(result).equals(`<img style="max-width: 100%;" src="cid:123456">`)
+		})
+		o("replace max-width for external images", function () {
+			const result = htmlSanitizer.sanitizeHTML(`<img src="https://tutanota.com/images/favicon/favicon.ico">`, {
+				blockExternalContent: false,
+			}).html
+			o(result).equals(`<img src="https://tutanota.com/images/favicon/favicon.ico" style="max-width: 100%;">`)
 		})
 		o("svg tag not removed", function () {
 			const result = htmlSanitizer.sanitizeSVG(`<svg> <rect x="10" y="10" width="10" height="10"> </rect> </svg>`).html.trim()

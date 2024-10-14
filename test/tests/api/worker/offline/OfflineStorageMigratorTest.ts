@@ -1,15 +1,15 @@
-import o from "ospec"
-import { OfflineMigration, OfflineStorageMigrator } from "../../../../../src/api/worker/offline/OfflineStorageMigrator.js"
-import { OfflineStorage } from "../../../../../src/api/worker/offline/OfflineStorage.js"
+import o from "@tutao/otest"
+import { OfflineMigration, OfflineStorageMigrator } from "../../../../../src/common/api/worker/offline/OfflineStorageMigrator.js"
+import { OfflineStorage } from "../../../../../src/common/api/worker/offline/OfflineStorage.js"
 import { func, instance, matchers, object, when } from "testdouble"
 import { assertThrows, verify } from "@tutao/tutanota-test-utils"
-import { ModelInfos } from "../../../../../src/api/common/EntityFunctions.js"
+import { ModelInfos } from "../../../../../src/common/api/common/EntityFunctions.js"
 import { typedEntries } from "@tutao/tutanota-utils"
-import { ProgrammingError } from "../../../../../src/api/common/error/ProgrammingError.js"
-import { SqlCipherFacade } from "../../../../../src/native/common/generatedipc/SqlCipherFacade.js"
-import { OutOfSyncError } from "../../../../../src/api/common/error/OutOfSyncError.js"
+import { ProgrammingError } from "../../../../../src/common/api/common/error/ProgrammingError.js"
+import { SqlCipherFacade } from "../../../../../src/common/native/common/generatedipc/SqlCipherFacade.js"
+import { OutOfSyncError } from "../../../../../src/common/api/common/error/OutOfSyncError.js"
 
-o.spec("OfflineStorageMigrator", async function () {
+o.spec("OfflineStorageMigrator", function () {
 	const modelInfos: ModelInfos = {
 		base: {
 			version: 1,

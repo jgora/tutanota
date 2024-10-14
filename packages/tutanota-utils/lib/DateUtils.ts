@@ -5,10 +5,12 @@
  */
 export const DAY_IN_MILLIS = 1000 * 60 * 60 * 24
 
+export const YEAR_IN_MILLIS = DAY_IN_MILLIS * 365
+
 /**
- * dates from before this year have negative timestamps and are currently considered edge cases
+ * dates from before 1970 have negative timestamps and are currently considered edge cases
  */
-export const TIMESTAMP_ZERO_YEAR = 1970
+export const TIMESTAMP_ZERO_YEAR = 0
 
 /**
  * Provides a date representing the beginning of the next day of the given date in local time.

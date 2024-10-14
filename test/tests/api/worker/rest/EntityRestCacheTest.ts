@@ -1,89 +1,93 @@
-import o from "ospec"
+//
+// NOTE: some of the mocking is this file is pretty old and we should replace spy() with something more modern
+//
+import o from "@tutao/otest"
 import {
 	CUSTOM_MAX_ID,
 	CUSTOM_MIN_ID,
 	elementIdPart,
+	firstBiggerThanSecond,
 	GENERATED_MAX_ID,
 	GENERATED_MIN_ID,
 	getElementId,
 	getListId,
 	listIdPart,
 	stringToCustomId,
-} from "../../../../../src/api/common/utils/EntityUtils.js"
-import { arrayOf, assertNotNull, clone, downcast, isSameTypeRef, neverNull, TypeRef } from "@tutao/tutanota-utils"
+} from "../../../../../src/common/api/common/utils/EntityUtils.js"
+import { arrayOf, clone, downcast, isSameTypeRef, last, neverNull, TypeRef } from "@tutao/tutanota-utils"
 import {
-	createCustomer,
-	createEntityUpdate,
-	createExternalUserReference,
-	createGroupMembership,
-	createGroupRoot,
-	createPermission,
-	createUser,
+	BucketKeyTypeRef,
 	CustomerTypeRef,
 	EntityUpdate,
+	EntityUpdateTypeRef,
 	ExternalUserReferenceTypeRef,
+	GroupMembershipTypeRef,
+	GroupRootTypeRef,
+	InstanceSessionKeyTypeRef,
 	PermissionTypeRef,
 	UserTypeRef,
-} from "../../../../../src/api/entities/sys/TypeRefs.js"
-import { EntityRestClient, typeRefToPath } from "../../../../../src/api/worker/rest/EntityRestClient.js"
-import { QueuedBatch } from "../../../../../src/api/worker/EventQueue.js"
-import { CacheStorage, DefaultEntityRestCache, expandId, EXTEND_RANGE_MIN_CHUNK_SIZE } from "../../../../../src/api/worker/rest/DefaultEntityRestCache.js"
+} from "../../../../../src/common/api/entities/sys/TypeRefs.js"
+import { EntityRestClient, typeRefToPath } from "../../../../../src/common/api/worker/rest/EntityRestClient.js"
+import { QueuedBatch } from "../../../../../src/common/api/worker/EventQueue.js"
 import {
+	CacheStorage,
+	DefaultEntityRestCache,
+	expandId,
+	EXTEND_RANGE_MIN_CHUNK_SIZE,
+} from "../../../../../src/common/api/worker/rest/DefaultEntityRestCache.js"
+import {
+	BodyTypeRef,
 	CalendarEventTypeRef,
 	ContactTypeRef,
-	createCalendarEvent,
-	createContact,
-	createMail,
-	createMailBody,
-	createMailDetailsBlob,
 	Mail,
-	MailBody,
-	MailBodyTypeRef,
+	MailBoxTypeRef,
+	MailDetailsBlob,
 	MailDetailsBlobTypeRef,
+	MailDetailsTypeRef,
 	MailTypeRef,
-} from "../../../../../src/api/entities/tutanota/TypeRefs.js"
-import { OfflineStorage } from "../../../../../src/api/worker/offline/OfflineStorage.js"
-import { assertThrows, mockAttribute, unmockAttribute } from "@tutao/tutanota-test-utils"
-import { NoZoneDateProvider } from "../../../../../src/api/common/utils/NoZoneDateProvider.js"
-import { RestClient } from "../../../../../src/api/worker/rest/RestClient.js"
-import { NotAuthorizedError, NotFoundError } from "../../../../../src/api/common/error/RestError.js"
-import { EphemeralCacheStorage } from "../../../../../src/api/worker/rest/EphemeralCacheStorage.js"
-import { GroupType, OperationType } from "../../../../../src/api/common/TutanotaConstants.js"
-import { OfflineStorageMigrator } from "../../../../../src/api/worker/offline/OfflineStorageMigrator.js"
-import { createEventElementId } from "../../../../../src/api/common/utils/CommonCalendarUtils.js"
-import { InterWindowEventFacadeSendDispatcher } from "../../../../../src/native/common/generatedipc/InterWindowEventFacadeSendDispatcher.js"
-import { func, instance, matchers, object, when } from "testdouble"
+} from "../../../../../src/common/api/entities/tutanota/TypeRefs.js"
+import { OfflineStorage, OfflineStorageCleaner } from "../../../../../src/common/api/worker/offline/OfflineStorage.js"
+import { assertThrows, mockAttribute, spy, unmockAttribute, verify } from "@tutao/tutanota-test-utils"
+import { NoZoneDateProvider } from "../../../../../src/common/api/common/utils/NoZoneDateProvider.js"
+import { RestClient } from "../../../../../src/common/api/worker/rest/RestClient.js"
+import { NotAuthorizedError, NotFoundError } from "../../../../../src/common/api/common/error/RestError.js"
+import { EphemeralCacheStorage } from "../../../../../src/common/api/worker/rest/EphemeralCacheStorage.js"
+import { GroupType, OperationType } from "../../../../../src/common/api/common/TutanotaConstants.js"
+import { OfflineStorageMigrator } from "../../../../../src/common/api/worker/offline/OfflineStorageMigrator.js"
+import { createEventElementId } from "../../../../../src/common/api/common/utils/CommonCalendarUtils.js"
+import { InterWindowEventFacadeSendDispatcher } from "../../../../../src/common/native/common/generatedipc/InterWindowEventFacadeSendDispatcher.js"
+import { func, instance, matchers, object, replace, when } from "testdouble"
+import { SqlCipherFacade } from "../../../../../src/common/native/common/generatedipc/SqlCipherFacade.js"
+import { createTestEntity } from "../../../TestUtils.js"
 
 const { anything } = matchers
 
 const offlineDatabaseTestKey = new Uint8Array([3957386659, 354339016, 3786337319, 3366334248])
 
 async function getOfflineStorage(userId: Id): Promise<CacheStorage> {
-	const { OfflineDbManager, PerWindowSqlCipherFacade } = await import("../../../../../src/desktop/db/PerWindowSqlCipherFacade.js")
-	const { DesktopSqlCipher } = await import("../../../../../src/desktop/DesktopSqlCipher.js")
+	const { PerWindowSqlCipherFacade } = await import("../../../../../src/common/desktop/db/PerWindowSqlCipherFacade.js")
+	const { OfflineDbRefCounter } = await import("../../../../../src/common/desktop/db/OfflineDbRefCounter.js")
+	const { DesktopSqlCipher } = await import("../../../../../src/common/desktop/db/DesktopSqlCipher.js")
 
-	const odbManager = new (class extends OfflineDbManager {
-		async getOrCreateDb(userId: string, key: Uint8Array) {
-			assertNotNull(userId)
+	const odbRefCounter = new OfflineDbRefCounter({
+		async create(userid: string, key: Uint8Array, retry?: boolean): Promise<SqlCipherFacade> {
 			// @ts-ignore Added by sqliteNativeBannerPlugin
 			const nativePath = buildOptions.sqliteNativePath
 			const db = new DesktopSqlCipher(nativePath, ":memory:", false)
 			//integrity check breaks for in memory database
 			await db.openDb(userId, key)
 			return db
-		}
+		},
 
-		async deleteDb(userId: string) {}
-
-		async disposeDb(userId: string) {}
-	})(null as any)
-
+		async delete(userId: string): Promise<void> {},
+	})
 	const migratorMock = instance(OfflineStorageMigrator)
 
-	const nativePath = buildOptions.sqliteNativePath
-	const sqlCipherFacade = new PerWindowSqlCipherFacade(odbManager)
+	const sqlCipherFacade = new PerWindowSqlCipherFacade(odbRefCounter)
+	await sqlCipherFacade.openDb(userId, offlineDatabaseTestKey)
 	const interWindowEventSender = instance(InterWindowEventFacadeSendDispatcher)
-	const offlineStorage = new OfflineStorage(sqlCipherFacade, interWindowEventSender, new NoZoneDateProvider(), migratorMock)
+	const offlineStorageCleanerMock = object<OfflineStorageCleaner>()
+	const offlineStorage = new OfflineStorage(sqlCipherFacade, interWindowEventSender, new NoZoneDateProvider(), migratorMock, offlineStorageCleanerMock)
 	await offlineStorage.init({ userId, databaseKey: offlineDatabaseTestKey, timeRangeDays: 42, forceNewDatabase: false })
 	return offlineStorage
 }
@@ -98,7 +102,7 @@ node(() => testEntityRestCache("offline", getOfflineStorage))()
 export function testEntityRestCache(name: string, getStorage: (userId: Id) => Promise<CacheStorage>) {
 	const groupId = "groupId"
 	const batchId = "batchId"
-	o.spec(`entity rest cache ${name}`, function () {
+	o.spec(`EntityRestCache ${name}`, function () {
 		let storage: CacheStorage
 		let cache: DefaultEntityRestCache
 
@@ -108,7 +112,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 		let userId: Id | null
 
 		let createUpdate = function (typeRef: TypeRef<any>, listId: Id, id: Id, operation: OperationType): EntityUpdate {
-			let eu = createEntityUpdate()
+			let eu = createTestEntity(EntityUpdateTypeRef)
 			eu.application = typeRef.app
 			eu.type = typeRef.type
 			eu.instanceListId = listId
@@ -118,20 +122,21 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 		}
 
 		let createId = function (idText) {
+			//return idText
 			return Array(13 - idText.length).join("-") + idText
 		}
 
-		let createBodyInstance = function (id, bodyText): MailBody {
-			let body = createMailBody()
-			body._id = createId(id)
-			body.text = bodyText
-			return body
+		let createMailDetailsBlobInstance = function (archiveId, id, bodyText): MailDetailsBlob {
+			let body = createTestEntity(BodyTypeRef, { text: bodyText })
+			let mailDetails = createTestEntity(MailDetailsTypeRef, { _id: createId(id), body: body })
+			return createTestEntity(MailDetailsBlobTypeRef, { _id: [archiveId, mailDetails._id], details: mailDetails })
 		}
 
 		let createMailInstance = function (listId, id, subject): Mail {
-			let mail = createMail()
+			let mail = createTestEntity(MailTypeRef)
 			mail._id = [listId, createId(id)]
 			mail.subject = subject ?? ""
+			mail.mailDetails = ["mailDetailsListId", "mailDetailsElementId"]
 			return mail
 		}
 
@@ -182,44 +187,42 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 			const calendarEventIds = [0, 1, 2, 3, 4, 5, 6].map((n) => createEventElementId(timestamp, n))
 
 			o("writes batch meta on entity update", async function () {
-				const contact1 = createContact({ _id: [contactListId1, id1] })
-				const contact2 = createContact({ _id: [contactListId1, id2] })
+				const contact1 = createTestEntity(ContactTypeRef, { _id: [contactListId1, id1] })
+				const contact2 = createTestEntity(ContactTypeRef, { _id: [contactListId1, id2] })
 
 				const batch = [
 					createUpdate(ContactTypeRef, contactListId1, id1, OperationType.CREATE),
 					createUpdate(ContactTypeRef, contactListId1, id2, OperationType.CREATE),
 				]
-				const loadMultiple = o.spy(function (typeRef, listId, ids) {
-					return Promise.resolve([contact1, contact2])
-				})
 
-				const mock = mockAttribute(entityRestClient, entityRestClient.loadMultiple, loadMultiple)
-				const mock2 = mockAttribute(storage, storage.putLastBatchIdForGroup, () => {
-					return Promise.resolve(undefined)
-				})
+				const loadMultiple = func<typeof entityRestClient.loadMultiple>()
+				when(loadMultiple(ContactTypeRef, contactListId1, [id1, id2])).thenResolve([contact1, contact2])
+				replace(entityRestClient, "loadMultiple", loadMultiple)
+
+				const putLastBatchIdForGroup = func<typeof storage.putLastBatchIdForGroup>()
+				when(putLastBatchIdForGroup(groupId, batchId)).thenResolve(undefined)
+				replace(storage, "putLastBatchIdForGroup", putLastBatchIdForGroup)
+
 				await cache.entityEventsReceived(makeBatch(batch))
 				await cache.getLastEntityEventBatchForGroup(groupId)
-				o(storage.putLastBatchIdForGroup.callCount).equals(1)("putLastBatchMeta is called")
-				o(storage.putLastBatchIdForGroup.args).deepEquals([groupId, batchId])
-				unmockAttribute(mock)
-				unmockAttribute(mock2)
+				verify(putLastBatchIdForGroup(groupId, batchId))
 			})
 
-			o.spec("postMultiple", async function () {
+			o.spec("postMultiple", function () {
 				o.beforeEach(async function () {
 					await storage.setNewRangeForList(ContactTypeRef, contactListId1, id1, id7)
 					await storage.setNewRangeForList(ContactTypeRef, contactListId2, id1, id7)
 					//when using offline calendar ids are always in cache range
 				})
 				o("entity events received should call loadMultiple when receiving updates from a postMultiple", async function () {
-					const contact1 = createContact({ _id: [contactListId1, id1] })
-					const contact2 = createContact({ _id: [contactListId1, id2] })
+					const contact1 = createTestEntity(ContactTypeRef, { _id: [contactListId1, id1] })
+					const contact2 = createTestEntity(ContactTypeRef, { _id: [contactListId1, id2] })
 
 					const batch = [
 						createUpdate(ContactTypeRef, contactListId1, id1, OperationType.CREATE),
 						createUpdate(ContactTypeRef, contactListId1, id2, OperationType.CREATE),
 					]
-					const loadMultiple = o.spy(function (typeRef, listId, ids) {
+					const loadMultiple = spy(function (typeRef, listId, ids) {
 						o(isSameTypeRef(typeRef, ContactTypeRef)).equals(true)
 						o(listId).equals(contactListId1)
 						o(ids).deepEquals(["id1", "id2"])
@@ -237,8 +240,8 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 				if (name === "offline") {
 					// in the other case storage is an EphemeralCache which doesn't use custom handlers or caches calendar events.
 					o("entity events received should call loadMultiple when receiving updates from a postMultiple with CustomCacheHandler", async function () {
-						const event1 = createCalendarEvent({ _id: [calendarEventListId, calendarEventIds[0]] })
-						const event2 = createCalendarEvent({ _id: [calendarEventListId, calendarEventIds[1]] })
+						const event1 = createTestEntity(CalendarEventTypeRef, { _id: [calendarEventListId, calendarEventIds[0]] })
+						const event2 = createTestEntity(CalendarEventTypeRef, { _id: [calendarEventListId, calendarEventIds[1]] })
 						// We only consider events to be in the range if we do actually have correct range
 						await storage.setNewRangeForList(CalendarEventTypeRef, calendarEventListId, CUSTOM_MIN_ID, CUSTOM_MAX_ID)
 
@@ -246,7 +249,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 							createUpdate(CalendarEventTypeRef, calendarEventListId, calendarEventIds[0], OperationType.CREATE),
 							createUpdate(ContactTypeRef, calendarEventListId, calendarEventIds[1], OperationType.CREATE),
 						]
-						const loadMultiple = o.spy(function (typeRef, listId, ids) {
+						const loadMultiple = spy(function (typeRef, listId, ids) {
 							o(isSameTypeRef(typeRef, CalendarEventTypeRef)).equals(true)
 							o(listId).equals(calendarEventListId)
 							o(ids).deepEquals([calendarEventIds[0], calendarEventIds[1]])
@@ -273,55 +276,55 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 						createUpdate(CalendarEventTypeRef, calendarEventListId, calendarEventIds[0], OperationType.CREATE),
 						createUpdate(CalendarEventTypeRef, calendarEventListId, calendarEventIds[1], OperationType.CREATE),
 					]
-					const load = o.spy(function (typeRef, id) {
+					const load = spy(function (typeRef, id) {
 						const { listId, elementId } = expandId(id)
 
 						if (isSameTypeRef(typeRef, ContactTypeRef)) {
 							o(elementId).equals(id2)
 							return Promise.resolve(
-								createContact({
+								createTestEntity(ContactTypeRef, {
 									_id: [neverNull(listId), elementId],
 								}),
 							)
 						} else if (isSameTypeRef(typeRef, CustomerTypeRef)) {
 							o(["id5", "id6", "id7"].includes(elementId)).equals(true)
 							return Promise.resolve(
-								createCustomer({
+								createTestEntity(CustomerTypeRef, {
 									_id: elementId,
 								}),
 							)
 						}
 						throw new Error("load: should not be reached" + typeRef)
 					})
-					const loadMultiple = o.spy(function (typeRef, listId, ids) {
+					const loadMultiple = spy(function (typeRef, listId, ids) {
 						if (isSameTypeRef(typeRef, ContactTypeRef) || isSameTypeRef(typeRef, CalendarEventTypeRef)) {
 							if (listId === contactListId1) {
 								o(ids).deepEquals(["id1", "id2"])
 								return Promise.resolve([
-									createContact({
+									createTestEntity(ContactTypeRef, {
 										_id: [listId, id1],
 									}),
-									createContact({
+									createTestEntity(ContactTypeRef, {
 										_id: [listId, id2],
 									}),
 								])
 							} else if (listId === calendarEventListId) {
 								o(ids).deepEquals([calendarEventIds[0], calendarEventIds[1]])
 								return Promise.resolve([
-									createCalendarEvent({
+									createTestEntity(CalendarEventTypeRef, {
 										_id: [calendarEventListId, calendarEventIds[0]],
 									}),
-									createCalendarEvent({
+									createTestEntity(CalendarEventTypeRef, {
 										_id: [calendarEventListId, calendarEventIds[1]],
 									}),
 								])
 							} else if (listId === contactListId2) {
 								o(ids).deepEquals(["id3", "id4"])
 								return Promise.resolve([
-									createContact({
+									createTestEntity(ContactTypeRef, {
 										_id: [listId, "id3"],
 									}),
-									createContact({
+									createTestEntity(ContactTypeRef, {
 										_id: [listId, "id4"],
 									}),
 								])
@@ -375,16 +378,16 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 						createUpdate(ContactTypeRef, contactListId2, id3, OperationType.CREATE),
 						createUpdate(ContactTypeRef, contactListId2, id4, OperationType.CREATE),
 					]
-					const loadMultiple = o.spy(function (typeRef, listId, ids) {
+					const loadMultiple = spy(function (typeRef, listId, ids) {
 						o(isSameTypeRef(typeRef, ContactTypeRef)).equals(true)
 
 						if (listId === contactListId1) {
 							o(ids).deepEquals(["id1", "id2"])
 							return Promise.resolve([
-								createContact({
+								createTestEntity(ContactTypeRef, {
 									_id: [listId, id1],
 								}),
-								createContact({
+								createTestEntity(ContactTypeRef, {
 									_id: [listId, id2],
 								}),
 							])
@@ -425,11 +428,11 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 						createUpdate(ContactTypeRef, contactListId1, id1, OperationType.CREATE),
 						createUpdate(ContactTypeRef, contactListId1, id2, OperationType.CREATE),
 					]
-					const loadMultiple = o.spy(function (typeRef, listId, ids) {
+					const loadMultiple = spy(function (typeRef, listId, ids) {
 						if (isSameTypeRef(typeRef, ContactTypeRef)) {
 							if (listId === contactListId1) {
 								o(ids).deepEquals(["id1", "id2"])
-								return Promise.resolve([createContact({ _id: [listId, id1] })])
+								return Promise.resolve([createTestEntity(ContactTypeRef, { _id: [listId, id1] })])
 							}
 						}
 						throw new Error("should not be reached")
@@ -457,19 +460,19 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 						createUpdate(ContactTypeRef, contactListId2, id3, OperationType.CREATE),
 						createUpdate(ContactTypeRef, contactListId2, id4, OperationType.CREATE),
 					]
-					const loadMultiple = o.spy(function (typeRef, listId, ids) {
+					const loadMultiple = spy(function (typeRef, listId, ids) {
 						if (isSameTypeRef(typeRef, ContactTypeRef)) {
 							if (listId === contactListId1) {
 								o(ids).deepEquals(["id1"])
 								return Promise.resolve([
-									createContact({
+									createTestEntity(ContactTypeRef, {
 										_id: [listId, id1],
 									}),
 								])
 							} else if (listId === contactListId2) {
 								o(ids).deepEquals(["id4"])
 								return Promise.resolve([
-									createContact({
+									createTestEntity(ContactTypeRef, {
 										_id: [listId, "id4"],
 									}),
 								])
@@ -500,12 +503,12 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 						createUpdate(ContactTypeRef, contactListId2, id3, OperationType.CREATE),
 						createUpdate(ContactTypeRef, contactListId2, id4, OperationType.CREATE),
 					]
-					const loadMultiple = o.spy(function (typeRef, listId, ids) {
+					const loadMultiple = spy(function (typeRef, listId, ids) {
 						if (isSameTypeRef(typeRef, ContactTypeRef)) {
 							if (listId === contactListId1) {
 								o(ids).deepEquals(["id1"])
 								return Promise.resolve([
-									createContact({
+									createTestEntity(ContactTypeRef, {
 										_id: [listId, id1],
 									}),
 								])
@@ -531,28 +534,28 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 				})
 			})
 			o("element create notifications are not loaded from server", async function () {
-				await cache.entityEventsReceived(makeBatch([createUpdate(MailBodyTypeRef, null as any, "id1", OperationType.CREATE)]))
+				await cache.entityEventsReceived(makeBatch([createUpdate(MailBoxTypeRef, null as any, "id1", OperationType.CREATE)]))
 			})
 
 			o("element update notifications are not put into cache", async function () {
-				await cache.entityEventsReceived(makeBatch([createUpdate(MailBodyTypeRef, null as any, "id1", OperationType.UPDATE)]))
+				await cache.entityEventsReceived(makeBatch([createUpdate(MailBoxTypeRef, null as any, "id1", OperationType.UPDATE)]))
 			})
 
 			// element notifications
 			o("Update event for cached entity is received, it should be redownloaded", async function () {
-				let initialBody = createBodyInstance("id1", "hello")
-				await storage.put(initialBody)
+				const archiveId = "archiveId"
+				const mailDetailsId = "detailsId1"
+				let mailDetailsBlob = createMailDetailsBlobInstance(archiveId, mailDetailsId, "hello")
+				await storage.put(mailDetailsBlob)
 
-				const load = o.spy(async () => createBodyInstance("id1", "goodbye"))
+				const load = spy(async () => createMailDetailsBlobInstance(archiveId, mailDetailsId, "goodbye"))
 				const loadMock = mockAttribute(entityRestClient, entityRestClient.load, load)
-				await cache.entityEventsReceived(makeBatch([createUpdate(MailBodyTypeRef, null as any, createId("id1"), OperationType.UPDATE)]))
+				await cache.entityEventsReceived(makeBatch([createUpdate(MailDetailsBlobTypeRef, archiveId, createId(mailDetailsId), OperationType.UPDATE)]))
 				o(load.callCount).equals(1) // entity is loaded from server
-				// @ts-ignore
-				o(isSameTypeRef(load.args[0], MailBodyTypeRef)).equals(true)
-				// @ts-ignore
-				o(load.args[1]).equals(createId("id1"))
-				const body = await cache.load(MailBodyTypeRef, createId("id1"))
-				o(body.text).equals("goodbye")
+				o(isSameTypeRef(load.args[0], MailDetailsBlobTypeRef)).equals(true)
+				o(load.args[1]).deepEquals([archiveId, createId(mailDetailsId)])
+				const blob = await cache.load(MailDetailsBlobTypeRef, [archiveId, createId(mailDetailsId)])
+				o(blob.details.body.text).equals("goodbye")
 				o(load.callCount).equals(1) // entity is provided from cache
 
 				unmockAttribute(loadMock)
@@ -560,32 +563,36 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 
 			// element notifications
 			o("When update event for cached entity is received but it can't be downloaded it is removed from cache", async function () {
-				let initialBody = createBodyInstance("id1", "hello")
-				await storage.put(initialBody)
+				const archiveId = "archiveId"
+				const mailDetailsId = "detailsId1"
+				let mailDetailsBlob = createMailDetailsBlobInstance(archiveId, mailDetailsId, "hello")
+				await storage.put(mailDetailsBlob)
 
-				const load = o.spy(async () => {
+				const load = spy(async () => {
 					throw new NotFoundError("test!")
 				})
 				const loadMock = mockAttribute(entityRestClient, entityRestClient.load, load)
-				await cache.entityEventsReceived(makeBatch([createUpdate(MailBodyTypeRef, null as any, createId("id1"), OperationType.UPDATE)]))
+				await cache.entityEventsReceived(makeBatch([createUpdate(MailDetailsBlobTypeRef, archiveId, createId(mailDetailsId), OperationType.UPDATE)]))
 				o(load.callCount).equals(1) // entity is loaded from server
-				o(await storage.get(initialBody._type, null, initialBody._id)).equals(null)("the body is deleted from the cache")
+				o(await storage.get(mailDetailsBlob._type, archiveId, createId(mailDetailsId))).equals(null)("the blob is deleted from the cache")
 
 				unmockAttribute(loadMock)
 			})
 
 			o("element should be deleted from the cache when a delete event is received", async function () {
-				let initialBody = createBodyInstance("id1", "hello")
-				await storage.put(initialBody)
+				const archiveId = "archiveId"
+				const mailDetailsId = "detailsId1"
+				let mailDetailsBlob = createMailDetailsBlobInstance(archiveId, mailDetailsId, "hello")
+				await storage.put(mailDetailsBlob)
 
-				const load = o.spy(function () {
+				const load = spy(function () {
 					return Promise.reject(new NotFoundError("not found"))
 				})
 				const loadMock = mockAttribute(entityRestClient, entityRestClient.load, load)
-				await cache.entityEventsReceived(makeBatch([createUpdate(MailBodyTypeRef, null as any, createId("id1"), OperationType.DELETE)]))
+				await cache.entityEventsReceived(makeBatch([createUpdate(MailDetailsBlobTypeRef, archiveId, createId(mailDetailsId), OperationType.DELETE)]))
 				// entity is not loaded from server when it is deleted
 				o(load.callCount).equals(0)
-				await assertThrows(NotFoundError, () => cache.load(MailBodyTypeRef, createId("id1")))
+				await assertThrows(NotFoundError, () => cache.load(MailDetailsBlobTypeRef, [archiveId, createId(mailDetailsId)]))
 				unmockAttribute(loadMock)
 
 				// we tried to reload the mail body using the rest client, because it was removed from the cache
@@ -608,13 +615,44 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 					]),
 				)
 
-				const load = o.spy(() => Promise.reject(new Error("error from test")))
+				const load = spy(() => Promise.reject(new Error("error from test")))
 				const loadMock = mockAttribute(entityRestClient, entityRestClient.load, load)
 				const thrown = await assertThrows(Error, () => cache.load(MailTypeRef, [getListId(instance), getElementId(instance)]))
 				o(thrown.message).equals("error from test")
 				o(load.callCount).equals(1)("load is called once")
 				const result2 = await cache.load(MailTypeRef, [newListId, getElementId(instance)])
 				o(result2).deepEquals(newInstance)("Cached instance is a newInstance")
+				unmockAttribute(loadMock)
+			})
+			o("Mail should not be loaded when a move event is received - update bucket key", async function () {
+				const instance = createMailInstance("listId1", "id1", "henlo")
+				instance.bucketKey = createTestEntity(BucketKeyTypeRef, {
+					bucketEncSessionKeys: [
+						createTestEntity(InstanceSessionKeyTypeRef, {
+							instanceList: "listId1",
+							instanceId: getElementId(instance),
+						}),
+					],
+				})
+				await storage.put(instance)
+
+				const newListId = "listId2"
+
+				// The moved mail will not be loaded from the server
+				await cache.entityEventsReceived(
+					makeBatch([
+						createUpdate(MailTypeRef, getListId(instance), getElementId(instance), OperationType.DELETE),
+						createUpdate(MailTypeRef, newListId, getElementId(instance), OperationType.CREATE),
+					]),
+				)
+
+				const load = spy(() => Promise.reject(new Error("error from test")))
+				const loadMock = mockAttribute(entityRestClient, entityRestClient.load, load)
+				const thrown = await assertThrows(Error, () => cache.load(MailTypeRef, [getListId(instance), getElementId(instance)]))
+				o(thrown.message).equals("error from test")
+				o(load.callCount).equals(1)("load is called once")
+				const result2 = await cache.load(MailTypeRef, [newListId, getElementId(instance)])
+				o(result2.bucketKey?.bucketEncSessionKeys[0].instanceList).deepEquals(newListId)("Cached instance has updated InstanceSessionKey")
 				unmockAttribute(loadMock)
 			})
 
@@ -624,16 +662,16 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 				const mails = [1, 2, 3].map((i) => createMailInstance(listId, "id" + i, "mail" + i))
 				const newListId = "listId2"
 
-				const loadRange = o.spy(() => Promise.resolve(mails))
+				const loadRange = spy(() => Promise.resolve(mails))
 				const loadRangeMock = mockAttribute(entityRestClient, entityRestClient.loadRange, loadRange)
-				storage.lockRangesDbAccess = o.spy(storage.lockRangesDbAccess)
-				storage.unlockRangesDbAccess = o.spy(storage.unlockRangesDbAccess)
+				storage.lockRangesDbAccess = spy(storage.lockRangesDbAccess)
+				storage.unlockRangesDbAccess = spy(storage.unlockRangesDbAccess)
 
 				await cache.loadRange(MailTypeRef, listId, GENERATED_MIN_ID, 3, false)
 
 				// Verify that we lock/unlock the ranges database when loading the range
-				o(storage.lockRangesDbAccess.calls.map((c) => c.args)).deepEquals([[listId]])
-				o(storage.unlockRangesDbAccess.calls.map((c) => c.args)).deepEquals([[listId]])
+				o(storage.lockRangesDbAccess.invocations).deepEquals([[listId]])
+				o(storage.unlockRangesDbAccess.invocations).deepEquals([[listId]])
 
 				o(loadRange.callCount).equals(1)
 				unmockAttribute(loadRangeMock)
@@ -647,7 +685,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 				)
 
 				// id3 was moved to another list, which means it is no longer cached, which means we should try to load it again (causing NotFoundError)
-				const load = o.spy(() => Promise.reject(new Error("This is not the mail you're looking for")))
+				const load = spy(() => Promise.reject(new Error("This is not the mail you're looking for")))
 				const loadMock = mockAttribute(entityRestClient, entityRestClient.load, load)
 				const thrown = await assertThrows(Error, () => cache.load(MailTypeRef, [listId, getElementId(mails[0])]))
 				o(thrown.message).equals("This is not the mail you're looking for")
@@ -662,7 +700,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 					createMailInstance("listId1", "id3", "mail 3"),
 				]
 
-				const loadRange = o.spy(async () => Promise.resolve(mails))
+				const loadRange = spy(async () => Promise.resolve(mails))
 				const loadRangeMock = mockAttribute(entityRestClient, entityRestClient.loadRange, loadRange)
 
 				await cache.loadRange(MailTypeRef, "listId1", GENERATED_MIN_ID, 3, false)
@@ -679,7 +717,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 				)
 
 				// id3 was moved to another list, which means it is no longer cached, which means we should try to load it again when requested (causing NotFoundError)
-				const load = o.spy(async function () {
+				const load = spy(async function () {
 					throw new Error("This is not the mail you're looking for")
 				})
 				const loadMock = mockAttribute(entityRestClient, entityRestClient.load, load)
@@ -691,7 +729,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 			})
 
 			o("delete Mail deletes MailDetailsBlob", async function () {
-				const mailDetailsBlob = createMailDetailsBlob({ _id: ["archiveId", "blobId"] })
+				const mailDetailsBlob = createTestEntity(MailDetailsBlobTypeRef, { _id: ["archiveId", "blobId"] })
 				const mail = createMailInstance("listId1", "id1", "mail 1")
 				mail.mailDetails = mailDetailsBlob._id
 
@@ -718,7 +756,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 				await storage.put(initialMail)
 
 				let mailUpdate = createMailInstance("listId1", createId("id1"), "goodbye")
-				const load = o.spy(function (typeRef, id) {
+				const load = spy(function (typeRef, id) {
 					o(isSameTypeRef(typeRef, MailTypeRef)).equals(true)
 					o(id).deepEquals(["listId1", createId("id1")])
 					return Promise.resolve(mailUpdate)
@@ -744,18 +782,18 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 				o(mails).deepEquals([originalMails[0], originalMails[2]])
 			})
 
-			o.spec("membership changes", async function () {
+			o.spec("membership changes", function () {
 				o("no membership change does not delete an entity and lastUpdateBatchIdPerGroup", async function () {
 					const userId = "userId"
 					const calendarGroupId = "calendarGroupId"
-					const initialUser = createUser({
+					const initialUser = createTestEntity(UserTypeRef, {
 						_id: userId,
 						memberships: [
-							createGroupMembership({
+							createTestEntity(GroupMembershipTypeRef, {
 								_id: "mailShipId",
 								groupType: GroupType.Mail,
 							}),
-							createGroupMembership({
+							createTestEntity(GroupMembershipTypeRef, {
 								_id: "calendarShipId",
 								group: calendarGroupId,
 								groupType: GroupType.Calendar,
@@ -769,7 +807,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 					await storage.put(initialUser)
 
 					const eventId: IdTuple = ["eventListId", "eventId"]
-					const event = createCalendarEvent({
+					const event = createTestEntity(CalendarEventTypeRef, {
 						_id: eventId,
 						_ownerGroup: calendarGroupId,
 					})
@@ -787,14 +825,14 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 				o("membership change deletes an element entity and lastUpdateBatchIdPerGroup", async function () {
 					const userId = "userId"
 					const calendarGroupId = "calendarGroupId"
-					const initialUser = createUser({
+					const initialUser = createTestEntity(UserTypeRef, {
 						_id: userId,
 						memberships: [
-							createGroupMembership({
+							createTestEntity(GroupMembershipTypeRef, {
 								_id: "mailShipId",
 								groupType: GroupType.Mail,
 							}),
-							createGroupMembership({
+							createTestEntity(GroupMembershipTypeRef, {
 								_id: "calendarShipId",
 								group: calendarGroupId,
 								groupType: GroupType.Calendar,
@@ -804,10 +842,10 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 
 					await storage.put(initialUser)
 
-					const updatedUser = createUser({
+					const updatedUser = createTestEntity(UserTypeRef, {
 						_id: userId,
 						memberships: [
-							createGroupMembership({
+							createTestEntity(GroupMembershipTypeRef, {
 								_id: "mailShipId",
 								groupType: GroupType.Mail,
 							}),
@@ -818,7 +856,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 					when(entityRestClient.load(UserTypeRef, userId)).thenResolve(updatedUser)
 
 					const groupRootId = "groupRootId"
-					const groupRoot = createGroupRoot({
+					const groupRoot = createTestEntity(GroupRootTypeRef, {
 						_id: groupRootId,
 						_ownerGroup: calendarGroupId,
 					})
@@ -836,14 +874,14 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 				o("membership change deletes a list entity and lastUpdateBatchIdPerGroup", async function () {
 					const userId = "userId"
 					const calendarGroupId = "calendarGroupId"
-					const initialUser = createUser({
+					const initialUser = createTestEntity(UserTypeRef, {
 						_id: userId,
 						memberships: [
-							createGroupMembership({
+							createTestEntity(GroupMembershipTypeRef, {
 								_id: "mailShipId",
 								groupType: GroupType.Mail,
 							}),
-							createGroupMembership({
+							createTestEntity(GroupMembershipTypeRef, {
 								_id: "calendarShipId",
 								group: calendarGroupId,
 								groupType: GroupType.Calendar,
@@ -853,10 +891,10 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 
 					await storage.put(initialUser)
 
-					const updatedUser = createUser({
+					const updatedUser = createTestEntity(UserTypeRef, {
 						_id: userId,
 						memberships: [
-							createGroupMembership({
+							createTestEntity(GroupMembershipTypeRef, {
 								_id: "mailShipId",
 								groupType: GroupType.Mail,
 							}),
@@ -867,7 +905,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 					when(entityRestClient.load(UserTypeRef, userId)).thenResolve(updatedUser)
 
 					const eventId: IdTuple = ["eventListId", "eventId"]
-					const event = createCalendarEvent({
+					const event = createTestEntity(CalendarEventTypeRef, {
 						_id: eventId,
 						_ownerGroup: calendarGroupId,
 					})
@@ -887,14 +925,14 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 				o("membership change but for another user does nothing", async function () {
 					const userId = "userId"
 					const calendarGroupId = "calendarGroupId"
-					const initialUser = createUser({
+					const initialUser = createTestEntity(UserTypeRef, {
 						_id: userId,
 						memberships: [
-							createGroupMembership({
+							createTestEntity(GroupMembershipTypeRef, {
 								_id: "mailShipId",
 								groupType: GroupType.Mail,
 							}),
-							createGroupMembership({
+							createTestEntity(GroupMembershipTypeRef, {
 								_id: "calendarShipId",
 								group: calendarGroupId,
 								groupType: GroupType.Calendar,
@@ -904,10 +942,10 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 
 					await storage.put(initialUser)
 
-					const updatedUser = createUser({
+					const updatedUser = createTestEntity(UserTypeRef, {
 						_id: userId,
 						memberships: [
-							createGroupMembership({
+							createTestEntity(GroupMembershipTypeRef, {
 								_id: "mailShipId",
 								groupType: GroupType.Mail,
 							}),
@@ -918,7 +956,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 					when(entityRestClient.load(UserTypeRef, userId)).thenResolve(updatedUser)
 
 					const eventId: IdTuple = ["eventListId", "eventId"]
-					const event = createCalendarEvent({
+					const event = createTestEntity(CalendarEventTypeRef, {
 						_id: eventId,
 						_ownerGroup: calendarGroupId,
 					})
@@ -934,14 +972,14 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 		}) // entityEventsReceived
 
 		o("when reading from the cache, the entities will be cloned", async function () {
-			let body = createBodyInstance("id1", "hello")
+			const archiveId = "archiveId"
+			const mailDetailsBlob = createMailDetailsBlobInstance(archiveId, "id1", "hello")
+			await storage.put(mailDetailsBlob)
 
-			await storage.put(body)
-
-			const body1 = await cache.load(MailBodyTypeRef, createId("id1"))
-			o(body1 == body).equals(false)
-			const body2 = await cache.load(MailBodyTypeRef, createId("id1"))
-			o(body1 == body2).equals(false)
+			const mailDetailsBlob1 = await cache.load(MailDetailsBlobTypeRef, [archiveId, createId("id1")])
+			o(mailDetailsBlob1 == mailDetailsBlob).equals(false)
+			const mailDetailsBlob2 = await cache.load(MailDetailsBlobTypeRef, [archiveId, createId("id1")])
+			o(mailDetailsBlob1 == mailDetailsBlob2).equals(false)
 		})
 
 		o("when reading from the cache, the entities will be cloned pt.2", async function () {
@@ -959,7 +997,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 			let mail3 = createMailInstance("listId1", "id3", "hello3")
 			let startId = loadedUntilMaxId ? GENERATED_MAX_ID : createId("id4")
 			let count = loadedUntilMinId ? 4 : 3
-			const loadRange = o.spy(function (typeRef, listId, start, countParam, reverse) {
+			const loadRange = spy(function (typeRef, listId, start, countParam, reverse) {
 				o(isSameTypeRef(typeRef, MailTypeRef)).equals(true)
 				o(listId).equals("listId1")
 				o(start).equals(startId)
@@ -1050,7 +1088,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 		o("load list elements partly from server - range min to id3 loaded", async function () {
 			let mail4 = createMailInstance("listId1", "id4", "subject4")
 			const cachedMails = await setupMailList(true, false)
-			const loadRange = o.spy(function (typeRef, listId, start, count, reverse) {
+			const loadRange = spy(function (typeRef, listId, start, count, reverse) {
 				o(isSameTypeRef(typeRef, MailTypeRef)).equals(true)
 				o(listId).equals("listId1")
 				o(start).equals(getElementId(cachedMails[2]))
@@ -1070,10 +1108,33 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 			unmockAttribute(loadRangeMock)
 		})
 
+		o("load list elements partly from server - range min to id3 loaded - range request id2 count 2", async function () {
+			let mail4 = createMailInstance("listId1", "id4", "subject4")
+			const cachedMails = await setupMailList(true, false)
+			const loadRange = spy(function (typeRef, listId, start, count, reverse) {
+				o(isSameTypeRef(typeRef, MailTypeRef)).equals(true)
+				o(listId).equals("listId1")
+				o(start).equals(getElementId(cachedMails[2]))
+				o(count).equals(1)
+				o(reverse).equals(false)
+				return Promise.resolve([mail4])
+			})
+
+			const loadRangeMock = mockAttribute(entityRestClient, entityRestClient.loadRange, loadRange)
+
+			const result = await cache.loadRange(MailTypeRef, "listId1", createId("id2"), 2, false)
+
+			o(result).deepEquals([cachedMails[2], clone(mail4)])
+			o((await storage.get(MailTypeRef, getListId(mail4), getElementId(mail4)))!).deepEquals(mail4)
+			o(loadRange.callCount).equals(1) // entities are provided from server
+
+			unmockAttribute(loadRangeMock)
+		})
+
 		o("when part of a range is already in cache, load range should only try to load what it doesn't have already", async function () {
 			let mail0 = createMailInstance("listId1", "id0", "subject0")
 			const cachedMails = await setupMailList(false, true)
-			const loadRange = o.spy(function (typeRef, listId, start, count, reverse) {
+			const loadRange = spy(function (typeRef, listId, start, count, reverse) {
 				o(isSameTypeRef(typeRef, MailTypeRef)).equals(true)
 				o(listId).equals("listId1")
 				o(start).equals(getElementId(cachedMails[0]))
@@ -1093,7 +1154,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 		o("load list elements partly from server - range max to id2 loaded - loadMore", async function () {
 			let mail0 = createMailInstance("listId1", "id0", "subject0")
 			const cachedMails = await setupMailList(false, true)
-			const loadRange = o.spy(function (typeRef, listId, start, count, reverse) {
+			const loadRange = spy(function (typeRef, listId, start, count, reverse) {
 				o(isSameTypeRef(typeRef, MailTypeRef)).equals(true)
 				o(listId).equals("listId1")
 				o(start).equals(cachedMails[0]._id[1])
@@ -1117,7 +1178,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 			const mail6 = createMailInstance(listId, "id6", "subject6")
 
 			const cachedMails = await setupMailList(true, false)
-			const loadRange = o.spy(function (typeRef, listId, start, count, reverse) {
+			const loadRange = spy(function (typeRef, listId, start, count, reverse) {
 				o(isSameTypeRef(typeRef, MailTypeRef)).equals(true)
 				o(listId).equals(listId)
 				o(start).equals(createId("id4"))
@@ -1146,7 +1207,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 			let mailFirst = createMailInstance("listId1", "ic5", "subject") // use ids smaller than "id1"
 			let mailSecond = createMailInstance("listId1", "ic8", "subject")
 			await setupMailList(false, false)
-			const loadRange = o.spy(function (typeRef, listId, start, count, reverse) {
+			const loadRange = spy(function (typeRef, listId, start, count, reverse) {
 				o(isSameTypeRef(typeRef, MailTypeRef)).equals(true)
 				o(listId).equals("listId1")
 				// the cache actually loads from the end of the range which is id1
@@ -1166,7 +1227,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 
 		o("reverse load range starting outside of stored range - no new elements", async function () {
 			await setupMailList(false, false)
-			const loadRange = o.spy(function (typeRef, listId, start, count, reverse) {
+			const loadRange = spy(function (typeRef, listId, start, count, reverse) {
 				o(isSameTypeRef(typeRef, MailTypeRef)).equals(true)
 				o(listId).equals("listId1")
 				// the cache actually loads from the end of the range which is id1
@@ -1183,7 +1244,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 		})
 
 		o("no elements in range", async function () {
-			const loadRange = o.spy(function (typeRef, listId, start, count, reverse) {
+			const loadRange = spy(function (typeRef, listId, start, count, reverse) {
 				o(isSameTypeRef(typeRef, MailTypeRef)).equals(true)
 				o(listId).equals("listId1")
 				o(start).equals(GENERATED_MAX_ID)
@@ -1206,9 +1267,9 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 		})
 
 		o("custom id range is not stored", async function () {
-			let ref = clone(createExternalUserReference())
+			let ref = clone(createTestEntity(ExternalUserReferenceTypeRef))
 			ref._id = ["listId1", stringToCustomId("custom")]
-			const loadRange = o.spy(function (typeRef, listId, start, count, reverse) {
+			const loadRange = spy(function (typeRef, listId, start, count, reverse) {
 				o(isSameTypeRef(typeRef, ExternalUserReferenceTypeRef)).equals(true)
 				o(listId).equals("listId1")
 				o(start).equals(CUSTOM_MIN_ID)
@@ -1243,7 +1304,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 			moreMails.set(ids[3], createMailInstance(listId1, ids[3], "hello4"))
 			moreMails.set(ids[4], createMailInstance(listId1, ids[4], "hello5"))
 
-			const loadRange = o.spy(function (...an) {
+			const loadRange = spy(function (...an) {
 				return Promise.resolve([moreMails.get(ids[3]), moreMails.get(ids[4])])
 			})
 
@@ -1283,7 +1344,7 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 				await storage.put(mail)
 			}
 
-			const loadRange = o.spy(function (...any) {
+			const loadRange = spy(function (...any) {
 				return Promise.resolve([mail2, mail1])
 			})
 
@@ -1467,60 +1528,95 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 			await Promise.all(inCache.map(async (i) => await storage.put(i)))
 			const ids = inCache.concat(notInCache).map(getElementId)
 
-			const loadMultiple = o.spy((...any) => Promise.resolve(notInCache))
+			const loadMultiple = spy((...any) => Promise.resolve(notInCache))
 			const mock = mockAttribute(entityRestClient, entityRestClient.loadMultiple, loadMultiple)
 
 			const result = await cache.loadMultiple(MailTypeRef, listId, ids)
 
 			o(result).deepEquals(notInCache.concat(inCache))("all mails are in cache")
 			o(loadMultiple.callCount).equals(1)("load multiple is called once")
-			o(loadMultiple.args).deepEquals([MailTypeRef, listId, notInCache.map(getElementId)])("load multiple is called for mails not in cache")
+			o(loadMultiple.args).deepEquals([MailTypeRef, listId, notInCache.map(getElementId), undefined])("load multiple is called for mails not in cache")
 			for (const item of inCache.concat(notInCache)) {
 				o(await storage.get(MailTypeRef, listId, getElementId(item))).notEquals(null)("element is in cache " + getElementId(item))
 			}
 			unmockAttribute(mock)
 		})
+
+		o("loadRange from server and provide cached entities from the cache", async function () {
+			const listId = "listId"
+
+			const inCache = [createMailInstance(listId, "0", "0"), createMailInstance(listId, "1", "1"), createMailInstance(listId, "3", "3")]
+
+			const serverMails = [...inCache, createMailInstance(listId, "4", "4"), createMailInstance(listId, "5", "5"), createMailInstance(listId, "6", "6")]
+
+			await storage.setNewRangeForList(MailTypeRef, listId, GENERATED_MIN_ID, createId("3"))
+			await Promise.all(inCache.map(async (i) => await storage.put(i)))
+
+			const loadRange = spy(async (typeRef, listIdToLoad: string, startId: Id, count: number, reverse: boolean) => {
+				if (listId !== listIdToLoad) throw new NotFoundError("unknown list id")
+				return serverMails.filter((mail) => firstBiggerThanSecond(getElementId(mail), startId)).slice(0, count)
+			})
+
+			const mockLoadRange = mockAttribute(entityRestClient, entityRestClient.loadRange, loadRange)
+
+			const result = await cache.loadRange(MailTypeRef, listId, createId("1"), 3, false)
+
+			// checking if our cache asked us for the right amount of mails, in this case ids 4, 5 and 6 starting at mail 1 (excl.)
+			o(loadRange.invocations[0][3]).equals(2)
+			o(loadRange.invocations[0][2]).equals(createId("3"))
+
+			for (let i = 0; i++; i < result.length) {
+				o(result[i]).deepEquals(serverMails[i])(`result ${i} does not match`)
+			}
+
+			for (const item of serverMails.slice(0, -1)) {
+				const mail = await storage.get(MailTypeRef, listId, getElementId(item))
+				o(mail).notEquals(null)
+			}
+			const lastId = getElementId(last(serverMails)!)
+			o(await storage.get(MailTypeRef, listId, lastId)).equals(null)
+
+			unmockAttribute(mockLoadRange)
+		})
+
 		o("load passes same parameters to entityRestClient", async function () {
 			const contactId: IdTuple = [createId("0"), createId("1")]
-			const contact = createContact({
+			const contact = createTestEntity(ContactTypeRef, {
 				_id: contactId,
 				firstName: "greg",
 			})
 			const client = downcast<EntityRestClient>({
-				load: o.spy(() => contact),
+				load: spy(() => contact),
 			})
 			const cache = new DefaultEntityRestCache(client, storage)
-			await cache.load(
-				ContactTypeRef,
-				contactId,
-				{
+			await cache.load(ContactTypeRef, contactId, {
+				queryParams: {
 					myParam: "param",
 				},
-				{
+				extraHeaders: {
 					myHeader: "header",
 				},
-			)
-			// @ts-ignore
-			o(isSameTypeRef(client.load.args[0], ContactTypeRef)).equals(true)
-			// @ts-ignore
-			o(client.load.args[1]).deepEquals(contactId)
-			// @ts-ignore
-			o(client.load.args[2]).deepEquals({
-				myParam: "param",
 			})
-			// @ts-ignore
-			o(client.load.args[3]).deepEquals({
-				myHeader: "header",
+			const [typeRef, id, opts] = client.load.args as Parameters<EntityRestClient["load"]>
+			o(isSameTypeRef(typeRef, ContactTypeRef)).equals(true)
+			o(id).deepEquals(contactId)
+			o(opts).deepEquals({
+				queryParams: {
+					myParam: "param",
+				},
+				extraHeaders: {
+					myHeader: "header",
+				},
 			})
 		})
 		o("single entity is cached after being loaded", async function () {
 			const contactId: IdTuple = [createId("0"), createId("1")]
-			const contactOnTheServer = createContact({
+			const contactOnTheServer = createTestEntity(ContactTypeRef, {
 				_id: contactId,
 				firstName: "greg",
 			})
 			const client = downcast<EntityRestClient>({
-				load: o.spy(async () => {
+				load: spy(async () => {
 					return contactOnTheServer
 				}),
 			})
@@ -1536,14 +1632,14 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 		})
 
 		o("A new range request for a nonexistent range should initialize that range", async function () {
-			const loadRange = o.spy(function (typeRef, listId, ...an) {
+			const loadRange = spy(function (typeRef, listId, ...an) {
 				return [
-					createContact({ _id: [listId, createId("1")] }),
-					createContact({ _id: [listId, createId("2")] }),
-					createContact({ _id: [listId, createId("3")] }),
-					createContact({ _id: [listId, createId("4")] }),
-					createContact({ _id: [listId, createId("5")] }),
-					createContact({ _id: [listId, createId("6")] }),
+					createTestEntity(ContactTypeRef, { _id: [listId, createId("1")] }),
+					createTestEntity(ContactTypeRef, { _id: [listId, createId("2")] }),
+					createTestEntity(ContactTypeRef, { _id: [listId, createId("3")] }),
+					createTestEntity(ContactTypeRef, { _id: [listId, createId("4")] }),
+					createTestEntity(ContactTypeRef, { _id: [listId, createId("5")] }),
+					createTestEntity(ContactTypeRef, { _id: [listId, createId("6")] }),
 				]
 			})
 
@@ -1558,11 +1654,11 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 
 		o("single entity is not cached if it is an ignored entity", async function () {
 			const permissionId: IdTuple = [createId("0"), createId("1")]
-			const permissionOnTheServer = createPermission({
+			const permissionOnTheServer = createTestEntity(PermissionTypeRef, {
 				_id: permissionId,
 			})
 			const client = downcast<EntityRestClient>({
-				load: o.spy(async () => {
+				load: spy(async () => {
 					return permissionOnTheServer
 				}),
 			})
@@ -1576,15 +1672,15 @@ export function testEntityRestCache(name: string, getStorage: (userId: Id) => Pr
 		o.spec("no user id", function () {
 			o("get", async function () {
 				userId = null
-				entityRestClient.load = o.spy(async () => createContact({ _id: ["listId", "id"] })) as EntityRestClient["load"]
+				entityRestClient.load = spy(async () => createTestEntity(ContactTypeRef, { _id: ["listId", "id"] })) as EntityRestClient["load"]
 				await cache.load(ContactTypeRef, ["listId", "id"])
 				o(entityRestClient.load.callCount).equals(1)
 			})
 
 			o("put", async function () {
 				userId = null
-				entityRestClient.setup = o.spy(async () => "id")
-				await cache.setup("listId", createContact({ _id: ["listId", "id"] }))
+				entityRestClient.setup = spy(async () => "id")
+				await cache.setup("listId", createTestEntity(ContactTypeRef, { _id: ["listId", "id"] }))
 				o(entityRestClient.setup.callCount).equals(1)
 			})
 		})
